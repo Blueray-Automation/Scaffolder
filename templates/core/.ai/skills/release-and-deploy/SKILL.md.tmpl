@@ -1,0 +1,43 @@
+---
+name: release-and-deploy
+description: Release a verified change through CI/CD (build once, promote through environments, verify the live URL, roll back). Use when shipping to staging or production.
+---
+
+# Release and deploy
+<%#hasCd%>
+
+## Pipeline
+1. Merge to `<%defaultBranch%>` after CI is green. `cd.yml` calls `ci.yml` first, then builds each image **once** with an immutable tag `sha-<12 chars>` and pushes it to `ghcr.io/<%ownerLower%>/`.
+2. Environments, in order:
+<%#environments%>
+   - **<%name%>**: trigger `<%trigger%>`, URL <%url%>
+<%/environments%>
+3. After each deploy the workflow runs the facts against the live URL (`--no-runtime --base-url web=<url>`). A failing fact fails the deploy job: treat the release as bad.
+4. Production approval: configure required reviewers on the GitHub Environment (Settings -> Environments).
+
+## Releasing
+```bash
+git tag v1.2.3 && git push origin v1.2.3        # tags trigger the tag-based environments
+# or: Actions -> CD -> Run workflow -> choose the environment
+```
+
+## Rollback
+Images are immutable, so rollback is "deploy the previous good tag":
+```bash
+./scripts/deploy.sh <environment> sha-<previous-12-chars>
+```
+then confirm with `./scripts/sdlc facts --no-runtime --base-url web=<url>`.
+
+## Deploy target: `<%cdTarget%>`
+Implementation: `scripts/deploy.sh` -> `deploy/targets/<%cdTarget%>.sh`. Required secrets are listed at the top of that script and are set per GitHub Environment, never in the repo.
+
+## Checklist
+- [ ] `./scripts/sdlc verify` green on the commit being released
+- [ ] Contract changes are backward compatible, or clients ship first
+- [ ] New env vars and secrets exist in the target environment
+- [ ] Post-deploy facts PASS; evidence artifact attached to the run
+<%/hasCd%>
+<%^hasCd%>
+
+CD was not enabled for this project (`cd.enabled: false`). Enable it in `scaffolder.config.yaml` and regenerate to get `cd.yml` and the deploy scripts.
+<%/hasCd%>

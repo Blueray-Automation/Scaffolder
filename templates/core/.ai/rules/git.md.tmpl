@@ -1,0 +1,8 @@
+# Rule: git and pull requests
+
+- Branch per feature: `feat/FEAT-001-user-login`, `fix/...`, `chore/...`. Never commit directly to `<%defaultBranch%>`.
+- Conventional Commits: `feat(api): add login endpoint`, `fix(web): handle empty state`, `chore: bump deps`, `docs:`, `test:`, `refactor:`, `ci:`.
+- Small, reviewable commits; each leaves `./scripts/sdlc gates` green.
+- A PR contains: the feature id, what changed and why, the verification report summary, contract changes called out, and screenshots for UI changes. The PR template asks for these.
+- Never force-push a shared branch. Never commit `.env`, keys, or build output.
+- Releases are tags `vMAJOR.MINOR.PATCH` on `<%defaultBranch%>`<%#hasCd%>; the CD workflow builds the image once and promotes it<%/hasCd%>.

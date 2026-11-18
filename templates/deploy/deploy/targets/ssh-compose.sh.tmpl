@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Deploy target: copy docker-compose.yml to a host over SSH and `docker compose up` the given images.
+#
+# Set these as GitHub *Environment* secrets (per environment), never in the repo:
+#   DEPLOY_HOST        hostname or IP
+#   DEPLOY_USER        ssh user (member of the docker group)
+#   DEPLOY_PATH        directory on the host that holds docker-compose.yml and a root-owned .env
+#   DEPLOY_SSH_KEY     private key (PEM text)
+#   DEPLOY_KNOWN_HOSTS (recommended) output of `ssh-keyscan <host>`; without it host keys are trusted on first use
+#
+# The host must be able to pull the images (docker login ghcr.io with a read:packages token, or public images),
+# and its .env supplies real secrets (POSTGRES_PASSWORD, CORS_ORIGINS, API_URL, ...).
+
+deploy() {
+  : "${DEPLOY_HOST:?DEPLOY_HOST is not set}" "${DEPLOY_USER:?DEPLOY_USER is not set}"
+  : "${DEPLOY_PATH:?DEPLOY_PATH is not set}" "${DEPLOY_SSH_KEY:?DEPLOY_SSH_KEY is not set}"
+
+  local key hosts
+  key="$(mktemp)"
+  hosts="$(mktemp)"
+  trap 'rm -f "$key" "$hosts"' RETURN
+  printf '%s\n' "$DEPLOY_SSH_KEY" > "$key"
+  chmod 600 "$key"
+
+  local opts=(-i "$key" -o BatchMode=yes)
+  if [[ -n "${DEPLOY_KNOWN_HOSTS:-}" ]]; then
+    printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$hosts"
+    opts+=(-o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$hosts")
+  else
+    echo "  warning: DEPLOY_KNOWN_HOSTS not set; trusting the host key on first use" >&2
+    opts+=(-o StrictHostKeyChecking=accept-new)
+  fi
+
+  local target="$DEPLOY_USER@$DEPLOY_HOST"
+  scp "${opts[@]}" "$ROOT/docker-compose.yml" "$target:$DEPLOY_PATH/docker-compose.yml"
+
+  # Quote the values for the remote shell; images are immutable sha tags, so this is repeatable and rollback-safe.
+  ssh "${opts[@]}" "$target" "$(printf 'cd %q && %s docker compose pull && %s docker compose up -d --wait --remove-orphans' \
+    "$DEPLOY_PATH" \
+    "$(deploy_env_assignments)" \
+    "$(deploy_env_assignments)")"
+}
+
+deploy_env_assignments() {
+  local out=""
+<%#hasBackend%>
+  out+="BACKEND_IMAGE=$(printf '%q' "$BACKEND_IMAGE") "
+<%/hasBackend%>
+<%#hasWeb%>
+  out+="WEB_IMAGE=$(printf '%q' "$WEB_IMAGE") "
+<%/hasWeb%>
+  printf '%s' "$out"
+}

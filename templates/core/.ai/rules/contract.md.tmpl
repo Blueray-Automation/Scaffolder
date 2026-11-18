@@ -1,0 +1,12 @@
+# Rule: API contract
+
+The backend is the single source of truth for the API. Define the contract before any client code.
+
+- Decide request/response schemas, status codes and error payloads from the PRD first; encode them as typed models, then implement.
+- Status codes: `200/201/204` success, `400` malformed, `401` unauthenticated, `403` forbidden, `404` missing, `409` conflict, `422` validation, `5xx` only for genuine server faults. Errors never leak stack traces or secrets.
+- Versioned paths: `/api/v1/...`. Breaking changes need a new version, not an edit.
+- Operational endpoints stay unversioned: `/health` (liveness, no dependencies), `/ready` (dependencies).
+- `.ai/contract/openapi.json` is a normalised snapshot of the generated OpenAPI. The `backend.contract` gate fails on any drift.
+  - Intentional change (the PRD says so): update the snapshot in the same commit with `<%#hasBackend%>cd <%backendDir%> && python -m app.export_openapi --write ../.ai/contract/openapi.json<%/hasBackend%>` and explain it in the PR.
+  - Unintentional drift: fix the code.
+- Clients (web, mobile) consume the contract; they never reach around it.

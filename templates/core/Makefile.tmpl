@@ -1,0 +1,48 @@
+# Thin wrappers so humans and agents share one vocabulary. All logic is in scripts/sdlc.py.
+.DEFAULT_GOAL := help
+SDLC := ./scripts/sdlc
+
+.PHONY: help setup doctor verify gates facts loop new feature report secrets<%#hasDocker%> up down<%/hasDocker%><%#hasCd%> deploy<%/hasCd%>
+
+help: ## List targets
+	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
+
+setup: ## Install dependencies for every component
+	$(SDLC) setup
+
+doctor: ## Check the toolchain
+	$(SDLC) doctor
+
+gates: ## Lint, types, unit tests, build, contract, security (no running system)
+	$(SDLC) gates
+
+facts: ## Check PRD acceptance criteria against the running system
+	$(SDLC) facts
+
+verify: ## Everything CI runs: gates + facts. "Done" means this is green.
+	$(SDLC) verify
+
+loop: ## verify -> heal -> verify until green (uses sdlc.agent.command, else you)
+	$(SDLC) loop
+
+new: ## Create a feature spec:  make new name=user-login
+	$(SDLC) new $(name)
+
+feature: ## PRD -> Code -> Test for one feature:  make feature name=FEAT-001
+	$(SDLC) feature $(name)
+
+report: ## Print the latest evidence report
+	$(SDLC) report
+
+secrets: ## Scan for committed secrets
+	$(SDLC) secrets
+<%#hasDocker%>
+up: ## Start the full stack in Docker (http://localhost:<%webPort%>)
+	docker compose up -d --build --wait
+
+down: ## Stop the stack and remove volumes
+	docker compose down --volumes --remove-orphans
+<%/hasDocker%><%#hasCd%>
+deploy: ## Deploy a tag:  make deploy env=<%firstEnvironment%> tag=sha-abc123def456
+	$(SDLC) deploy $(env) --tag $(tag)
+<%/hasCd%>

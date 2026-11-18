@@ -1,0 +1,23 @@
+import pytest
+
+from app.core.config import Settings
+
+
+def test_cors_origins_are_split_and_trimmed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CORS_ORIGINS", "https://a.example , https://b.example,,")
+
+    assert Settings().cors_origin_list == ["https://a.example", "https://b.example"]
+<%#hasDb%>
+
+
+def test_empty_database_url_is_treated_as_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "")
+
+    assert Settings().database_url is None
+
+
+def test_database_url_is_read_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@db:5432/app")
+
+    assert Settings().database_url == "postgresql+asyncpg://u:p@db:5432/app"
+<%/hasDb%>

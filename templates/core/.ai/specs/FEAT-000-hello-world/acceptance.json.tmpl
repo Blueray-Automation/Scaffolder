@@ -1,0 +1,80 @@
+{
+  "feature": "FEAT-000",
+  "checks": [
+    {
+      "id": "CHK-001",
+      "name": "Liveness endpoint answers ok",
+      "covers": ["AC-001"],
+      "type": "http",
+      "target": "backend",
+      "path": "/health",
+      "expect": { "status": 200, "json": { "status": "ok" } }
+    },
+    {
+      "id": "CHK-002",
+      "name": "Default greeting",
+      "covers": ["AC-002"],
+      "type": "http",
+      "target": "backend",
+      "path": "/api/v1/hello",
+      "expect": { "status": 200, "json": { "message": "Hello, World!" } }
+    },
+    {
+      "id": "CHK-003",
+      "name": "Personalised greeting",
+      "covers": ["AC-003"],
+      "type": "http",
+      "target": "backend",
+      "path": "/api/v1/hello?name=Ada",
+      "expect": { "status": 200, "json": { "message": "Hello, Ada!" } }
+    },
+    {
+      "id": "CHK-004",
+      "name": "Over-long name is rejected with 422",
+      "covers": ["AC-004"],
+      "type": "http",
+      "target": "backend",
+      "path": "/api/v1/hello?name=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expect": { "status": 422 }
+    },
+<%#hasDb%>
+    {
+      "id": "CHK-005",
+      "name": "Readiness reports the database as up",
+      "covers": ["AC-005"],
+      "type": "http",
+      "target": "backend",
+      "needs": ["db"],
+      "path": "/ready",
+      "expect": { "status": 200, "json": { "status": "ok", "database": "up" } }
+    },
+    {
+      "id": "CHK-006",
+      "name": "Readiness returns 503 when the database is down (unit test)",
+      "covers": ["AC-005"],
+      "type": "cmd",
+      "cwd": "<%backendDir%>",
+      "pathPrepend": ["<%backendDir%>/.venv/bin"],
+      "run": "pytest -q tests/test_ready.py::test_ready_returns_503_when_database_is_down",
+      "expectExit": 0
+    },
+<%/hasDb%>
+    {
+      "id": "CHK-007",
+      "name": "Contract snapshot is committed and describes the hello endpoint",
+      "covers": ["AC-006"],
+      "type": "file",
+      "path": ".ai/contract/openapi.json",
+      "contains": ["/api/v1/hello", "/health", "/ready"]
+    }<%#hasWeb%>,
+    {
+      "id": "CHK-008",
+      "name": "Web page renders the greeting fetched from the backend",
+      "covers": ["AC-007"],
+      "type": "http",
+      "target": "web",
+      "path": "/",
+      "expect": { "status": 200, "bodyContains": ["Hello, World!"] }
+    }<%/hasWeb%>
+  ]
+}

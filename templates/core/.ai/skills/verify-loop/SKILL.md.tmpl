@@ -1,0 +1,30 @@
+---
+name: verify-loop
+description: Run and interpret the verification loop (gates, facts, evidence, exit codes). Use whenever you need to prove work is done or understand a verification result.
+---
+
+# Run the verification loop
+
+## Commands
+| Goal | Command |
+|---|---|
+| Is my toolchain ready? | `./scripts/sdlc doctor` then `./scripts/sdlc setup` |
+| Fast feedback while coding | `./scripts/sdlc gates` (or `--only <gate-id>`, `--stage unit`) |
+| Prove acceptance criteria on the running system | `./scripts/sdlc facts` |
+| Everything CI runs | `./scripts/sdlc verify` |
+| Verify, heal, verify until green | `./scripts/sdlc loop` |
+| One feature, PRD to green | `./scripts/sdlc feature FEAT-xxx` |
+| Read the last result | `./scripts/sdlc report` |
+
+## Reading the result
+- `PASS`/`FAIL` per gate and per check. `WARN` = non-required gate failed (audit): report it, don't hide it. `SKIP` = capability missing in this runtime: *not verified*.
+- Evidence lives in `.ai/evidence/latest/`: `report.md` (human), `results.json` (machine), `logs/<id>.log` (full output).
+- The traceability table shows each AC -> checks -> status. A feature is done only when all its ACs are PASS.
+
+## Exit codes
+`0` verified · `1` failed (or out of iterations) · `2` needs a human (no agent configured / PRD stub) · `3` same failure repeated, no progress · `4` integrity violation (protected files changed).
+
+## Rules
+- Trust the report, not your memory. Re-run after any change.
+- A stage failing stops the run (failFast). Fix, re-run; later stages run once earlier ones pass.
+- Never report "verified" for anything the report shows as SKIP or FAIL.

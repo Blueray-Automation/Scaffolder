@@ -1,0 +1,18 @@
+import { HelloCard, type HelloCardProps } from "@/components/HelloCard";
+import { fetchHello } from "@/lib/api";
+
+// Rendered per request: the greeting comes from the live backend, never from build time.
+export const dynamic = "force-dynamic";
+
+async function loadGreeting(): Promise<HelloCardProps> {
+  try {
+    const hello = await fetchHello();
+    return { state: "success", message: hello.message };
+  } catch (error) {
+    return { state: "error", detail: error instanceof Error ? error.message : "Unknown error" };
+  }
+}
+
+export default async function HomePage() {
+  return <HelloCard {...await loadGreeting()} />;
+}

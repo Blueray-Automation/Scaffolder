@@ -1,0 +1,37 @@
+---
+name: write-fact-checks
+description: Write acceptance.json checks that prove each PRD acceptance criterion against the running system (http, cmd, file). Use whenever you add or change acceptance criteria.
+---
+
+# Write fact checks
+
+A *fact check* turns one acceptance criterion into something the loop executes. If it can't fail, it isn't a check.
+
+## Check anatomy
+```json
+{
+  "id": "CHK-010",
+  "name": "Unknown id returns 404 with a stable error body",
+  "covers": ["AC-012"],
+  "type": "http",
+  "target": "backend",
+  "method": "GET",
+  "path": "/api/v1/items/does-not-exist",
+  "expect": { "status": 404, "json": { "detail": "$type:string" } }
+}
+```
+
+## Types
+- **http**: `target` (`backend` | `web`), `method`, `path`, optional `headers`, `body` (JSON), `expect`: `status` (int or list), `json` (subset match), `bodyContains` (string or list), `headers`, `maxMs`.
+- **cmd**: `run`, `cwd`, `expectExit` (default 0), `stdoutContains`, optional `pathPrepend`. Use to tie a criterion to one specific test: `pytest -q tests/test_x.py::test_name`.
+- **file**: `path`, `exists`, `contains` (list), `regex`.
+
+## JSON matchers
+Exact values, or `"$exists"`, `"$type:string|number|boolean|array|object|null"`, `"$re:<regex>"`. Objects match as subsets.
+
+## Rules of thumb
+- Assert what the AC says, no more, no less: over-specifying makes checks brittle.
+- Cover unhappy paths with their exact status codes.
+- A check needing something the runtime might not have (`db`) declares `"needs": ["db"]`. It is reported as SKIP (never pass) where unavailable.
+- Mutating checks (POST/PUT/DELETE) must be repeatable: use unique ids or clean up, because they also run in CI and against deployed environments.
+- Never loosen a check to make it pass. If the check is wrong, the spec is wrong: raise it.

@@ -1,0 +1,25 @@
+# Rule: PRDs
+
+Every feature lives in `.ai/specs/FEAT-<nnn>-<slug>/` with `prd.md` and `acceptance.json`. No code before both exist.
+
+## prd.md structure (in this order)
+1. **Objective**: 1-2 sentences, who benefits and what changes.
+2. **User stories & acceptance criteria**: one line each, `- **AC-001** Given ..., when ..., then ...`.
+3. **Permissions & roles**: who may, who must be refused (and with which status).
+4. **Data & validation**: fields, types, lengths, nullability, units.
+5. **Contract impact**: endpoints, status codes, error payloads, migrations.
+6. **Out of scope**.
+7. **Verification map** (lives in `acceptance.json`).
+
+## Writing acceptance criteria
+- Observable from outside the system. "Returns 404 with `{"detail": "..."}`", not "handles missing users well".
+- One behaviour per criterion; split "and" sentences.
+- Always include: the unhappy paths (validation, not found, unauthorized), empty/boundary values, and idempotency where it applies.
+- No implementation words (no class or table names).
+- IDs are stable (`AC-001`...). Never renumber; retire by striking through, not deleting.
+
+## acceptance.json
+- Each check has `id`, `name`, `covers` (AC ids), `type` (`http` | `cmd` | `file`) and an `expect`/`run`.
+- Every AC is covered by at least one check; every check covers at least one AC. `./scripts/sdlc facts` fails otherwise.
+- Prefer `http` checks against the running system. Use `cmd` to tie an AC to one specific test (`pytest -q path::test_name`).
+- A check you cannot run in some runtime declares `needs` (e.g. `["db"]`) instead of being weakened.

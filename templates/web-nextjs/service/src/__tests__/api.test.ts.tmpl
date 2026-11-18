@@ -1,0 +1,64 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ApiError, apiBaseUrl, fetchHello } from "@/lib/api";
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("apiBaseUrl", () => {
+  it("defaults to the local backend", () => {
+    vi.stubEnv("API_URL", "");
+    delete process.env.API_URL;
+
+    expect(apiBaseUrl()).toBe("http://localhost:<%backendPort%>");
+  });
+
+  it("is read from API_URL at call time", () => {
+    vi.stubEnv("API_URL", "http://backend:8000");
+
+    expect(apiBaseUrl()).toBe("http://backend:8000");
+  });
+});
+
+describe("fetchHello", () => {
+  it("returns the greeting from the backend", async () => {
+    vi.stubEnv("API_URL", "http://backend:8000");
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ message: "Hello, World!" }));
+
+    const hello = await fetchHello(undefined, fetchMock);
+
+    expect(hello).toEqual({ message: "Hello, World!" });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("http://backend:8000/api/v1/hello");
+  });
+
+  it("passes the name as a query parameter", async () => {
+    vi.stubEnv("API_URL", "http://backend:8000");
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ message: "Hello, Ada!" }));
+
+    await fetchHello("Ada", fetchMock);
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("http://backend:8000/api/v1/hello?name=Ada");
+  });
+
+  it("throws an ApiError carrying the status when the backend fails", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ detail: "boom" }, 503));
+
+    await expect(fetchHello(undefined, fetchMock)).rejects.toMatchObject({
+      name: "ApiError",
+      status: 503,
+    });
+  });
+
+  it("rejects a response that does not match the contract", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ msg: "wrong shape" }));
+
+    await expect(fetchHello(undefined, fetchMock)).rejects.toBeInstanceOf(ApiError);
+  });
+});

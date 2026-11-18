@@ -1,0 +1,18 @@
+# Task: write the PRD for {{feature}}
+
+Draft `{{specDir}}/prd.md` and `{{specDir}}/acceptance.json` from this brief:
+
+> {{brief}}
+
+## Read first
+- `.ai/rules/prd.md` (required structure) and `.ai/skills/write-prd/SKILL.md` (procedure).
+- `.ai/specs/FEAT-000-hello-world/` as a worked example of the exact format.
+
+## Requirements
+- Every acceptance criterion is a line `- **AC-001** Given ... When ... Then ...`, observable and testable. Include error, empty and boundary cases.
+- Every AC is covered by at least one check in `acceptance.json` (`covers: ["AC-001"]`). Prefer `http` checks against the running system; use `cmd` checks to tie an AC to a specific test.
+- Remove every `TODO(prd)` marker once the section is real. Do not leave placeholders.
+- Do NOT write implementation code in this step.
+
+## Final message
+Summarize the criteria and list any open questions that block implementation.

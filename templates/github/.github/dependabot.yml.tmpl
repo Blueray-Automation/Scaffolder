@@ -1,0 +1,38 @@
+version: 2
+updates:
+<%#hasBackend%>
+  - package-ecosystem: pip
+    directory: /<%backendDir%>
+    schedule:
+      interval: weekly
+    groups:
+      python-dependencies:
+        patterns: ["*"]
+<%/hasBackend%>
+<%#hasWeb%>
+  - package-ecosystem: npm
+    directory: /<%webDir%>
+    schedule:
+      interval: weekly
+    groups:
+      npm-dependencies:
+        patterns: ["*"]
+<%/hasWeb%>
+<%#hasDocker%>
+<%#hasBackend%>
+  - package-ecosystem: docker
+    directory: /<%backendDir%>
+    schedule:
+      interval: weekly
+<%/hasBackend%>
+<%#hasWeb%>
+  - package-ecosystem: docker
+    directory: /<%webDir%>
+    schedule:
+      interval: weekly
+<%/hasWeb%>
+<%/hasDocker%>
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

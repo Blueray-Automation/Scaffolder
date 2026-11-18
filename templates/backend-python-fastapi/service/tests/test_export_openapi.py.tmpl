@@ -1,0 +1,47 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from app import export_openapi
+
+
+def test_contract_documents_the_public_endpoints() -> None:
+    contract = export_openapi.build_contract()
+
+    assert set(contract["paths"]) == {"/health", "/ready", "/api/v1/hello"}
+
+
+def test_normalise_keeps_property_names_that_look_like_dropped_keywords() -> None:
+    schema = {
+        "properties": {"title": {"type": "string", "description": "dropped"}},
+        "title": "dropped",
+    }
+
+    assert export_openapi.normalise(schema) == {"properties": {"title": {"type": "string"}}}
+
+
+def test_write_then_check_round_trips(tmp_path: Path) -> None:
+    snapshot = tmp_path / "contract" / "openapi.json"
+
+    assert export_openapi.main(["--write", str(snapshot)]) == 0
+    assert export_openapi.main(["--check", str(snapshot)]) == 0
+    assert json.loads(snapshot.read_text())["contract"] == 1
+
+
+def test_check_fails_on_drift(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    snapshot = tmp_path / "openapi.json"
+    export_openapi.main(["--write", str(snapshot)])
+    snapshot.write_text(snapshot.read_text().replace("/api/v1/hello", "/api/v1/hola"))
+
+    assert export_openapi.main(["--check", str(snapshot)]) == 1
+    assert "API contract drift" in capsys.readouterr().out
+
+
+def test_check_fails_when_the_snapshot_is_missing(tmp_path: Path) -> None:
+    assert export_openapi.main(["--check", str(tmp_path / "missing.json")]) == 1
+
+
+def test_default_prints_the_contract(capsys: pytest.CaptureFixture[str]) -> None:
+    assert export_openapi.main([]) == 0
+    assert json.loads(capsys.readouterr().out)["contract"] == 1

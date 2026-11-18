@@ -1,0 +1,50 @@
+# .ai/: the operating system of this repository
+
+```
+.ai/
+  sdlc.json        machine config of the loop: gates, runtime, agent, integrity (generated; protected from agents)
+  rules/           what "good" looks like (conventions). Short, imperative, checkable.
+  skills/          step-by-step playbooks an agent loads when it does that kind of work
+  prompts/         templates the loop fills in and sends to the agent (prd, implement, heal)
+  specs/           one folder per feature: prd.md + acceptance.json   (_template/ and FEAT-000 as examples)
+  contract/        committed API contract snapshot (openapi.json)
+  evidence/        run output: logs, results.json, report.md  (gitignored; CI uploads it)
+```
+
+## How verification works
+
+1. **Gates**: shell commands from `sdlc.json` run stage by stage (`<%stages%>`). A failing required gate stops the run at the end of that stage (`loop.failFast`), so the agent gets one focused problem.
+2. **Facts**: for each feature folder, `prd.md` lists acceptance criteria and `acceptance.json` lists checks that prove them.
+   - *Traceability*: every `AC-xxx` needs at least one check; every check must cite an existing AC. Otherwise verification fails.
+   - *Execution*: the system under test is started (`runtime.mode`: `docker` | `local` | `none`) and each check runs against it.
+   - Check types: `http` (status, JSON subset, body, headers, latency), `cmd` (exit code, output), `file` (exists, contains, regex). Against a *deployed* environment (`facts --no-runtime --base-url ...`) only `http` checks whose target has a URL run; `cmd`/`file` checks verify the repository and are reported as SKIP there.
+   - JSON matchers: exact values, or `"$exists"`, `"$type:string"`, `"$re:^Hello"`. A check that `needs` a capability the runtime does not provide (e.g. `db` in `local` mode) is reported as SKIP, never as pass. Set `facts.strictSkips: true` to make skips fail.
+3. **Evidence**: every run writes `.ai/evidence/<run-id>/` (`report.md`, `results.json`, per-gate logs, runtime logs) and refreshes `.ai/evidence/latest/`.
+
+## The healing loop (`./scripts/sdlc loop`)
+
+```
+verify -> green? -> done (exit 0)
+   |
+   +-> failed: fingerprint the failures
+         same fingerprint <noProgressLimit> times in a row -> stop, ask a human (exit 3)
+         iteration == maxIterations                         -> stop (exit 1)
+         build heal prompt from .ai/prompts/heal.md + evidence
+         run agent.command (stdin = prompt)  or wait for you if it is empty (exit 2 when non-interactive)
+         integrity check: did the agent touch protected files?  -> stop (exit 4)
+         verify again
+```
+
+Integrity (`sdlc.json` -> `integrity`): `protected` files can never change during the loop, `protectedWhileHealing` (the specs) cannot change while healing, `guarded` files (the contract) may change but the change is reported for review.
+
+## Configure
+
+| What | Where |
+|---|---|
+| Which gates run, coverage floors, runtime mode, loop budget, agent command | `scaffolder.config.yaml` -> regenerate, or edit `.ai/sdlc.json` directly |
+| Add a gate | append to `gates` in `.ai/sdlc.json` (`id`, `stage`, `cwd`, `cmd`, `required`, `timeoutSeconds`) **and** to `.github/workflows/ci.yml` |
+| Add a feature | `./scripts/sdlc new <slug>` |
+| Use a different AI tool | set `agent.command` (reads the prompt on stdin), or `SDLC_AGENT_CMD` for one run |
+| Make skips fatal | `facts.strictSkips: true` |
+
+Editing `.ai/sdlc.json` or the workflows is a human decision: agents are blocked from it by design.

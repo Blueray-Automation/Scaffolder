@@ -1,0 +1,32 @@
+---
+name: fix-failing-gate
+description: Diagnose and fix a failing verification gate or fact check at its root cause without weakening checks. Use whenever ./scripts/sdlc reports FAIL, and in every heal iteration.
+---
+
+# Fix a failing gate
+
+## Procedure
+1. **Read the failure** in `.ai/evidence/latest/report.md`; open the full log `logs/<id>.log`. Quote the first real error, not the last line.
+2. **Reproduce** by running the exact command from the report in the right directory.
+3. **Root cause in one sentence** before touching code. If you cannot write it, you do not understand it yet.
+4. **Smallest fix in the code** that makes the spec true. Keep unrelated changes out.
+5. **Re-run only that gate** (`./scripts/sdlc gates --only <id>`), then the full `./scripts/sdlc verify`.
+
+## Per failure type
+| Failure | Typical cause | Fix in |
+|---|---|---|
+| lint / format | style or unused code | code (`ruff format`, eslint `--fix`), not config |
+| types | wrong or missing annotation, `None` not handled | code and types |
+| unit test | real regression, or the test encoded old behaviour | code; edit the test ONLY if the PRD changed behaviour |
+| coverage | untested branch | add the test (write-tests skill) or delete dead code |
+| build | import/type/config error | code |
+| contract drift | API changed unintentionally | code; snapshot only if the PRD changed the API |
+| fact check | running system disagrees with the PRD | code; if the CHECK seems wrong, the spec is wrong: stop and report |
+| runtime failed to start | bad env var, port taken, image build error | read `logs/runtime-*.log` |
+| secrets | credential-like string committed | remove it, rotate if real |
+
+## Never
+Skip/xfail/delete tests, lower thresholds, add blanket suppressions, regenerate the contract to hide drift, edit `.ai/sdlc.json`, `scripts/sdlc*`, `.github/workflows/` or (while healing) `.ai/specs/`. The loop will stop with exit code 4.
+
+## If stuck
+Same failure twice? Your hypothesis is wrong: re-read the raw output, add a failing test that isolates it, bisect with `git diff`. After that, report what you know and what blocks you.

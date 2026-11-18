@@ -1,0 +1,25 @@
+FROM node:<%nodeVersion%>-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
+
+FROM node:<%nodeVersion%>-alpine AS build
+WORKDIR /app
+ENV NEXT_TELEMETRY_DISABLED=1 NEXT_OUTPUT=standalone
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN npm run build
+
+FROM node:<%nodeVersion%>-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3000
+RUN addgroup -S app && adduser -S app -G app
+COPY --from=build --chown=app:app /app/.next/standalone ./
+COPY --from=build --chown=app:app /app/.next/static ./.next/static
+COPY --from=build --chown=app:app /app/public ./public
+USER app
+EXPOSE 3000
+HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=5 \
+  CMD node -e "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+# API_URL is read at request time: set it per environment, no rebuild needed.
+CMD ["node", "server.js"]

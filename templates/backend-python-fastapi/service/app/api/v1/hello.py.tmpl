@@ -1,0 +1,17 @@
+from typing import Annotated
+
+from fastapi import APIRouter, Query
+
+from app.schemas.hello import HelloResponse
+
+router = APIRouter(prefix="/hello", tags=["hello"])
+
+NameQuery = Annotated[
+    str,
+    Query(min_length=1, max_length=50, description="Who to greet (1-50 characters)."),
+]
+
+
+@router.get("", response_model=HelloResponse, summary="Greet someone")
+async def hello(name: NameQuery = "World") -> HelloResponse:
+    return HelloResponse(message=f"Hello, {name}!")

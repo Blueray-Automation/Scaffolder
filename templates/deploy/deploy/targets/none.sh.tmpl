@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Placeholder deploy target: prints what WOULD be deployed and changes nothing.
+# Replace it (or set cd.target in scaffolder.config.yaml, e.g. ssh-compose) to deploy for real.
+
+deploy() {
+  echo "  [target: none] nothing is deployed."
+  echo "  environment : ${ENVIRONMENT}"
+<%#hasBackend%>
+  echo "  backend     : ${BACKEND_IMAGE}"
+<%/hasBackend%>
+<%#hasWeb%>
+  echo "  web         : ${WEB_IMAGE}"
+<%/hasWeb%>
+  echo "  Implement deploy() in deploy/targets/none.sh, or switch target to ssh-compose."
+}

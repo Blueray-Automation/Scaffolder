@@ -1,0 +1,26 @@
+# Rule: web (Next.js App Router, TypeScript), in `<%webDir%>/`
+
+## Layout
+```
+src/app/            routes (server components by default), layout, globals.css
+src/components/     presentational components: props in, JSX out, no data fetching
+src/lib/            typed API client (mirrors .ai/contract/openapi.json), helpers
+src/__tests__/      Vitest + Testing Library specs
+```
+
+## Conventions
+- TypeScript `strict` (+ `noUncheckedIndexedAccess`). No `any`; narrow `unknown` with type guards at the boundary.
+- All backend access goes through `src/lib/api.ts`. Never call `fetch` from a component. Responses are validated against the contract shape before use.
+- `API_URL` is a RUNTIME variable (server-side). Never bake environment-specific URLs into the build: one image runs in every environment.
+- Every data-driven view models all its states explicitly: loading, empty, error, success. Errors are shown with `role="alert"`, never swallowed.
+- Prefer server components for data; add `"use client"` only for interactivity, and keep it as low in the tree as possible.
+- Accessibility: semantic elements, labelled controls, visible focus, sufficient contrast. Don't convey state by colour alone.
+- Lint with `eslint --max-warnings 0` (flat config, `eslint-config-next`); fix the code instead of adding `eslint-disable`. React Compiler rules apply: no JSX construction inside `try/catch` (compute props in the `try`, render outside it).
+
+## Tests (Vitest, coverage floor <%coverageWeb%>%)
+- Test behaviour through the rendered output (`getByRole`, `getByText`), not implementation details.
+- Server components are async functions: `render(await Page())`, with `fetchHello` mocked at the module boundary.
+- Cover each state of each component and each error path of `src/lib/api.ts`.
+
+## Contract
+When the backend contract changes, update `src/lib/api.ts` types and tests in the same PR.

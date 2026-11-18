@@ -1,0 +1,19 @@
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import { HelloCard } from "@/components/HelloCard";
+
+describe("HelloCard", () => {
+  it("shows the greeting in the success state", () => {
+    render(<HelloCard state="success" message="Hello, World!" />);
+
+    expect(screen.getByRole("heading", { name: "Hello, World!" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("announces the failure in the error state", () => {
+    render(<HelloCard state="error" detail="Backend responded with 503" />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Backend unavailable");
+    expect(screen.getByRole("alert")).toHaveTextContent("Backend responded with 503");
+  });
+});

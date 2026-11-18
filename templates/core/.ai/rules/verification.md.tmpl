@@ -1,0 +1,23 @@
+# Rule: verification and definition of done
+
+## Definition of done
+All of these, shown with evidence:
+1. `./scripts/sdlc verify` exits 0 (report: `.ai/evidence/latest/report.md`).
+2. Every acceptance criterion of the feature appears in the report's traceability table as PASS (not SKIP).
+3. New behaviour has tests; the contract snapshot is current if the API changed.
+4. No secrets, no debug leftovers, no commented-out code.
+5. The PR links the feature id and pastes the report summary.
+
+## Claims must be checkable
+- "I fixed it" -> the failing gate now passes (name it).
+- "It works" -> an `acceptance.json` check or a test proves it (name it).
+- "Nothing else broke" -> full `verify` is green, not just the one gate.
+- If something could not be verified (tool missing, runtime unavailable), say exactly what and why. Unverified is not passed.
+
+## Forbidden shortcuts
+Editing the gates, the workflows, the specs while healing; lowering thresholds; skipping or deleting tests; blanket lint/type suppressions; regenerating the contract snapshot to hide drift; mocking the thing under test; catching and swallowing exceptions to silence a failure.
+
+## Loop etiquette
+- Same failure twice means your model of the problem is wrong. Re-read the real output and change approach.
+- Keep each iteration small; do not refactor while healing.
+- If blocked by the spec, the environment or a gate you believe is wrong: stop and report. Do not route around it.

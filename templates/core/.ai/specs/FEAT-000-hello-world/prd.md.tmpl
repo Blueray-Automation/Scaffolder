@@ -1,0 +1,35 @@
+# FEAT-000: Hello World
+
+Status: Accepted. This is the worked example every new PRD follows. Copy its shape, not its content.
+
+## 1. Objective
+Prove the whole pipeline end to end (code, tests, contract, running system, deploy) with the smallest possible feature: a service that greets, reports its own health, <%#hasDb%>checks its database, <%/hasDb%><%#hasWeb%>and a web page that displays the greeting from the API.<%/hasWeb%><%^hasWeb%>and a documented API.<%/hasWeb%>
+
+## 2. User stories & acceptance criteria
+- **AC-001** Given the backend is running, when a client requests `GET /health`, then it responds `200` with `{"status": "ok"}` without touching any dependency (liveness).
+- **AC-002** Given the backend is running, when a client requests `GET /api/v1/hello`, then it responds `200` with `{"message": "Hello, World!"}`.
+- **AC-003** Given the backend is running, when a client requests `GET /api/v1/hello?name=Ada`, then it responds `200` with `{"message": "Hello, Ada!"}`.
+- **AC-004** Given the backend is running, when a client requests `GET /api/v1/hello` with a `name` longer than 50 characters, then it responds `422`.
+<%#hasDb%>
+- **AC-005** Given the database is reachable, when a client requests `GET /ready`, then it responds `200` with `{"status": "ok", "database": "up"}`; when the database is unreachable it responds `503` with `{"status": "degraded", "database": "down"}`.
+<%/hasDb%>
+- **AC-006** The API contract is committed at `.ai/contract/openapi.json` and describes `/health`, `/ready` and `/api/v1/hello`; any drift between code and contract fails the `backend.contract` gate.
+<%#hasWeb%>
+- **AC-007** Given backend and web are both running, when a user opens the web root `/`, then the page shows the greeting `Hello, World!` fetched from the backend at request time.
+<%/hasWeb%>
+
+## 3. Permissions & roles
+None: all endpoints are public and read-only.
+
+## 4. Data & validation
+- `name`: optional string, 1 to 50 characters, default `World`.
+- Response `message`: string, always `Hello, <name>!`.
+
+## 5. Contract impact
+New endpoints `GET /health`, `GET /ready`, `GET /api/v1/hello`. No migrations. Error payload for validation failures is FastAPI's standard `422` body.
+
+## 6. Out of scope
+Authentication, persistence of greetings, localization.
+
+## 7. Verification map
+See `acceptance.json`. AC-001 to AC-004 are proven against the running service; AC-006 by a file check plus the contract gate<%#hasWeb%>; AC-007 by an HTTP check on the web app (which proves the web-to-backend wiring)<%/hasWeb%>.

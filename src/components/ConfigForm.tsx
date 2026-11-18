@@ -1,0 +1,277 @@
+"use client";
+
+import React from "react";
+import { Boxes, GitBranch, Layers, Plus, ShieldCheck, Smartphone, Trash2 } from "lucide-react";
+import { CAPABILITIES, type DeployTrigger, type Issue, type ScaffolderConfig } from "@/engine";
+import { setIn } from "@/lib/utils";
+import { Badge, Button, Field, NumberInput, Section, Select, TextInput, Toggle } from "./ui";
+
+interface Props {
+  config: ScaffolderConfig;
+  onChange: (next: ScaffolderConfig) => void;
+  issues: Issue[];
+}
+
+const TRIGGERS: Array<{ id: DeployTrigger; label: string }> = [
+  { id: "push-default-branch", label: "Push to default branch" },
+  { id: "tag", label: "Version tag (v1.2.3)" },
+  { id: "manual", label: "Manual dispatch" },
+];
+
+const GATE_LABELS: Array<[keyof ScaffolderConfig["sdlc"]["gates"], string, string]> = [
+  ["lint", "Lint & format", "ruff, eslint"],
+  ["types", "Type check", "mypy, tsc"],
+  ["unit", "Unit tests + coverage floor", "pytest, vitest"],
+  ["build", "Production build", "next build, compose validation"],
+  ["contract", "API contract drift", "OpenAPI snapshot"],
+  ["facts", "Facts: PRD vs running system", "acceptance.json"],
+  ["security", "Security scans", "secrets, pip-audit, npm audit"],
+];
+
+export function ConfigForm({ config, onChange, issues }: Props) {
+  const set = (path: Array<string | number>, value: unknown) => onChange(setIn(config, path, value));
+  const err = (path: string) => issues.find((i) => i.level === "error" && i.path === path)?.message;
+
+  const pyFrameworks = CAPABILITIES.backend.languages.find((l) => l.id === config.backend.language)?.frameworks ?? [];
+  const pyVersions = pyFrameworks.find((f) => f.id === config.backend.framework)?.versions ?? [];
+  const webVersions = CAPABILITIES.web.frameworks.find((f) => f.id === config.web.framework)?.versions ?? [];
+  const dbVersions = CAPABILITIES.database.find((d) => d.id === config.database.type)?.versions ?? [];
+
+  const toOptions = (list: readonly string[]) => list.map((v) => ({ id: v, label: v }));
+
+  return (
+    <div className="space-y-5">
+      <Section icon={<Layers className="h-4 w-4" />} title="Project" hint="Names the repo, images and docs.">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="Name (slug)" error={err("project.name")}>
+            {(id) => <TextInput id={id} value={config.project.name} onChange={(v) => set(["project", "name"], v)} placeholder="hello-scaffold" />}
+          </Field>
+          <Field label="GitHub owner" hint="Used for ghcr.io/<owner>/..." error={err("project.owner")}>
+            {(id) => <TextInput id={id} value={config.project.owner} onChange={(v) => set(["project", "owner"], v)} />}
+          </Field>
+        </div>
+        <Field label="Description">
+          {(id) => <TextInput id={id} value={config.project.description} onChange={(v) => set(["project", "description"], v)} />}
+        </Field>
+        <Field label="License" error={err("project.license")}>
+          {(id) => <Select id={id} value={config.project.license} onChange={(v) => set(["project", "license"], v)} options={CAPABILITIES.license} />}
+        </Field>
+      </Section>
+
+      <Section icon={<Boxes className="h-4 w-4" />} title="Stack" hint="Options marked “coming soon” have no pack yet, so they are not generated as broken stubs.">
+        <div className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+          <Toggle checked={config.backend.enabled} onChange={(v) => set(["backend", "enabled"], v)} label="Backend API" />
+          {config.backend.enabled && (
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Language" error={err("backend.language")}>
+                {(id) => (
+                  <Select
+                    id={id}
+                    value={config.backend.language}
+                    options={CAPABILITIES.backend.languages}
+                    onChange={(v) => {
+                      const lang = CAPABILITIES.backend.languages.find((l) => l.id === v);
+                      const fw = lang?.frameworks.find((f) => f.available) ?? lang?.frameworks[0];
+                      onChange({ ...config, backend: { ...config.backend, language: v as never, framework: fw?.id ?? "", version: fw?.versions[0] ?? "" } });
+                    }}
+                  />
+                )}
+              </Field>
+              <Field label="Framework" error={err("backend.framework")}>
+                {(id) => (
+                  <Select
+                    id={id}
+                    value={config.backend.framework}
+                    options={pyFrameworks}
+                    onChange={(v) => {
+                      const fw = pyFrameworks.find((f) => f.id === v);
+                      onChange({ ...config, backend: { ...config.backend, framework: v, version: fw?.versions[0] ?? config.backend.version } });
+                    }}
+                  />
+                )}
+              </Field>
+              <Field label="Version" error={err("backend.version")}>
+                {(id) => <Select id={id} value={config.backend.version} options={toOptions(pyVersions)} onChange={(v) => set(["backend", "version"], v)} />}
+              </Field>
+              <Field label="Port" error={err("backend.port")}>
+                {(id) => <NumberInput id={id} value={config.backend.port} onChange={(v) => set(["backend", "port"], v)} />}
+              </Field>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+          <Toggle checked={config.web.enabled} onChange={(v) => set(["web", "enabled"], v)} label="Web app" />
+          {err("web.enabled") && <p className="text-xs text-red-400">{err("web.enabled")}</p>}
+          {config.web.enabled && (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <Field label="Framework" error={err("web.framework")}>
+                {(id) => <Select id={id} value={config.web.framework} options={CAPABILITIES.web.frameworks} onChange={(v) => set(["web", "framework"], v)} />}
+              </Field>
+              <Field label="Node version" error={err("web.nodeVersion")}>
+                {(id) => <Select id={id} value={config.web.nodeVersion} options={toOptions(webVersions)} onChange={(v) => set(["web", "nodeVersion"], v)} />}
+              </Field>
+              <Field label="Port" error={err("web.port")}>
+                {(id) => <NumberInput id={id} value={config.web.port} onChange={(v) => set(["web", "port"], v)} />}
+              </Field>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between rounded-lg border border-dashed border-zinc-800 p-3">
+          <span className="flex items-center gap-2 text-sm text-zinc-400">
+            <Smartphone className="h-4 w-4" aria-hidden /> Mobile (Flutter, React Native)
+          </span>
+          <Badge tone="info">coming soon</Badge>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Database" error={err("database.type")}>
+            {(id) => (
+              <Select
+                id={id}
+                value={config.database.type}
+                options={CAPABILITIES.database}
+                onChange={(v) => {
+                  const versions = CAPABILITIES.database.find((d) => d.id === v)?.versions;
+                  onChange({ ...config, database: { type: v as never, version: versions?.[0] ?? config.database.version } });
+                }}
+              />
+            )}
+          </Field>
+          <Field label="Database version" error={err("database.version")}>
+            {(id) => <Select id={id} value={config.database.version} options={toOptions(dbVersions)} onChange={(v) => set(["database", "version"], v)} disabled={dbVersions.length === 0} />}
+          </Field>
+          <Field label="Cache">
+            {(id) => <Select id={id} value={config.cache.type} options={CAPABILITIES.cache} onChange={(v) => set(["cache", "type"], v)} />}
+          </Field>
+          <Field label="Auth">
+            {(id) => <Select id={id} value={config.auth.type} options={CAPABILITIES.auth} onChange={(v) => set(["auth", "type"], v)} />}
+          </Field>
+        </div>
+
+        <details className="group rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+          <summary className="cursor-pointer text-xs font-medium text-zinc-400 group-open:mb-3">Layout</summary>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Backend directory" error={err("layout.backendDir")}>
+              {(id) => <TextInput id={id} value={config.layout.backendDir} onChange={(v) => set(["layout", "backendDir"], v)} />}
+            </Field>
+            <Field label="Web directory" error={err("layout.webDir")}>
+              {(id) => <TextInput id={id} value={config.layout.webDir} onChange={(v) => set(["layout", "webDir"], v)} />}
+            </Field>
+          </div>
+        </details>
+      </Section>
+
+      <Section
+        icon={<ShieldCheck className="h-4 w-4" />}
+        title="Verification loop"
+        hint="How “done” is proven: gates, then PRD facts against the running system, healed by an agent or you."
+      >
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Max iterations" error={err("sdlc.maxIterations")}>
+            {(id) => <NumberInput id={id} value={config.sdlc.maxIterations} onChange={(v) => set(["sdlc", "maxIterations"], v)} />}
+          </Field>
+          <Field label="Stop after N identical failures" error={err("sdlc.noProgressLimit")}>
+            {(id) => <NumberInput id={id} value={config.sdlc.noProgressLimit} onChange={(v) => set(["sdlc", "noProgressLimit"], v)} />}
+          </Field>
+          <Field label="Coverage floor: backend %" error={err("sdlc.coverage.backend")}>
+            {(id) => <NumberInput id={id} value={config.sdlc.coverage.backend} onChange={(v) => set(["sdlc", "coverage", "backend"], v)} />}
+          </Field>
+          <Field label="Coverage floor: web %" error={err("sdlc.coverage.web")}>
+            {(id) => <NumberInput id={id} value={config.sdlc.coverage.web} onChange={(v) => set(["sdlc", "coverage", "web"], v)} />}
+          </Field>
+        </div>
+
+        <Field label="Runtime for facts" error={err("sdlc.runtime")} hint={CAPABILITIES.runtime.find((r) => r.id === config.sdlc.runtime)?.hint}>
+          {(id) => <Select id={id} value={config.sdlc.runtime} options={CAPABILITIES.runtime} onChange={(v) => set(["sdlc", "runtime"], v)} />}
+        </Field>
+
+        <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+          {GATE_LABELS.map(([key, label, hint]) => (
+            <Toggle key={key} checked={config.sdlc.gates[key]} onChange={(v) => set(["sdlc", "gates", key], v)} label={label} hint={hint} />
+          ))}
+          <Toggle checked={config.sdlc.failFast} onChange={(v) => set(["sdlc", "failFast"], v)} label="Stop at the first failing stage" hint="Gives the agent one focused problem" />
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="sm:col-span-2">
+            <Field label="Agent command" hint="Any CLI that reads the prompt on stdin. Empty = human in the loop." error={err("sdlc.agent.command")}>
+              {(id) => <TextInput id={id} value={config.sdlc.agent.command} onChange={(v) => set(["sdlc", "agent", "command"], v)} placeholder="e.g. my-agent --prompt-stdin" spellCheck={false} />}
+            </Field>
+          </div>
+          <Field label="Agent timeout (s)" error={err("sdlc.agent.timeoutSeconds")}>
+            {(id) => <NumberInput id={id} value={config.sdlc.agent.timeoutSeconds} onChange={(v) => set(["sdlc", "agent", "timeoutSeconds"], v)} />}
+          </Field>
+        </div>
+      </Section>
+
+      <Section icon={<GitBranch className="h-4 w-4" />} title="CI / CD" hint="Build once, promote the same image through environments.">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <Field label="CI provider" error={err("ci.provider")}>
+            {(id) => <Select id={id} value={config.ci.provider} options={CAPABILITIES.ci} onChange={(v) => set(["ci", "provider"], v)} />}
+          </Field>
+          <Field label="Default branch" error={err("ci.defaultBranch")}>
+            {(id) => <TextInput id={id} value={config.ci.defaultBranch} onChange={(v) => set(["ci", "defaultBranch"], v)} />}
+          </Field>
+          <div className="flex items-end pb-2">
+            <Toggle checked={config.docker.enabled} onChange={(v) => set(["docker", "enabled"], v)} label="Docker + compose" />
+          </div>
+        </div>
+
+        <Toggle checked={config.cd.enabled} onChange={(v) => set(["cd", "enabled"], v)} label="Continuous delivery" hint="cd.yml: CI gate, build images once, deploy to environments" />
+        {err("cd.enabled") && <p className="text-xs text-red-400">{err("cd.enabled")}</p>}
+
+        {config.cd.enabled && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Registry" error={err("cd.registry")}>
+                {(id) => <Select id={id} value={config.cd.registry} options={CAPABILITIES.registry} onChange={(v) => set(["cd", "registry"], v)} />}
+              </Field>
+              <Field label="Deploy target" error={err("cd.target")}>
+                {(id) => <Select id={id} value={config.cd.target} options={CAPABILITIES.deployTarget} onChange={(v) => set(["cd", "target"], v)} />}
+              </Field>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-zinc-400">Environments (deployed in order)</p>
+              {config.cd.environments.map((env, i) => (
+                <div key={i} className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-950/50 p-2.5">
+                  <div className="grid grid-cols-2 gap-2">
+                    <TextInput aria-label={`Environment ${i + 1} name`} value={env.name} onChange={(v) => set(["cd", "environments", i, "name"], v)} />
+                    <Select aria-label={`Environment ${i + 1} trigger`} value={env.trigger} options={TRIGGERS} onChange={(v) => set(["cd", "environments", i, "trigger"], v)} />
+                  </div>
+                  <div className="flex gap-2">
+                    <TextInput aria-label={`Environment ${i + 1} URL`} value={env.url} onChange={(v) => set(["cd", "environments", i, "url"], v)} />
+                    <Button
+                      variant="ghost"
+                      aria-label={`Remove environment ${env.name}`}
+                      onClick={() => set(["cd", "environments"], config.cd.environments.filter((_, j) => j !== i))}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {[`cd.environments[${i}].name`, `cd.environments[${i}].url`, `cd.environments[${i}].trigger`].map(
+                    (p) => err(p) && <p key={p} className="text-xs text-red-400">{err(p)}</p>,
+                  )}
+                </div>
+              ))}
+              {err("cd.environments") && <p className="text-xs text-red-400">{err("cd.environments")}</p>}
+              <Button
+                disabled={config.cd.environments.length >= 6}
+                onClick={() =>
+                  set(["cd", "environments"], [
+                    ...config.cd.environments,
+                    { name: `env-${config.cd.environments.length + 1}`, url: "https://example.com", trigger: "manual" },
+                  ])
+                }
+              >
+                <Plus className="h-3.5 w-3.5" /> Add environment
+              </Button>
+            </div>
+          </div>
+        )}
+      </Section>
+    </div>
+  );
+}

@@ -1,0 +1,94 @@
+"""Export / verify the committed API contract snapshot.
+
+The snapshot is a NORMALISED view of the generated OpenAPI document (paths + schemas, without
+titles, descriptions or operation ids) so that cosmetic changes do not cause noise but any change
+to the shape of the API does.
+
+    python -m app.export_openapi --check <path>   # exit 1 on drift (what the gate runs)
+    python -m app.export_openapi --write <path>   # update it: an INTENTIONAL contract change
+    python -m app.export_openapi                  # print to stdout
+"""
+
+import argparse
+import difflib
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+from app.main import create_app
+
+DROPPED_KEYS = {"title", "description", "summary", "operationId", "example", "examples"}
+
+
+def normalise(node: Any, *, in_properties: bool = False) -> Any:
+    if isinstance(node, dict):
+        out: dict[str, Any] = {}
+        for key in sorted(node):
+            # Inside a `properties` map the keys are property NAMES (keep them even if they
+            # look like a dropped keyword such as "title").
+            if not in_properties and key in DROPPED_KEYS:
+                continue
+            child_is_properties_map = key == "properties" and not in_properties
+            out[key] = normalise(node[key], in_properties=child_is_properties_map)
+        return out
+    if isinstance(node, list):
+        return [normalise(item) for item in node]
+    return node
+
+
+def build_contract() -> dict[str, Any]:
+    spec = create_app().openapi()
+    return {
+        "contract": 1,
+        "paths": normalise(spec.get("paths", {})),
+        "schemas": normalise(spec.get("components", {}).get("schemas", {})),
+    }
+
+
+def render() -> str:
+    return json.dumps(build_contract(), indent=2, sort_keys=True) + "\n"
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawTextHelpFormatter
+    )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--check", metavar="PATH", help="fail if the snapshot at PATH differs")
+    group.add_argument("--write", metavar="PATH", help="write the snapshot to PATH")
+    args = parser.parse_args(argv)
+    current = render()
+
+    if args.write:
+        Path(args.write).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.write).write_text(current)
+        print(f"wrote {args.write}")
+        return 0
+
+    if args.check:
+        path = Path(args.check)
+        if not path.exists():
+            print(f"contract snapshot {path} does not exist (create it with --write).")
+            return 1
+        committed = path.read_text()
+        if committed == current:
+            print("API contract matches the committed snapshot.")
+            return 0
+        diff = difflib.unified_diff(
+            committed.splitlines(), current.splitlines(), "committed", "generated", lineterm=""
+        )
+        print("\n".join(diff))
+        print(
+            "\nAPI contract drift. If the PRD intentionally changed the API, regenerate with\n"
+            f"  python -m app.export_openapi --write {path}\n"
+            "and explain the change in the PR. Otherwise fix the code."
+        )
+        return 1
+
+    sys.stdout.write(current)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

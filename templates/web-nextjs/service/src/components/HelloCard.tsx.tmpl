@@ -1,0 +1,24 @@
+export type HelloCardProps =
+  | { state: "success"; message: string }
+  | { state: "error"; detail: string };
+
+/** Presentational: every state the page can be in is explicit (success, error). */
+export function HelloCard(props: HelloCardProps) {
+  if (props.state === "error") {
+    return (
+      <section className="card card-error" role="alert">
+        <p className="eyebrow"><%title%></p>
+        <h1>Backend unavailable</h1>
+        <p className="muted">{props.detail}</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="card">
+      <p className="eyebrow"><%title%></p>
+      <h1>{props.message}</h1>
+      <p className="muted">Rendered by Next.js from the API at /api/v1/hello.</p>
+    </section>
+  );
+}

@@ -1,0 +1,1079 @@
+#!/usr/bin/env python3
+"""
+sdlc: the verification loop for this repository (PRD -> Code -> Test -> Deploy).
+
+Standard library only (Python 3.9+). Configured by .ai/sdlc.json; see .ai/README.md.
+
+  setup     install dependencies for every component
+  doctor    check the toolchain this repo needs
+  gates     run verification gates (lint, types, unit, build, contract, security)
+  facts     check PRD acceptance criteria against the RUNNING system
+  verify    gates + facts, one pass, no agent (this is what CI runs)
+  loop      verify -> heal -> verify ... until green, stuck, or out of budget
+  feature   drive one feature through PRD -> Code -> Test (-> Deploy)
+  new       create a feature spec from the template
+  deploy    deploy an image tag to an environment, then verify facts there
+  secrets   scan the working tree for committed secrets
+  up|down   start/stop the runtime used by facts
+  report    print the latest evidence report
+
+Exit codes: 0 ok | 1 verification failed | 2 needs a human | 3 no progress | 4 integrity violation
+"""
+from __future__ import annotations
+
+import argparse
+import contextlib
+import datetime
+import hashlib
+import json
+import os
+import re
+import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+CONFIG_PATH = ROOT / ".ai" / "sdlc.json"
+EVIDENCE = ROOT / ".ai" / "evidence"
+
+EXIT_OK, EXIT_FAIL, EXIT_HUMAN, EXIT_STUCK, EXIT_INTEGRITY, EXIT_USAGE = 0, 1, 2, 3, 4, 64
+
+ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+USE_COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+
+
+def c(text: str, code: str) -> str:
+    return f"\033[{code}m{text}\033[0m" if USE_COLOR else text
+
+
+def ok(t: str) -> str:
+    return c(t, "32")
+
+
+def bad(t: str) -> str:
+    return c(t, "31")
+
+
+def warn(t: str) -> str:
+    return c(t, "33")
+
+
+def dim(t: str) -> str:
+    return c(t, "2")
+
+
+def say(msg: str = "") -> None:
+    print(msg, flush=True)
+
+
+def die(msg: str, code: int = EXIT_USAGE) -> "None":
+    print(bad(f"error: {msg}"), file=sys.stderr)
+    sys.exit(code)
+
+
+def load_config() -> dict:
+    if not CONFIG_PATH.exists():
+        die(f"{CONFIG_PATH.relative_to(ROOT)} not found")
+    return json.loads(CONFIG_PATH.read_text())
+
+
+def strip_ansi(s: str) -> str:
+    return ANSI.sub("", s)
+
+
+def tail_lines(path: Path, n: int = 80) -> str:
+    try:
+        lines = strip_ansi(path.read_text(errors="replace")).splitlines()
+    except OSError:
+        return ""
+    return "\n".join(lines[-n:])
+
+
+def rel(p: Path) -> str:
+    try:
+        return str(p.relative_to(ROOT))
+    except ValueError:
+        return str(p)
+
+
+# --------------------------------------------------------------------------- processes
+
+
+def build_env(extra: dict | None = None, path_prepend: list | None = None) -> dict:
+    env = os.environ.copy()
+    env.update({k: str(v) for k, v in (extra or {}).items()})
+    dirs = [str(ROOT / p) for p in (path_prepend or []) if (ROOT / p).is_dir()]
+    if dirs:
+        env["PATH"] = os.pathsep.join(dirs + [env.get("PATH", "")])
+    return env
+
+
+def kill_group(proc: subprocess.Popen) -> None:
+    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+
+
+def run_shell(cmd: str, cwd: Path, log: Path, *, env: dict, timeout: int, stdin_text: str | None = None) -> int:
+    """Run a shell command, streaming combined output to `log`. Returns exit code (124 = timeout)."""
+    with open(log, "a", encoding="utf-8") as fh:
+        fh.write(f"$ {cmd}    (cwd={rel(cwd) or '.'})\n\n")
+        fh.flush()
+        proc = subprocess.Popen(
+            cmd,
+            shell=True,
+            cwd=str(cwd),
+            env=env,
+            stdin=subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL,
+            stdout=fh,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        try:
+            proc.communicate(input=stdin_text.encode() if stdin_text is not None else None, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            kill_group(proc)
+            fh.write(f"\n[sdlc] TIMEOUT after {timeout}s\n")
+            return 124
+        return proc.returncode
+
+
+# --------------------------------------------------------------------------- evidence
+
+
+class Run:
+    """One verification pass: logs + results.json + report.md under .ai/evidence/<id>/."""
+
+    def __init__(self, label: str = "") -> None:
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        base = f"{stamp}-{label}" if label else stamp
+        self.id, n = base, 1
+        while (EVIDENCE / self.id).exists():
+            n += 1
+            self.id = f"{base}-{n}"
+        self.dir = EVIDENCE / self.id
+        self.logs = self.dir / "logs"
+        self.logs.mkdir(parents=True, exist_ok=True)
+        self.started = time.time()
+        self.items: list = []
+        self.notes: list = []
+        self.label = label
+
+    def add(self, item: dict) -> dict:
+        self.items.append(item)
+        return item
+
+    def required_failures(self) -> list:
+        return [i for i in self.items if i["status"] == "fail" and i.get("required", True)]
+
+    def passed(self, strict_skips: bool = False) -> bool:
+        if self.required_failures():
+            return False
+        return not (strict_skips and any(i["status"] == "skip" and not i.get("notApplicable") for i in self.items))
+
+    def finish(self, cfg: dict, specs: list | None = None) -> None:
+        data = {
+            "id": self.id,
+            "label": self.label,
+            "finished": datetime.datetime.now().isoformat(timespec="seconds"),
+            "seconds": round(time.time() - self.started, 1),
+            "git": git_info(),
+            "passed": self.passed(cfg.get("facts", {}).get("strictSkips", False)),
+            "items": self.items,
+            "notes": self.notes,
+        }
+        (self.dir / "results.json").write_text(json.dumps(data, indent=2))
+        (self.dir / "report.md").write_text(render_report(data, specs or []))
+        latest = EVIDENCE / "latest"
+        if latest.is_symlink() or latest.is_file():
+            latest.unlink()
+        elif latest.is_dir():
+            shutil.rmtree(latest)
+        shutil.copytree(self.dir, latest)
+
+
+def git(*args: str) -> str:
+    try:
+        out = subprocess.run(["git", *args], cwd=str(ROOT), capture_output=True, text=True, timeout=20)
+        return out.stdout.strip() if out.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def git_info() -> dict:
+    return {"sha": git("rev-parse", "--short", "HEAD"), "dirty": bool(git("status", "--porcelain"))}
+
+
+def render_report(data: dict, specs: list) -> str:
+    icon = {"pass": "PASS", "fail": "FAIL", "warn": "WARN", "skip": "SKIP"}
+    items = data["items"]
+    verdict = "PASSED" if data["passed"] else "FAILED"
+    lines = [
+        f"# Verification report: {verdict}",
+        "",
+        f"- Run: `{data['id']}`  ({data['seconds']}s, finished {data['finished']})",
+        f"- Git: `{data['git'].get('sha') or 'n/a'}`" + (" (uncommitted changes)" if data["git"].get("dirty") else ""),
+        "",
+    ]
+    gate_items = [x for x in items if x["kind"] == "gate"]
+    if gate_items:
+        lines += ["## Gates", "", "| Status | Gate | Stage | Time | Log |", "|---|---|---|---|---|"]
+    for i in gate_items:
+        lines.append(f"| {icon[i['status']]} | `{i['id']}` {i['label']} | {i['stage']} | {i['seconds']}s | `{i.get('log', '')}` |")
+    facts = [x for x in items if x["kind"] == "fact"]
+    if facts or specs:
+        lines += ["", "## Facts (acceptance criteria -> checks)", ""]
+        by_id = {f["id"]: f for f in facts}
+        for spec in specs:
+            lines.append(f"### {spec['feature']}")
+            lines += ["", "| AC | Requirement | Checks | Status |", "|---|---|---|---|"]
+            for ac_id, text in spec["acs"].items():
+                cs = [by_id[k] for k in by_id if ac_id in by_id[k].get("covers", []) and by_id[k].get("feature") == spec["feature"]]
+                if not cs:
+                    status = "FAIL (no check)"
+                elif any(x["status"] == "fail" for x in cs):
+                    status = "FAIL"
+                elif all(x["status"] == "skip" for x in cs):
+                    status = "SKIP"
+                else:
+                    status = "PASS"
+                names = ", ".join(f"`{x['id'].split(':')[-1]}`" for x in cs) or "-"
+                lines.append(f"| {ac_id} | {text[:110].replace('|', '/')} | {names} | {status} |")
+            lines.append("")
+        lines += ["### Check results", "", "| Status | Check | Detail |", "|---|---|---|"]
+        for f in facts:
+            lines.append(f"| {icon[f['status']]} | `{f['id']}` {f['label']} | {str(f.get('detail', ''))[:160].replace('|', '/')} |")
+    bad_items = [i for i in items if i["status"] == "fail"]
+    if bad_items:
+        lines += ["", "## Failures", ""]
+        for i in bad_items:
+            lines += [f"### `{i['id']}` {i['label']}", ""]
+            if i.get("detail"):
+                lines += [str(i["detail"]), ""]
+            if i.get("tail"):
+                lines += ["```text", i["tail"], "```", ""]
+    if data["notes"]:
+        lines += ["", "## Notes", ""] + [f"- {n}" for n in data["notes"]]
+    return "\n".join(lines) + "\n"
+
+
+# --------------------------------------------------------------------------- gates
+
+
+def run_gate(gate: dict, run: Run) -> dict:
+    log = run.logs / f"{gate['id']}.log"
+    env = build_env(gate.get("env"), gate.get("pathPrepend"))
+    t0 = time.time()
+    code = run_shell(gate["cmd"], ROOT / gate["cwd"], log, env=env, timeout=gate.get("timeoutSeconds", 600))
+    status = "pass" if code == 0 else ("fail" if gate.get("required", True) else "warn")
+    item = {
+        "kind": "gate",
+        "id": gate["id"],
+        "label": gate["label"],
+        "stage": gate["stage"],
+        "required": gate.get("required", True),
+        "status": status,
+        "exitCode": code,
+        "seconds": round(time.time() - t0, 1),
+        "log": rel(log),
+        "cmd": gate["cmd"],
+    }
+    if status != "pass":
+        item["tail"] = tail_lines(log)
+    return run.add(item)
+
+
+def show(item: dict) -> None:
+    mark = {"pass": ok("  PASS"), "fail": bad("  FAIL"), "warn": warn("  WARN"), "skip": dim("  SKIP")}[item["status"]]
+    extra = dim(f" ({item['seconds']}s)") if "seconds" in item else ""
+    detail = ""
+    if item["status"] in ("fail", "skip", "warn") and item.get("detail"):
+        detail = dim(f"  {str(item['detail']).splitlines()[0][:110]}")
+    say(f"{mark}  {item['id']}  {item['label']}{extra}{detail}")
+
+
+# --------------------------------------------------------------------------- runtime
+
+
+class RuntimeFailed(Exception):
+    pass
+
+
+def http_ok(url: str, timeout: float = 2.0) -> bool:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:  # noqa: S310 (local health probe)
+            return 200 <= r.status < 400
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+
+
+class Runtime:
+    """Starts the system under test (docker compose or local processes) and tears it down."""
+
+    def __init__(self, cfg: dict, mode: str, run: Run) -> None:
+        self.cfg, self.mode, self.run = cfg, mode, run
+        self.procs: list = []
+        rt = cfg["runtime"]
+        self.provides = set(rt["docker"]["provides"] if mode == "docker" else rt["local"]["provides"])
+
+    def __enter__(self) -> "Runtime":
+        try:
+            if self.mode == "docker":
+                self._up_docker()
+            elif self.mode == "local":
+                self._up_local()
+        except BaseException:
+            self.__exit__(None, None, None)
+            raise
+        return self
+
+    def _up_docker(self) -> None:
+        if not shutil.which("docker"):
+            raise RuntimeFailed("docker is not installed (set sdlc.runtime to 'local' or 'none' to proceed without it)")
+        spec = self.cfg["runtime"]["docker"]
+        log = self.run.logs / "runtime-up.log"
+        say(dim("  starting docker compose stack (build + wait for healthy)..."))
+        code = run_shell(spec["up"], ROOT, log, env=os.environ.copy(), timeout=1500)
+        if code != 0:
+            self._save_logs()
+            raise RuntimeFailed(f"`{spec['up']}` failed (exit {code})\n{tail_lines(log, 40)}")
+
+    def _up_local(self) -> None:
+        for svc in self.cfg["runtime"]["local"]["services"]:
+            if http_ok(svc["healthUrl"]):
+                raise RuntimeFailed(
+                    f"{svc['healthUrl']} already responds: stop whatever uses that port first, "
+                    "otherwise the facts would be checked against the wrong process"
+                )
+            log = self.run.logs / f"runtime-{svc['name']}.log"
+            fh = open(log, "w", encoding="utf-8")
+            say(dim(f"  starting {svc['name']}: {svc['cmd']}"))
+            proc = subprocess.Popen(
+                svc["cmd"], shell=True, cwd=str(ROOT / svc["cwd"]),
+                env=build_env(svc.get("env"), svc.get("pathPrepend")),
+                stdout=fh, stderr=subprocess.STDOUT, start_new_session=True,
+            )
+            self.procs.append((svc["name"], proc, fh))
+            deadline = time.time() + svc.get("startTimeoutSeconds", 60)
+            while time.time() < deadline:
+                if proc.poll() is not None:
+                    raise RuntimeFailed(f"{svc['name']} exited early (code {proc.returncode})\n{tail_lines(log, 40)}")
+                if http_ok(svc["healthUrl"]):
+                    break
+                time.sleep(0.5)
+            else:
+                raise RuntimeFailed(f"{svc['name']} did not become healthy at {svc['healthUrl']}\n{tail_lines(log, 40)}")
+
+    def _save_logs(self) -> None:
+        spec = self.cfg["runtime"]["docker"]
+        run_shell(spec["logs"], ROOT, self.run.logs / "runtime-compose.log", env=os.environ.copy(), timeout=120)
+
+    def __exit__(self, *exc) -> None:
+        if self.mode == "docker" and shutil.which("docker"):
+            self._save_logs()
+            run_shell(self.cfg["runtime"]["docker"]["down"], ROOT, self.run.logs / "runtime-down.log", env=os.environ.copy(), timeout=300)
+        for _name, proc, fh in reversed(self.procs):
+            kill_group(proc)
+            fh.close()
+        self.procs = []
+
+
+# --------------------------------------------------------------------------- facts
+
+
+AC_LINE = re.compile(r"^\s*[-*]\s+\*\*(AC-\d+)\*\*\s*(.*)$", re.M)
+
+
+def load_specs(cfg: dict) -> list:
+    specs_dir = ROOT / cfg["facts"]["specsDir"]
+    specs = []
+    for d in sorted(p for p in specs_dir.iterdir() if p.is_dir() and not p.name.startswith("_")) if specs_dir.is_dir() else []:
+        spec = {"feature": d.name.split("-", 2)[0] + "-" + d.name.split("-", 2)[1] if d.name.startswith("FEAT-") else d.name,
+                "dir": d, "acs": {}, "checks": [], "errors": []}
+        prd, acc = d / "prd.md", d / "acceptance.json"
+        if prd.exists():
+            spec["acs"] = {m.group(1): m.group(2).strip() for m in AC_LINE.finditer(prd.read_text())}
+            if "TODO(prd)" in prd.read_text():
+                spec["errors"].append("prd.md still contains TODO(prd) placeholders: the PRD is not finished")
+        else:
+            spec["errors"].append("prd.md is missing")
+        if acc.exists():
+            try:
+                data = json.loads(acc.read_text())
+                spec["checks"] = data.get("checks", [])
+                if data.get("feature") and data["feature"] != spec["feature"]:
+                    spec["errors"].append(f"acceptance.json feature '{data['feature']}' != folder '{spec['feature']}'")
+            except json.JSONDecodeError as e:
+                spec["errors"].append(f"acceptance.json is not valid JSON: {e}")
+        else:
+            spec["errors"].append("acceptance.json is missing")
+        specs.append(spec)
+    return specs
+
+
+def traceability(spec: dict) -> tuple:
+    """Every acceptance criterion needs at least one check; every check must point at a real criterion."""
+    errors = list(spec["errors"])
+    if not spec["acs"] and not errors:
+        errors.append("prd.md defines no acceptance criteria (lines like '- **AC-001** Given ... When ... Then ...')")
+    covered, seen = set(), set()
+    for chk in spec["checks"]:
+        cid = chk.get("id", "?")
+        if cid in seen:
+            errors.append(f"duplicate check id {cid}")
+        seen.add(cid)
+        if not chk.get("covers"):
+            errors.append(f"check {cid} covers no acceptance criterion")
+        for ac in chk.get("covers", []):
+            if ac not in spec["acs"]:
+                errors.append(f"check {cid} covers unknown criterion {ac}")
+            covered.add(ac)
+        if chk.get("type") not in ("http", "cmd", "file"):
+            errors.append(f"check {cid} has unknown type {chk.get('type')!r}")
+    for ac in spec["acs"]:
+        if ac not in covered:
+            errors.append(f"{ac} has no check: an unverified requirement is not done")
+    return (not errors), errors
+
+
+def match(expected, actual, path: str = "$") -> list:
+    """Subset match. Strings may be matchers: $exists, $re:<regex>, $type:<string|number|boolean|array|object|null>."""
+    if isinstance(expected, dict):
+        if not isinstance(actual, dict):
+            return [f"{path}: expected an object, got {type(actual).__name__}"]
+        out: list = []
+        for k, v in expected.items():
+            if k not in actual:
+                out.append(f"{path}.{k}: missing")
+            else:
+                out += match(v, actual[k], f"{path}.{k}")
+        return out
+    if isinstance(expected, list):
+        if not isinstance(actual, list) or len(actual) != len(expected):
+            return [f"{path}: expected a list of {len(expected)} items, got {actual!r}"]
+        out = []
+        for i, (e, a) in enumerate(zip(expected, actual)):
+            out += match(e, a, f"{path}[{i}]")
+        return out
+    if isinstance(expected, str) and expected.startswith("$"):
+        if expected == "$exists":
+            return []
+        if expected.startswith("$re:"):
+            return [] if re.search(expected[4:], str(actual)) else [f"{path}: {actual!r} does not match /{expected[4:]}/"]
+        if expected.startswith("$type:"):
+            names = {"string": str, "number": (int, float), "boolean": bool, "array": list, "object": dict, "null": type(None)}
+            want = expected[6:]
+            good = isinstance(actual, names.get(want, object)) and not (want == "number" and isinstance(actual, bool))
+            return [] if good else [f"{path}: expected type {want}, got {type(actual).__name__}"]
+    return [] if expected == actual else [f"{path}: expected {expected!r}, got {actual!r}"]
+
+
+def check_http(chk: dict, base: str) -> tuple:
+    url = base.rstrip("/") + chk.get("path", "/")
+    headers = dict(chk.get("headers", {}))
+    data = None
+    if "body" in chk:
+        data = json.dumps(chk["body"]).encode()
+        headers.setdefault("Content-Type", "application/json")
+    attempts, last_err = int(chk.get("retries", 4)), ""
+    for attempt in range(attempts):
+        t0 = time.time()
+        try:
+            req = urllib.request.Request(url, data=data, method=chk.get("method", "GET"), headers=headers)
+            try:
+                resp = urllib.request.urlopen(req, timeout=chk.get("timeoutSeconds", 10))  # noqa: S310
+                status, body, hdrs = resp.status, resp.read(), resp.headers
+            except urllib.error.HTTPError as e:
+                status, body, hdrs = e.code, e.read(), e.headers
+        except (urllib.error.URLError, OSError) as e:  # connection problems are retried; assertion failures are not
+            last_err = str(getattr(e, "reason", e))
+            time.sleep(1.5 * (attempt + 1))
+            continue
+        ms = (time.time() - t0) * 1000
+        text = body.decode("utf-8", errors="replace")
+        exp, problems = chk.get("expect", {"status": 200}), []
+        want = exp.get("status", 200)
+        if status not in (want if isinstance(want, list) else [want]):
+            problems.append(f"status {status}, expected {want}")
+        if "json" in exp:
+            try:
+                problems += match(exp["json"], json.loads(text))
+            except json.JSONDecodeError:
+                problems.append(f"body is not JSON: {text[:80]!r}")
+        for needle in ([exp["bodyContains"]] if isinstance(exp.get("bodyContains"), str) else exp.get("bodyContains", [])):
+            if needle not in text:
+                problems.append(f"body does not contain {needle!r}")
+        for k, v in exp.get("headers", {}).items():
+            problems += match(v, hdrs.get(k), f"header[{k}]") if hdrs.get(k) is not None else [f"header[{k}] missing"]
+        if "maxMs" in exp and ms > exp["maxMs"]:
+            problems.append(f"took {ms:.0f}ms, budget {exp['maxMs']}ms")
+        return (not problems), (f"{chk.get('method', 'GET')} {url} -> {status} in {ms:.0f}ms" if not problems else "; ".join(problems) + f"  [{url}]")
+    return False, f"could not reach {url}: {last_err}"
+
+
+def check_cmd(chk: dict, run: Run, key: str) -> tuple:
+    log = run.logs / f"fact-{re.sub(r'[^A-Za-z0-9_.-]', '_', key)}.log"
+    code = run_shell(chk["run"], ROOT / chk.get("cwd", "."), log, env=build_env(chk.get("env"), chk.get("pathPrepend")), timeout=chk.get("timeoutSeconds", 120))
+    out, problems = tail_lines(log, 400), []
+    if code != chk.get("expectExit", 0):
+        problems.append(f"exit {code}, expected {chk.get('expectExit', 0)}")
+    for needle in chk.get("stdoutContains", []):
+        if needle not in out:
+            problems.append(f"output does not contain {needle!r}")
+    return (not problems), ("; ".join(problems) if problems else f"exit {code}")
+
+
+def check_file(chk: dict) -> tuple:
+    p = ROOT / chk["path"]
+    if not chk.get("exists", True):
+        return (not p.exists()), ("absent" if not p.exists() else f"{chk['path']} must not exist")
+    if not p.exists():
+        return False, f"{chk['path']} does not exist"
+    text, problems = p.read_text(errors="replace"), []
+    for needle in chk.get("contains", []):
+        if needle not in text:
+            problems.append(f"does not contain {needle!r}")
+    if "regex" in chk and not re.search(chk["regex"], text, re.M):
+        problems.append(f"does not match /{chk['regex']}/")
+    return (not problems), ("; ".join(problems) if problems else "present")
+
+
+def run_facts(cfg: dict, run: Run, opts: argparse.Namespace) -> list:
+    specs = load_specs(cfg)
+    if opts.feature:
+        specs = [s for s in specs if s["feature"] == opts.feature or s["dir"].name == opts.feature]
+        if not specs:
+            run.add({"kind": "fact", "id": "facts.spec", "label": f"feature {opts.feature} exists", "status": "fail", "required": True,
+                     "detail": f"no folder for {opts.feature} under {cfg['facts']['specsDir']}/"})
+            show(run.items[-1])
+            return specs
+    if not specs:
+        run.add({"kind": "fact", "id": "facts.spec", "label": "at least one feature spec exists", "status": "fail", "required": True,
+                 "detail": f"no spec folders under {cfg['facts']['specsDir']}/; run ./scripts/sdlc new <slug>"})
+        show(run.items[-1])
+        return specs
+
+    for spec in specs:
+        good, errors = traceability(spec)
+        item = run.add({"kind": "fact", "id": f"{spec['feature']}:traceability", "label": f"{spec['feature']} every criterion has a check",
+                        "status": "pass" if good else "fail", "required": True, "feature": spec["feature"], "covers": [],
+                        "detail": "; ".join(errors) if errors else f"{len(spec['acs'])} criteria, {len(spec['checks'])} checks"})
+        if not good:
+            item["tail"] = "\n".join(f"- {e}" for e in errors)
+        show(item)
+
+    runnable = [(s, ch) for s in specs for ch in s["checks"]]
+    mode = opts.runtime or cfg["runtime"]["mode"]
+    base_urls = dict(cfg["runtime"]["targets"])
+    base_urls.update(dict(kv.split("=", 1) for kv in (opts.base_url or [])))
+
+    # Verifying a live environment: only checks that talk to the deployed system make sense there.
+    deployed = bool(opts.no_runtime and opts.base_url)
+
+    def execute(provides: set) -> None:
+        for spec, chk in runnable:
+            key = f"{spec['feature']}:{chk.get('id', '?')}"
+            item = {"kind": "fact", "id": key, "label": chk.get("name", chk.get("id", "")), "required": True, "feature": spec["feature"],
+                    "covers": chk.get("covers", []), "status": "pass", "detail": ""}
+            needs = set(chk.get("needs", []))
+            if chk.get("type") == "http":
+                needs.add(chk.get("target", ""))
+            missing = sorted(n for n in needs if n and n not in provides)
+            t0 = time.time()
+            if deployed and chk.get("type") in ("cmd", "file"):
+                item.update(status="skip", notApplicable=True, detail="build-time check (repository), not applicable to a deployed environment")
+            elif missing:
+                item.update(status="skip", detail=f"needs {', '.join(missing)}, not provided by this runtime ({mode})")
+            elif chk.get("type") == "http":
+                good, detail = check_http(chk, base_urls.get(chk.get("target", ""), ""))
+                item.update(status="pass" if good else "fail", detail=detail)
+            elif chk.get("type") == "cmd":
+                good, detail = check_cmd(chk, run, key)
+                item.update(status="pass" if good else "fail", detail=detail)
+            elif chk.get("type") == "file":
+                good, detail = check_file(chk)
+                item.update(status="pass" if good else "fail", detail=detail)
+            item["seconds"] = round(time.time() - t0, 1)
+            if item["status"] == "fail":
+                item["tail"] = item["detail"]
+            run.add(item)
+            show(item)
+
+    needs_runtime = any(ch.get("type") == "http" or ch.get("needs") for _s, ch in runnable)
+    if opts.no_runtime or mode == "none" or not needs_runtime:
+        if opts.no_runtime:
+            # Explicit --base-url means "only these targets exist" (e.g. a deployed environment).
+            overridden = {kv.split("=", 1)[0] for kv in (opts.base_url or [])}
+            provided = (overridden or set(base_urls)) | set(opts.provides or [])
+        else:
+            provided = set()
+        execute(provided)
+    else:
+        try:
+            with Runtime(cfg, mode, run) as rt:
+                execute(rt.provides)
+        except RuntimeFailed as e:
+            item = run.add({"kind": "fact", "id": "runtime.up", "label": f"start the system under test ({mode})", "status": "fail",
+                            "required": True, "detail": str(e).splitlines()[0], "tail": str(e)})
+            show(item)
+            run.notes.append("Runtime failed to start, so runtime-dependent facts were NOT verified (this counts as a failure).")
+    return specs
+
+
+# --------------------------------------------------------------------------- pipeline
+
+
+def run_verify(cfg: dict, label: str, args: argparse.Namespace, *, with_facts: bool = True) -> tuple:
+    run = Run(label)
+    fail_fast = cfg["loop"]["failFast"] and not getattr(args, "keep_going", False)
+    only = set(getattr(args, "only", None) or [])
+    stage_filter = getattr(args, "stage", None)
+    specs: list = []
+    for stage in cfg["stages"]:
+        if stage_filter and stage != stage_filter:
+            continue
+        say(c(f"\n== {stage} ==", "1"))
+        if stage == "facts":
+            if not (with_facts and cfg["facts"]["enabled"]):
+                say(dim("  (facts disabled)"))
+                continue
+            specs = run_facts(cfg, run, args)
+        else:
+            gates = [g for g in cfg["gates"] if g["stage"] == stage and (not only or g["id"] in only)]
+            if not gates:
+                say(dim("  (no gates)"))
+            for g in gates:
+                show(run_gate(g, run))
+        if fail_fast and run.required_failures():
+            run.notes.append(f"Stopped after stage '{stage}' (failFast). Later stages did not run.")
+            break
+    run.finish(cfg, specs)
+    return run, specs
+
+
+def summarize(run: Run, cfg: dict) -> bool:
+    good = run.passed(cfg.get("facts", {}).get("strictSkips", False))
+    counts = {k: sum(1 for i in run.items if i["status"] == k) for k in ("pass", "fail", "warn", "skip")}
+    say("")
+    say(f"{ok('VERIFIED') if good else bad('NOT VERIFIED')}  {counts['pass']} passed, {counts['fail']} failed, "
+        f"{counts['warn']} warnings, {counts['skip']} skipped  [{rel(run.dir)}/report.md]")
+    return good
+
+
+def snapshot(paths: list) -> dict:
+    out: dict = {}
+    for p in paths:
+        full = ROOT / p
+        files = [full] if full.is_file() else sorted(f for f in full.rglob("*") if f.is_file() and "__pycache__" not in f.parts) if full.is_dir() else []
+        for f in files:
+            out[rel(f)] = hashlib.sha256(f.read_bytes()).hexdigest()
+    return out
+
+
+def changed(before: dict, after: dict) -> list:
+    return sorted([f"{k} (modified)" for k in before if k in after and before[k] != after[k]]
+                  + [f"{k} (deleted)" for k in before if k not in after]
+                  + [f"{k} (added)" for k in after if k not in before])
+
+
+def fingerprint(run: Run) -> str:
+    parts = []
+    for i in run.required_failures():
+        body = re.sub(r"\d+(\.\d+)?", "N", i.get("tail", "") or i.get("detail", ""))[-1500:]
+        parts.append(i["id"] + "|" + body)
+    return hashlib.sha256("\n".join(sorted(parts)).encode()).hexdigest()[:16]
+
+
+def render_prompt(path: str, values: dict) -> str:
+    text = (ROOT / path).read_text()
+    for k, v in values.items():
+        text = text.replace("{{" + k + "}}", str(v))
+    return text
+
+
+def run_agent(cfg: dict, command: str, prompt: str, tag: str, run_dir: Path) -> int:
+    prompt_file = run_dir / f"{tag}.prompt.md"
+    prompt_file.write_text(prompt)
+    log = run_dir / f"{tag}.agent.log"
+    env = os.environ.copy()
+    env.update({"SDLC_PROMPT_FILE": str(prompt_file), "SDLC_PHASE": tag})
+    say(dim(f"  running agent: {command}"))
+    code = run_shell(command, ROOT, log, env=env, timeout=cfg["agent"]["timeoutSeconds"], stdin_text=prompt)
+    say(dim(f"  agent finished (exit {code}); output: {rel(log)}"))
+    return code
+
+
+def failures_markdown(run: Run) -> str:
+    chunks = []
+    for i in run.required_failures():
+        chunks.append(f"### {i['id']}: {i['label']}\n" + (f"Command: `{i['cmd']}`\n" if i.get("cmd") else "")
+                      + f"Result: {i.get('detail') or 'exit ' + str(i.get('exitCode'))}\n"
+                      + ("```text\n" + i.get("tail", "") + "\n```" if i.get("tail") else ""))
+    return "\n\n".join(chunks)
+
+
+def cmd_loop(cfg: dict, args: argparse.Namespace) -> int:
+    max_iter = args.max or cfg["loop"]["maxIterations"]
+    agent = args.agent if args.agent is not None else os.environ.get("SDLC_AGENT_CMD", cfg["agent"]["command"])
+    integ = cfg["integrity"]
+    base_snap = snapshot(integ["protected"] + integ["protectedWhileHealing"])
+    guarded_snap = snapshot(integ["guarded"])
+    previous, same, history = None, 0, []
+    for i in range(1, max_iter + 1):
+        say(c(f"\n######## loop iteration {i}/{max_iter} ########", "1;36"))
+        run, _ = run_verify(cfg, f"loop{i}", args)
+        if summarize(run, cfg):
+            guard_changes = changed(guarded_snap, snapshot(integ["guarded"]))
+            if guard_changes:
+                say(warn("  guarded verification inputs changed during the loop (review them): " + ", ".join(guard_changes)))
+            return EXIT_OK
+        fp = fingerprint(run)
+        same = same + 1 if fp == previous else 1
+        previous = fp
+        history.append(", ".join(x["id"] for x in run.required_failures()))
+        if same >= cfg["loop"]["noProgressLimit"]:
+            say(bad(f"\nNo progress: the same failure repeated {same}x in a row. Stopping so it can be looked at by a human."))
+            return EXIT_STUCK
+        if i == max_iter:
+            say(bad(f"\nBudget exhausted after {max_iter} iterations. Latest report: {rel(run.dir)}/report.md"))
+            return EXIT_FAIL
+        prompt = render_prompt(cfg["agent"]["prompts"]["heal"], {
+            "iteration": i, "maxIterations": max_iter, "failures": failures_markdown(run),
+            "previousAttempts": "\n".join(f"- iteration {n + 1}: {h}" for n, h in enumerate(history[:-1])) or "none",
+            "feature": getattr(args, "focus", None) or args.feature or "(all)", "changedFiles": git("status", "--short") or "(unknown)",
+            "report": f"{rel(run.dir)}/report.md",
+        })
+        if not agent:
+            path = run.dir / f"heal-{i}.prompt.md"
+            path.write_text(prompt)
+            say(warn(f"\nNo agent configured. Fix the failures above (prompt for your AI assistant: {rel(path)})."))
+            if sys.stdin.isatty():
+                try:
+                    input("Press Enter to re-verify (Ctrl-C to stop)... ")
+                except (EOFError, KeyboardInterrupt):
+                    return EXIT_HUMAN
+            else:
+                return EXIT_HUMAN
+        else:
+            run_agent(cfg, agent, prompt, f"heal-{i}", run.dir)
+        now = snapshot(integ["protected"] + integ["protectedWhileHealing"])
+        violations = changed(base_snap, now)
+        if violations:
+            say(bad("\nINTEGRITY VIOLATION: files that define what 'correct' means were modified while healing:"))
+            for v in violations:
+                say(bad(f"  - {v}"))
+            say("Healing must fix the code, not the checks. Revert these changes (git checkout -- <path>) and re-run.")
+            (run.dir / "integrity-violation.md").write_text("\n".join(violations))
+            return EXIT_INTEGRITY
+    return EXIT_FAIL
+
+
+# --------------------------------------------------------------------------- commands
+
+
+def cmd_setup(cfg: dict, args: argparse.Namespace) -> int:
+    run = Run("setup")
+    for step in cfg["setup"]:
+        say(f"  {step['label']} ...")
+        log = run.logs / f"{step['id']}.log"
+        code = run_shell(step["cmd"], ROOT / step["cwd"], log, env=os.environ.copy(), timeout=1800)
+        if code != 0:
+            say(bad(f"  FAILED ({step['id']}):\n{tail_lines(log, 30)}"))
+            return EXIT_FAIL
+    say(ok("setup complete"))
+    return EXIT_OK
+
+
+def cmd_doctor(cfg: dict, args: argparse.Namespace) -> int:
+    needed = {"git": True, "python3": True}
+    if any(s["toolchain"] == "node" for s in cfg["setup"]):
+        needed.update({"node": True, "npm": True})
+    if cfg["runtime"]["mode"] == "docker":
+        needed["docker"] = True
+    bad_count = 0
+    for tool, required in needed.items():
+        path = shutil.which(tool)
+        version = ""
+        if path:
+            with contextlib.suppress(Exception):
+                version = subprocess.run([tool, "--version"], capture_output=True, text=True, timeout=10).stdout.strip().splitlines()[0]
+        say(f"  {ok('ok  ') if path else bad('MISS')}  {tool:8} {version}")
+        bad_count += 0 if path else 1
+    say("")
+    say(ok("toolchain ready") if not bad_count else bad(f"{bad_count} required tool(s) missing"))
+    return EXIT_OK if not bad_count else EXIT_FAIL
+
+
+def cmd_gates(cfg: dict, args: argparse.Namespace) -> int:
+    run, _ = run_verify(cfg, "gates", args, with_facts=False)
+    return EXIT_OK if summarize(run, cfg) else EXIT_FAIL
+
+
+def cmd_facts(cfg: dict, args: argparse.Namespace) -> int:
+    run = Run(args.label or "facts")
+    say(c("\n== facts ==", "1"))
+    specs = run_facts(cfg, run, args)
+    run.finish(cfg, specs)
+    return EXIT_OK if summarize(run, cfg) else EXIT_FAIL
+
+
+def cmd_verify(cfg: dict, args: argparse.Namespace) -> int:
+    run, _ = run_verify(cfg, args.label or "verify", args)
+    return EXIT_OK if summarize(run, cfg) else EXIT_FAIL
+
+
+def next_feature_id(cfg: dict) -> str:
+    nums = [int(m.group(1)) for p in (ROOT / cfg["facts"]["specsDir"]).glob("FEAT-*") if (m := re.match(r"FEAT-(\d+)", p.name))]
+    return f"FEAT-{(max(nums) + 1) if nums else 1:03d}"
+
+
+def slugify(s: str) -> str:
+    return re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9]+", "-", s.lower())).strip("-") or "feature"
+
+
+def cmd_new(cfg: dict, args: argparse.Namespace) -> int:
+    base = ROOT / cfg["facts"]["specsDir"]
+    slug, title = slugify(args.slug), args.title or args.slug.replace("-", " ").title()
+    existing = [p for p in base.glob("FEAT-*") if p.name.split("-", 2)[2] == slug]
+    if existing:
+        say(f"spec already exists: {rel(existing[0])}")
+        return EXIT_OK
+    fid = next_feature_id(cfg)
+    dest = base / f"{fid}-{slug}"
+    shutil.copytree(base / "_template", dest)
+    for f in dest.iterdir():
+        f.write_text(f.read_text().replace("{{ID}}", fid).replace("{{TITLE}}", title).replace("{{SLUG}}", slug))
+    say(ok(f"created {rel(dest)}/  (edit prd.md + acceptance.json, or run: ./scripts/sdlc feature {fid})"))
+    return EXIT_OK
+
+
+def find_spec(cfg: dict, ref: str) -> Path | None:
+    base = ROOT / cfg["facts"]["specsDir"]
+    for p in sorted(base.glob("FEAT-*")):
+        if ref in (p.name, p.name.split("-", 2)[0] + "-" + p.name.split("-", 2)[1], p.name.split("-", 2)[2]):
+            return p
+    return None
+
+
+def cmd_feature(cfg: dict, args: argparse.Namespace) -> int:
+    agent = args.agent if args.agent is not None else os.environ.get("SDLC_AGENT_CMD", cfg["agent"]["command"])
+    say(c(f"\n=== PRD: {args.name} ===", "1;35"))
+    spec = find_spec(cfg, args.name)
+    if spec is None:
+        if re.fullmatch(r"FEAT-\d+", args.name):
+            die(f"no spec folder for {args.name} under {cfg['facts']['specsDir']}/")
+        cmd_new(cfg, argparse.Namespace(slug=args.name, title=None))
+        spec = find_spec(cfg, slugify(args.name))
+    assert spec is not None
+    fid = spec.name.split("-", 2)[0] + "-" + spec.name.split("-", 2)[1]
+    prd_text = (spec / "prd.md").read_text()
+    if "TODO(prd)" in prd_text:
+        if agent and args.brief:
+            values = {"feature": fid, "specDir": rel(spec), "brief": args.brief}
+            run_agent(cfg, agent, render_prompt(cfg["agent"]["prompts"]["prd"], values), f"prd-{fid}", spec)
+        else:
+            say(warn(f"PRD is a stub: finish {rel(spec)}/prd.md and acceptance.json (skill: .ai/skills/write-prd), then re-run."))
+            say(dim("Tip: configure sdlc.agent.command and pass --brief \"...\" to have the agent draft it."))
+            return EXIT_HUMAN
+    if args.skip_code:
+        say(dim("\n=== CODE: skipped (--skip-code) ==="))
+    else:
+        say(c(f"\n=== CODE: {fid} ===", "1;35"))
+        if agent:
+            values = {"feature": fid, "specDir": rel(spec)}
+            run_agent(cfg, agent, render_prompt(cfg["agent"]["prompts"]["implement"], values), f"code-{fid}", spec)
+        else:
+            say(warn(f"Implement {fid} from {rel(spec)}/prd.md (skill: .ai/skills/implement-feature), then re-run with --skip-code."))
+            return EXIT_HUMAN
+    say(c(f"\n=== TEST: {fid} ===", "1;35"))
+    args.focus = fid  # the loop verifies EVERYTHING (regressions included); the feature only focuses the agent prompt
+    code = cmd_loop(cfg, args)
+    if code != EXIT_OK or not args.deploy:
+        return code
+    say(c(f"\n=== DEPLOY: {args.deploy} ===", "1;35"))
+    return cmd_deploy(cfg, argparse.Namespace(environment=args.deploy, tag=None))
+
+
+def cmd_deploy(cfg: dict, args: argparse.Namespace) -> int:
+    envs = {e["name"]: e for e in cfg["deploy"]["environments"]}
+    if args.environment not in envs:
+        die(f"unknown environment '{args.environment}' (choose: {', '.join(envs)})")
+    tag = args.tag or f"sha-{git('rev-parse', '--short=12', 'HEAD') or 'local'}"
+    script = ROOT / cfg["deploy"]["script"]
+    if not script.exists():
+        die("deployment is not configured (cd.enabled=false at generation time)")
+    say(f"deploying {tag} -> {args.environment} (target: {cfg['deploy']['target']})")
+    code = subprocess.call([str(script), args.environment, tag], cwd=str(ROOT))
+    if code != 0:
+        say(bad("deploy script failed; nothing was verified"))
+        return EXIT_FAIL
+    if cfg["deploy"]["target"] == "none":
+        say(warn("deploy target is 'none' (placeholder): nothing was deployed, so there is no live URL to verify."))
+        return EXIT_OK
+    web_url = envs[args.environment]["url"]
+    run = Run(f"deploy-{args.environment}")
+    say(c("\n== post-deploy facts ==", "1"))
+    ns = argparse.Namespace(feature=None, runtime="none", base_url=[f"web={web_url}"], no_runtime=True, provides=[])
+    specs = run_facts(cfg, run, ns)
+    run.finish(cfg, specs)
+    return EXIT_OK if summarize(run, cfg) else EXIT_FAIL
+
+
+SECRET_PATTERNS = [
+    ("AWS access key id", re.compile(r"AKIA[0-9A-Z]{16}")),
+    ("private key block", re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----")),
+    ("GitHub token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b")),
+    ("Slack token", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}")),
+    ("Anthropic/OpenAI style API key", re.compile(r"\b(?:sk-ant-|sk-)[A-Za-z0-9_-]{24,}")),
+    ("hard-coded credential", re.compile(r"""(?i)\b(?:api[_-]?key|secret|token|passwd|password)\b['"]?\s*[:=]\s*['"](?![$<{%])[^'"\s]{12,}['"]""")),
+]
+SECRET_SKIP_DIRS = {".git", "node_modules", ".venv", ".next", "__pycache__", ".ai/evidence"}
+SECRET_SKIP_FILES = {".env.example", "package-lock.json", "docker-compose.yml"}
+SECRET_BAD_NAMES = re.compile(r"(^|/)(\.env|id_rsa|id_ed25519|.*\.pem|.*\.p12|.*\.pfx)$")
+
+
+def cmd_secrets(cfg: dict, args: argparse.Namespace) -> int:
+    listed = git("ls-files", "-co", "--exclude-standard")
+    if listed:
+        files = [ROOT / f for f in listed.splitlines()]
+    else:
+        files = [p for p in ROOT.rglob("*") if p.is_file() and not (set(p.relative_to(ROOT).parts) & SECRET_SKIP_DIRS)]
+    findings = []
+    for f in files:
+        r = rel(f)
+        if not f.is_file() or any(r.startswith(d + "/") for d in SECRET_SKIP_DIRS) or f.name in SECRET_SKIP_FILES:
+            continue
+        if SECRET_BAD_NAMES.search(r):
+            findings.append(f"{r}: file that should never be committed")
+            continue
+        if f.suffix in (".md", ".png", ".jpg", ".ico", ".zip", ".gz", ".woff2") or f.stat().st_size > 1_000_000:
+            continue
+        try:
+            text = f.read_text(errors="strict")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for n, line in enumerate(text.splitlines(), 1):
+            if "sdlc:allow-secret" in line:
+                continue
+            for name, rx in SECRET_PATTERNS:
+                if rx.search(line):
+                    findings.append(f"{r}:{n}: {name}")
+    if findings:
+        say(bad(f"{len(findings)} possible secret(s):"))
+        for x in findings[:50]:
+            say(f"  - {x}")
+        say("Remove them and rotate anything real. Add '# sdlc:allow-secret' to a line only for a deliberate fake.")
+        return EXIT_FAIL
+    say(ok("no secrets found"))
+    return EXIT_OK
+
+
+def cmd_up(cfg: dict, args: argparse.Namespace) -> int:
+    run = Run("up")
+    mode = cfg["runtime"]["mode"]
+    if mode != "docker":
+        die("`up` is for runtime mode 'docker'; for local mode run the services from .ai/sdlc.json yourself")
+    code = run_shell(cfg["runtime"]["docker"]["up"], ROOT, run.logs / "up.log", env=os.environ.copy(), timeout=1500)
+    say(ok("stack is up") if code == 0 else bad(tail_lines(run.logs / "up.log", 40)))
+    return EXIT_OK if code == 0 else EXIT_FAIL
+
+
+def cmd_down(cfg: dict, args: argparse.Namespace) -> int:
+    run = Run("down")
+    code = run_shell(cfg["runtime"]["docker"]["down"], ROOT, run.logs / "down.log", env=os.environ.copy(), timeout=300)
+    return EXIT_OK if code == 0 else EXIT_FAIL
+
+
+def cmd_report(cfg: dict, args: argparse.Namespace) -> int:
+    path = EVIDENCE / "latest" / "report.md"
+    if not path.exists():
+        die("no report yet: run ./scripts/sdlc verify", EXIT_FAIL)
+    say(path.read_text())
+    return EXIT_OK
+
+
+# --------------------------------------------------------------------------- entry
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="sdlc", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="command", required=True)
+
+    def common(sp: argparse.ArgumentParser, *, facts: bool = True) -> None:
+        sp.add_argument("--stage", help="only this stage")
+        sp.add_argument("--only", action="append", help="only this gate id (repeatable)")
+        sp.add_argument("--keep-going", action="store_true", help="do not stop at the first failing stage")
+        sp.add_argument("--label", help="label for the evidence folder")
+        if facts:
+            facts_opts(sp)
+
+    def facts_opts(sp: argparse.ArgumentParser) -> None:
+        sp.add_argument("--feature", help="only this feature (FEAT-001 or its slug)")
+        sp.add_argument("--runtime", choices=["docker", "local", "none"], help="override runtime mode")
+        sp.add_argument("--no-runtime", action="store_true", help="do not start anything; probe already-running URLs")
+        sp.add_argument("--base-url", action="append", help="target=URL override, e.g. web=https://staging.example.com")
+        sp.add_argument("--provides", action="append", help="capability available without a runtime (e.g. db)")
+
+    sub.add_parser("setup")
+    sub.add_parser("doctor")
+    common(sub.add_parser("gates"), facts=False)
+    f = sub.add_parser("facts")
+    facts_opts(f)
+    f.add_argument("--label")
+    common(sub.add_parser("verify"))
+    lp = sub.add_parser("loop")
+    common(lp)
+    lp.add_argument("--max", type=int, help="override max iterations")
+    lp.add_argument("--agent", help="agent command (reads the prompt on stdin); '' = human in the loop")
+    ft = sub.add_parser("feature")
+    ft.add_argument("name", help="FEAT-001, a slug, or a new feature name")
+    ft.add_argument("--brief", help="one-paragraph description for the agent to draft the PRD from")
+    ft.add_argument("--skip-code", action="store_true")
+    ft.add_argument("--deploy", metavar="ENV", help="deploy to ENV after verification passes")
+    ft.add_argument("--max", type=int)
+    ft.add_argument("--agent")
+    common(ft, facts=False)
+    nw = sub.add_parser("new")
+    nw.add_argument("slug")
+    nw.add_argument("--title")
+    dp = sub.add_parser("deploy")
+    dp.add_argument("environment")
+    dp.add_argument("--tag")
+    sub.add_parser("secrets")
+    sub.add_parser("up")
+    sub.add_parser("down")
+    sub.add_parser("report")
+    return p
+
+
+COMMANDS = {
+    "setup": cmd_setup, "doctor": cmd_doctor, "gates": cmd_gates, "facts": cmd_facts, "verify": cmd_verify, "loop": cmd_loop,
+    "feature": cmd_feature, "new": cmd_new, "deploy": cmd_deploy, "secrets": cmd_secrets, "up": cmd_up, "down": cmd_down, "report": cmd_report,
+}
+
+
+def main(argv: list | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    cfg = load_config()
+    for name, default in (("runtime", None), ("no_runtime", False), ("base_url", None), ("provides", None), ("feature", None)):
+        if not hasattr(args, name):
+            setattr(args, name, default)
+    try:
+        return COMMANDS[args.command](cfg, args)
+    except KeyboardInterrupt:
+        say(warn("\ninterrupted"))
+        return EXIT_HUMAN
+
+
+if __name__ == "__main__":
+    sys.exit(main())

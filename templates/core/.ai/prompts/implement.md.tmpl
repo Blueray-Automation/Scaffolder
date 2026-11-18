@@ -1,0 +1,22 @@
+# Task: implement {{feature}}
+
+Implement the feature specified in `{{specDir}}/` (`prd.md` and `acceptance.json`).
+
+## Read first
+- `AGENTS.md`, then every file in `.ai/rules/`.
+- `.ai/skills/implement-feature/SKILL.md`, `.ai/skills/write-tests/SKILL.md`, and `.ai/skills/define-contract/SKILL.md` if the API changes.
+
+## How to work
+1. List the acceptance criteria (AC-xxx) from `prd.md`. They are the definition of done.
+2. Work in small vertical slices, test first: write the failing test for one AC, make it pass, refactor.
+3. If the HTTP API changes, update the contract deliberately (see the define-contract skill).
+4. Every AC must be proven by `acceptance.json` checks (HTTP/cmd/file). Add or refine checks only for THIS feature's spec.
+5. Run `./scripts/sdlc gates` while you work and `./scripts/sdlc verify` before you finish.
+
+## Rules
+- Do not touch `.ai/sdlc.json`, `scripts/sdlc*`, `.github/workflows/`, or other features' specs.
+- No placeholder implementations, no skipped tests, no commented-out code, no secrets.
+- Keep changes scoped to this feature.
+
+## Final message
+List each AC with the test(s) and check id(s) that prove it, plus anything you could not verify and why.

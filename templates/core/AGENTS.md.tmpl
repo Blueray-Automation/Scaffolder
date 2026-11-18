@@ -1,0 +1,73 @@
+# AGENTS.md: how to work in this repository
+
+This file is for any AI coding agent (and any human). It is tool-neutral on purpose.
+Project: **<%title%>**: <%description%>
+
+## The one rule
+**"Done" means `./scripts/sdlc verify` exits 0 and you can show its report.** Not "the code looks right", not "tests I wrote pass".
+The report is `.ai/evidence/latest/report.md`. If you cannot run something, say so; never claim it passed.
+
+## Workflow: PRD -> Code -> Test -> Deploy
+| Phase | What you do | Where the procedure lives |
+|---|---|---|
+| PRD | Write acceptance criteria (`AC-xxx`) and the checks that prove them | `.ai/skills/write-prd/`, `.ai/rules/prd.md` |
+| Contract | Define the API before code | `.ai/skills/define-contract/`, `.ai/rules/contract.md` |
+| Code | Small vertical slices, test first | `.ai/skills/implement-feature/`, `.ai/rules/*` |
+| Test | Run the loop until green | `.ai/skills/verify-loop/`, `.ai/skills/fix-failing-gate/` |
+| Deploy | Tag, let CD promote, verify the live URL | `.ai/skills/release-and-deploy/` |
+
+Start a feature: `./scripts/sdlc new <slug>` (creates `.ai/specs/FEAT-xxx-<slug>/`) then `./scripts/sdlc feature FEAT-xxx`.
+Worked example: `.ai/specs/FEAT-000-hello-world/`.
+
+## Commands
+```bash
+./scripts/sdlc setup      # install dependencies
+./scripts/sdlc doctor     # check the toolchain
+./scripts/sdlc gates      # lint, types, unit tests, build, contract, security
+./scripts/sdlc facts      # PRD acceptance criteria vs the RUNNING system (<%runtimeMode%> runtime)
+./scripts/sdlc verify     # gates + facts: exactly what CI runs
+./scripts/sdlc loop       # verify -> heal -> verify (max <%maxIterations%> iterations)
+```
+Single gate while iterating: `./scripts/sdlc gates --only <id>`. `make help` lists the same commands.
+
+## Gates (defined once in `.ai/sdlc.json`, mirrored in CI)
+| Stage | Gate | Command | Required |
+|---|---|---|---|
+<%#gates%>
+| <%stage%> | `<%id%>` | `<%cmd%>` (in `<%cwd%>`) | <%required%> |
+<%/gates%>
+
+## Layout
+```
+.ai/            rules/ skills/ prompts/ specs/ contract/   <- the AI operating system of this repo
+scripts/        sdlc, sdlc.py                              <- the verification loop (stdlib-only Python)
+<%#hasBackend%>
+<%backendDir%>/        FastAPI service (Python <%pythonVersion%>)
+<%/hasBackend%>
+<%#hasWeb%>
+<%webDir%>/            Next.js app (Node <%nodeVersion%>, TypeScript)
+<%/hasWeb%>
+<%#hasDocker%>
+docker-compose.yml   full stack, also used by the facts stage
+<%/hasDocker%>
+<%#hasCi%>
+.github/workflows/   ci.yml<%#hasCd%> + cd.yml (build once, promote through <%#environments%><%name%> <%/environments%>)<%/hasCd%>
+<%/hasCi%>
+```
+
+## Hard constraints
+1. Never edit the machinery that defines "correct": `.ai/sdlc.json`, `scripts/sdlc*`, `.github/workflows/`. While healing, also never edit `.ai/specs/`. The loop detects this and stops (exit 4).
+2. Never delete, skip or weaken a test or a threshold to get green. Fix the code.
+3. Never change `.ai/contract/openapi.json` to hide drift. It changes only when the PRD changes the API.
+4. No secrets in the repo (`./scripts/sdlc secrets` enforces it). Config comes from environment variables; see `.env.example`.
+5. One feature per branch/PR; reference the `FEAT-xxx` id. Conventional Commits (`feat:`, `fix:`, `chore:`).
+6. If the spec is ambiguous or seems wrong, stop and ask. Do not guess requirements.
+
+## When verification fails
+Read `.ai/skills/fix-failing-gate/SKILL.md`. In short: reproduce, find the root cause, smallest fix in code, re-run the gate, then the full `verify`.
+The loop stops on its own after `<%noProgressLimit%>` identical failures in a row (exit 3) or `<%maxIterations%>` iterations (exit 1): a human looks at it then.
+
+## Agent integration
+`.ai/sdlc.json` -> `agent.command` is a shell command that reads the prompt on stdin<%#agentConfigured%> (currently `<%agentCommand%>`)<%/agentConfigured%><%^agentConfigured%> (currently empty: the loop prints the prompt and waits for you)<%/agentConfigured%>.
+Override per run: `SDLC_AGENT_CMD='<your-agent-cli>' ./scripts/sdlc loop`. Prompts: `.ai/prompts/`.
+Skills are plain Markdown in `.ai/skills/<name>/SKILL.md` (frontmatter: name, description). To expose them to a tool that expects another folder, symlink it, e.g. `ln -s ../.ai/skills .claude/skills`.

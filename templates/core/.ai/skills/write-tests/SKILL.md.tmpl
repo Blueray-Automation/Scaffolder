@@ -1,0 +1,28 @@
+---
+name: write-tests
+description: Write meaningful unit and API tests (behaviour-named, deterministic, covering edge and error paths) that raise coverage with real signal. Use when adding behaviour or when a coverage gate fails.
+---
+
+# Write tests that can fail
+
+## Checklist for every behaviour
+- Happy path
+- Each validation rule (one test per rule)
+- Boundaries: 0, 1, max, max+1, empty, whitespace, unicode
+- Error paths: not found, conflict, dependency down
+- Idempotency / repeated calls where relevant
+
+## How
+- Name by behaviour: `test_hello_uses_default_name_when_missing`.
+- Arrange / Act / Assert, one reason to fail.
+- Test through the public interface (HTTP client / component render), not private helpers.
+- Fake only at the boundary (database, network, clock). Do not mock the unit under test.
+- Assert on outcomes (status, body, rendered text), not on call counts.
+
+## When coverage is below the floor
+Look at the uncovered lines in the gate output. For each: is it reachable behaviour (write the test) or dead code (delete it)? Never lower the threshold or exclude files to get green.
+
+## Verify the test is real
+Temporarily break the code under test. The test must fail. Restore the code.
+
+Reference: `.ai/rules/testing.md`.

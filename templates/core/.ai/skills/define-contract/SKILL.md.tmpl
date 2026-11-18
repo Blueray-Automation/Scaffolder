@@ -1,0 +1,22 @@
+---
+name: define-contract
+description: Design the HTTP API contract (schemas, status codes, errors) before implementing, and keep the committed OpenAPI snapshot in sync. Use when a feature adds or changes an endpoint.
+---
+
+# Define the contract first
+
+## Steps
+1. From the PRD's acceptance criteria, list endpoints: method, path (`/api/v1/...`), request, response, every status code, error body.
+2. Write the typed models first (<%#hasBackend%>`<%backendDir%>/app/schemas/`<%/hasBackend%>): constraints in the type (`min_length`, `ge`, enums), not in handler code.
+3. Add the route with the response model and `responses=` for each documented error. Handlers stay thin: parse -> call service/repository -> return.
+4. Write tests from the contract (status, body shape, each validation rule).
+5. Intentional API change? Regenerate the snapshot and review the diff line by line:
+   `<%#hasBackend%>cd <%backendDir%> && python -m app.export_openapi --write <%openapiFromBackend%><%/hasBackend%>`
+6. `./scripts/sdlc gates --only backend.contract` must pass; the PR description lists every contract change.
+
+## Rules
+- Never edit the snapshot by hand and never regenerate it to silence a failing gate you do not understand.
+- Additive changes are fine within a version; renames, removals and type changes need `/api/v2`.
+- Update client types (web/mobile) in the same PR as the contract change.
+
+Reference: `.ai/rules/contract.md`.

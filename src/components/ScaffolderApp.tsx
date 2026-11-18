@@ -1,721 +1,247 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useDeferredValue, useMemo, useRef, useState } from "react";
+import { AlertTriangle, Check, CircleAlert, Copy, Cpu, Download, FileCog, FolderTree, Terminal, Upload } from "lucide-react";
+import { parse } from "yaml";
 import {
-  Box,
-  Check,
-  Code2,
-  Copy,
-  Cpu,
-  Database,
-  Download,
-  FileCode2,
-  FolderTree,
-  GitBranch,
-  Layers,
-  Play,
-  RefreshCw,
-  Server,
-  ShieldCheck,
-  Smartphone,
-  Terminal,
-  Globe,
-} from "lucide-react";
-import {
-  ArchitectureType,
-  AuthType,
-  BackendLang,
-  CacheType,
-  CiProvider,
-  DatabaseType,
-  FrontendFramework,
-  MobileFramework,
-  ScaffolderConfig,
-} from "@/lib/types";
-import {
-  generateCiYaml,
-  generateDirectoryTree,
-  generateDockerCompose,
-  generateFeatureRunner,
-  generateInitScript,
-  sanitizeName,
-} from "@/lib/generators";
+  configToYaml,
+  deepMerge,
+  defaultConfig,
+  generateProject,
+  hasErrors,
+  resolveConfig,
+  toZip,
+  type GenerateResult,
+  type ScaffolderConfig,
+} from "@/engine";
+import { cx, downloadBlob } from "@/lib/utils";
+import { ConfigForm } from "./ConfigForm";
+import { FileExplorer } from "./FileExplorer";
+import { Badge, Button } from "./ui";
 
-type ArtifactTab = "init" | "feature" | "docker" | "ci" | "tree";
+type Tab = "files" | "config" | "cli";
 
-const BACKEND_OPTIONS: Record<
-  BackendLang,
-  { label: string; frameworks: string[]; versions: string[] }
-> = {
-  python: {
-    label: "Python",
-    frameworks: ["FastAPI", "Django Ninja", "Flask"],
-    versions: ["3.12", "3.11", "3.13", "3.10"],
-  },
-  java: {
-    label: "Java",
-    frameworks: ["Spring Boot 3.3", "Quarkus", "Micronaut"],
-    versions: ["21", "17"],
-  },
-  node: {
-    label: "Node.js",
-    frameworks: ["NestJS", "Fastify", "Express"],
-    versions: ["22", "20"],
-  },
-  go: {
-    label: "Go",
-    frameworks: ["Gin", "Fiber", "Chi"],
-    versions: ["1.23", "1.22"],
-  },
-};
+const PRESETS: Array<{ id: string; label: string; hint: string; patch: Record<string, unknown> }> = [
+  { id: "fullstack", label: "Full-stack", hint: "FastAPI + Next.js + PostgreSQL", patch: {} },
+  { id: "api", label: "API + database", hint: "FastAPI + PostgreSQL", patch: { web: { enabled: false } } },
+  { id: "api-lite", label: "API only", hint: "FastAPI, no database", patch: { web: { enabled: false }, database: { type: "none" } } },
+];
+
+function safeGenerate(config: ScaffolderConfig): { result?: GenerateResult; crash?: string } {
+  try {
+    return { result: generateProject(config) };
+  } catch (e) {
+    return { crash: e instanceof Error ? e.message : String(e) };
+  }
+}
 
 export default function ScaffolderApp() {
-  const [config, setConfig] = useState<ScaffolderConfig>({
-    projectName: "acme-platform",
-    architecture: "fullstack-mobile",
-    includeBackend: true,
-    backendLang: "python",
-    backendFramework: "FastAPI",
-    backendVersion: "3.12",
-    database: "postgres",
-    cache: "redis",
-    auth: "jwt",
-    includeWeb: true,
-    webFramework: "vue",
-    webTypescript: true,
-    includeMobile: true,
-    mobileFramework: "flutter",
-    mobileStateMgmt: "BLoC",
-    includeDocker: true,
-    ciProvider: "github-actions",
-    maxHealingLoops: 3,
-  });
-
-  const [activeTab, setActiveTab] = useState<ArtifactTab>("init");
+  const [config, setConfig] = useState<ScaffolderConfig>(() => defaultConfig());
+  const [tab, setTab] = useState<Tab>("files");
   const [copied, setCopied] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
 
-  const handleArchitecturePreset = (arch: ArchitectureType) => {
-    if (arch === "microservice") {
-      setConfig((prev) => ({
-        ...prev,
-        architecture: arch,
-        includeBackend: true,
-        includeWeb: false,
-        includeMobile: false,
-      }));
-    } else if (arch === "fullstack") {
-      setConfig((prev) => ({
-        ...prev,
-        architecture: arch,
-        includeBackend: true,
-        includeWeb: true,
-        includeMobile: false,
-      }));
-    } else if (arch === "fullstack-mobile") {
-      setConfig((prev) => ({
-        ...prev,
-        architecture: arch,
-        includeBackend: true,
-        includeWeb: true,
-        includeMobile: true,
-      }));
-    } else {
-      setConfig((prev) => ({
-        ...prev,
-        architecture: arch,
-        includeBackend: true,
-        includeWeb: true,
-        includeMobile: false,
-      }));
+  const deferred = useDeferredValue(config);
+  const { result, crash } = useMemo(() => safeGenerate(deferred), [deferred]);
+  const resolved = useMemo(() => resolveConfig(deferred), [deferred]);
+  const yaml = useMemo(() => configToYaml(resolved), [resolved]);
+
+  const issues = result?.issues ?? [];
+  const errors = issues.filter((i) => i.level === "error");
+  const warnings = issues.filter((i) => i.level === "warning");
+  const files = result?.files ?? [];
+  const ready = !crash && result && !hasErrors(issues);
+  const slug = resolved.project.name;
+
+  const downloadZip = () => {
+    if (!ready) return;
+    downloadBlob(toZip(files, slug) as BlobPart, `${slug}.zip`, "application/zip");
+  };
+
+  const copyYaml = async () => {
+    try {
+      await navigator.clipboard.writeText(yaml);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable */
     }
   };
 
-  const handleBackendLangChange = (lang: BackendLang) => {
-    const meta = BACKEND_OPTIONS[lang];
-    setConfig((prev) => ({
-      ...prev,
-      backendLang: lang,
-      backendFramework: meta.frameworks[0],
-      backendVersion: meta.versions[0],
-    }));
+  const loadFile = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const parsed: unknown = parse(await file.text());
+      setConfig(resolveConfig(parsed ?? {}));
+      setLoadError(null);
+    } catch (e) {
+      setLoadError(`Could not read ${file.name}: ${e instanceof Error ? e.message : "invalid YAML"}`);
+    }
   };
 
-  const artifacts = useMemo(() => {
-    return {
-      init: generateInitScript(config),
-      feature: generateFeatureRunner(config),
-      docker: generateDockerCompose(config),
-      ci: generateCiYaml(config),
-      tree: generateDirectoryTree(config),
-    };
-  }, [config]);
-
-  const currentContent = artifacts[activeTab];
-
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(currentContent);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1800);
-  };
-
-  const handleDownload = () => {
-    const filenameMap: Record<ArtifactTab, string> = {
-      init: "init-project.sh",
-      feature: "feature-runner.sh",
-      docker: "docker-compose.yml",
-      ci: "ci.yml",
-      tree: `${sanitizeName(config.projectName)}-structure.txt`,
-    };
-    const blob = new Blob([currentContent], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filenameMap[activeTab];
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
+  const tabs: Array<{ id: Tab; label: string; icon: React.ReactNode }> = [
+    { id: "files", label: `Files${ready ? ` (${files.length})` : ""}`, icon: <FolderTree className="h-3.5 w-3.5" /> },
+    { id: "config", label: "scaffolder.config.yaml", icon: <FileCog className="h-3.5 w-3.5" /> },
+    { id: "cli", label: "Command line", icon: <Terminal className="h-3.5 w-3.5" /> },
+  ];
 
   return (
-    <div className="min-h-screen flex flex-col">
-      {/* Top Navigation Bar */}
-      <header className="border-b border-zinc-800 bg-zinc-950/90 backdrop-blur sticky top-0 z-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+    <div className="flex min-h-screen flex-col">
+      <header className="sticky top-0 z-20 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur">
+        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
           <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-lg bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
-              <Cpu className="w-5 h-5" />
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-indigo-500/40 bg-indigo-600/20 text-indigo-400">
+              <Cpu className="h-5 w-5" aria-hidden />
             </div>
             <div>
-              <h1 className="text-base font-semibold tracking-tight text-zinc-100">
-                AI SDLC Project Scaffolder
-              </h1>
-              <p className="text-xs text-zinc-400">
-                Standardized Boilerplate + 4-Phase Loop Engineering Generator
-              </p>
+              <h1 className="text-base font-semibold tracking-tight text-zinc-100">Scaffolder</h1>
+              <p className="text-xs text-zinc-400">AI-ready projects, verified end to end</p>
             </div>
           </div>
-
-          <div className="flex items-center gap-2">
-            <span className="hidden md:inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              PRD &rarr; Contract &rarr; Code &rarr; Loop
-            </span>
-          </div>
+          <ol className="hidden items-center gap-1.5 text-xs text-zinc-400 md:flex" aria-label="Pipeline">
+            {["PRD", "Code", "Test", "Deploy"].map((step, i) => (
+              <li key={step} className="flex items-center gap-1.5">
+                {i > 0 && <span aria-hidden>→</span>}
+                <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-zinc-200">{step}</span>
+              </li>
+            ))}
+          </ol>
         </div>
       </header>
 
-      {/* Main Split Layout */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Configuration Form */}
-        <div className="lg:col-span-5 space-y-5">
-          {/* 1. Project Identity & Topology */}
-          <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 space-y-4">
-            <div className="flex items-center gap-2 text-sm font-medium text-zinc-200">
-              <Layers className="w-4 h-4 text-indigo-400" />
-              <span>1. Project Topology</span>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1.5">
-                Repository / Project Slug
-              </label>
-              <input
-                type="text"
-                value={config.projectName}
-                onChange={(e) =>
-                  setConfig({ ...config, projectName: e.target.value })
-                }
-                placeholder="e.g. payment-hub-service"
-                className="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1.5">
-                Architecture Pattern
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                {(
-                  [
-                    {
-                      id: "microservice",
-                      title: "Microservice",
-                      desc: "Backend API only",
-                    },
-                    {
-                      id: "fullstack",
-                      title: "Full-Stack Web",
-                      desc: "Backend + Web UI",
-                    },
-                    {
-                      id: "fullstack-mobile",
-                      title: "Omnichannel",
-                      desc: "Backend + Web + Mobile",
-                    },
-                    {
-                      id: "monolith",
-                      title: "Modular Monolith",
-                      desc: "Unified src/ tree",
-                    },
-                  ] as const
-                ).map((item) => {
-                  const selected = config.architecture === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => handleArchitecturePreset(item.id)}
-                      className={`text-left p-2.5 rounded-lg border transition ${
-                        selected
-                          ? "bg-indigo-600/15 border-indigo-500 text-zinc-100"
-                          : "bg-zinc-950/60 border-zinc-800 text-zinc-400 hover:border-zinc-700"
-                      }`}
-                    >
-                      <div className="text-xs font-semibold">{item.title}</div>
-                      <div className="text-[11px] opacity-75">{item.desc}</div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </section>
-
-          {/* 2. Backend Service Configuration */}
-          <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-medium text-zinc-200">
-                <Server className="w-4 h-4 text-emerald-400" />
-                <span>2. Backend Runtime</span>
-              </div>
-              <label className="inline-flex items-center gap-2 text-xs text-zinc-400 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={config.includeBackend}
-                  onChange={(e) =>
-                    setConfig({ ...config, includeBackend: e.target.checked })
-                  }
-                  className="rounded border-zinc-700 bg-zinc-950 text-indigo-500 focus:ring-0"
-                />
-                Enable
-              </label>
-            </div>
-
-            {config.includeBackend && (
-              <div className="space-y-3 pt-1">
-                <div className="grid grid-cols-4 gap-1.5">
-                  {(Object.keys(BACKEND_OPTIONS) as BackendLang[]).map(
-                    (lang) => (
-                      <button
-                        key={lang}
-                        type="button"
-                        onClick={() => handleBackendLangChange(lang)}
-                        className={`py-1.5 px-2 rounded-md text-xs font-medium border transition ${
-                          config.backendLang === lang
-                            ? "bg-emerald-500/15 border-emerald-500/60 text-emerald-300"
-                            : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700"
-                        }`}
-                      >
-                        {BACKEND_OPTIONS[lang].label}
-                      </button>
-                    )
-                  )}
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs text-zinc-400 mb-1">
-                      Framework
-                    </label>
-                    <select
-                      value={config.backendFramework}
-                      onChange={(e) =>
-                        setConfig({
-                          ...config,
-                          backendFramework: e.target.value,
-                        })
-                      }
-                      className="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-2.5 py-2 text-xs text-zinc-100"
-                    >
-                      {BACKEND_OPTIONS[config.backendLang].frameworks.map(
-                        (fw) => (
-                          <option key={fw} value={fw}>
-                            {fw}
-                          </option>
-                        )
-                      )}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs text-zinc-400 mb-1">
-                      Runtime Version
-                    </label>
-                    <select
-                      value={config.backendVersion}
-                      onChange={(e) =>
-                        setConfig({ ...config, backendVersion: e.target.value })
-                      }
-                      className="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-2.5 py-2 text-xs text-zinc-100"
-                    >
-                      {BACKEND_OPTIONS[config.backendLang].versions.map(
-                        (ver) => (
-                          <option key={ver} value={ver}>
-                            {BACKEND_OPTIONS[config.backendLang].label} {ver}
-                          </option>
-                        )
-                      )}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <label className="block text-xs text-zinc-400 mb-1">
-                      Database
-                    </label>
-                    <select
-                      value={config.database}
-                      onChange={(e) =>
-                        setConfig({
-                          ...config,
-                          database: e.target.value as DatabaseType,
-                        })
-                      }
-                      className="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-2 py-1.5 text-xs text-zinc-100"
-                    >
-                      <option value="postgres">PostgreSQL 16</option>
-                      <option value="mysql">MySQL 8.4</option>
-                      <option value="mongodb">MongoDB 7</option>
-                      <option value="sqlite">SQLite</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs text-zinc-400 mb-1">
-                      Cache / Broker
-                    </label>
-                    <select
-                      value={config.cache}
-                      onChange={(e) =>
-                        setConfig({
-                          ...config,
-                          cache: e.target.value as CacheType,
-                        })
-                      }
-                      className="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-2 py-1.5 text-xs text-zinc-100"
-                    >
-                      <option value="redis">Redis 7</option>
-                      <option value="none">None</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs text-zinc-400 mb-1">
-                      Auth Strategy
-                    </label>
-                    <select
-                      value={config.auth}
-                      onChange={(e) =>
-                        setConfig({
-                          ...config,
-                          auth: e.target.value as AuthType,
-                        })
-                      }
-                      className="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-2 py-1.5 text-xs text-zinc-100"
-                    >
-                      <option value="jwt">JWT Bearer</option>
-                      <option value="keycloak">Keycloak OIDC</option>
-                      <option value="session">Session Cookie</option>
-                      <option value="none">None</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-            )}
-          </section>
-
-          {/* 3. Web Frontend Configuration */}
-          <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-medium text-zinc-200">
-                <Globe className="w-4 h-4 text-sky-400" />
-                <span>3. Web Frontend</span>
-              </div>
-              <label className="inline-flex items-center gap-2 text-xs text-zinc-400 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={config.includeWeb}
-                  onChange={(e) =>
-                    setConfig({ ...config, includeWeb: e.target.checked })
-                  }
-                  className="rounded border-zinc-700 bg-zinc-950 text-indigo-500 focus:ring-0"
-                />
-                Enable
-              </label>
-            </div>
-
-            {config.includeWeb && (
-              <div className="space-y-3 pt-1">
-                <div className="grid grid-cols-4 gap-1.5">
-                  {(
-                    [
-                      { id: "vue", label: "Vue 3" },
-                      { id: "nextjs", label: "Next.js" },
-                      { id: "nuxt", label: "Nuxt 3" },
-                      { id: "react", label: "React" },
-                    ] as { id: FrontendFramework; label: string }[]
-                  ).map((fw) => (
-                    <button
-                      key={fw.id}
-                      type="button"
-                      onClick={() =>
-                        setConfig({ ...config, webFramework: fw.id })
-                      }
-                      className={`py-1.5 px-2 rounded-md text-xs font-medium border transition ${
-                        config.webFramework === fw.id
-                          ? "bg-sky-500/15 border-sky-500/60 text-sky-300"
-                          : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700"
-                      }`}
-                    >
-                      {fw.label}
-                    </button>
-                  ))}
-                </div>
-
-                <label className="inline-flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={config.webTypescript}
-                    onChange={(e) =>
-                      setConfig({ ...config, webTypescript: e.target.checked })
-                    }
-                    className="rounded border-zinc-700 bg-zinc-950 text-sky-500 focus:ring-0"
-                  />
-                  Enforce Strict TypeScript in AI Rules &amp; CI
-                </label>
-              </div>
-            )}
-          </section>
-
-          {/* 4. Mobile App Configuration */}
-          <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-medium text-zinc-200">
-                <Smartphone className="w-4 h-4 text-amber-400" />
-                <span>4. Mobile Client</span>
-              </div>
-              <label className="inline-flex items-center gap-2 text-xs text-zinc-400 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={config.includeMobile}
-                  onChange={(e) =>
-                    setConfig({ ...config, includeMobile: e.target.checked })
-                  }
-                  className="rounded border-zinc-700 bg-zinc-950 text-indigo-500 focus:ring-0"
-                />
-                Enable
-              </label>
-            </div>
-
-            {config.includeMobile && (
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                <div>
-                  <label className="block text-xs text-zinc-400 mb-1">
-                    Mobile SDK
-                  </label>
-                  <select
-                    value={config.mobileFramework}
-                    onChange={(e) => {
-                      const val = e.target.value as MobileFramework;
-                      setConfig({
-                        ...config,
-                        mobileFramework: val,
-                        mobileStateMgmt: val === "flutter" ? "BLoC" : "Zustand",
-                      });
-                    }}
-                    className="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-2.5 py-2 text-xs text-zinc-100"
-                  >
-                    <option value="flutter">Flutter (Dart 3+)</option>
-                    <option value="react-native">React Native (Expo)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs text-zinc-400 mb-1">
-                    State Architecture
-                  </label>
-                  <select
-                    value={config.mobileStateMgmt}
-                    onChange={(e) =>
-                      setConfig({ ...config, mobileStateMgmt: e.target.value })
-                    }
-                    className="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-2.5 py-2 text-xs text-zinc-100"
-                  >
-                    {config.mobileFramework === "flutter" ? (
-                      <>
-                        <option value="BLoC">BLoC / Cubit</option>
-                        <option value="Riverpod">Riverpod</option>
-                      </>
-                    ) : (
-                      <>
-                        <option value="Zustand">Zustand</option>
-                        <option value="Redux Toolkit">Redux Toolkit</option>
-                      </>
-                    )}
-                  </select>
-                </div>
-              </div>
-            )}
-          </section>
-
-          {/* 5. DevOps & Loop Engineering */}
-          <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 space-y-4">
-            <div className="flex items-center gap-2 text-sm font-medium text-zinc-200">
-              <RefreshCw className="w-4 h-4 text-purple-400" />
-              <span>5. DevOps &amp; Loop Engineering</span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-zinc-400 mb-1">
-                  CI/CD Pipeline
-                </label>
-                <select
-                  value={config.ciProvider}
-                  onChange={(e) =>
-                    setConfig({
-                      ...config,
-                      ciProvider: e.target.value as CiProvider,
-                    })
-                  }
-                  className="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-2.5 py-2 text-xs text-zinc-100"
+      <main className="mx-auto grid w-full max-w-7xl flex-1 grid-cols-1 gap-6 px-4 py-6 sm:px-6 lg:grid-cols-12">
+        <div className="space-y-4 lg:col-span-5">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+            <p className="mb-2 text-xs font-medium text-zinc-400">Start from</p>
+            <div className="grid grid-cols-3 gap-2">
+              {PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setConfig(deepMerge(defaultConfig(), p.patch))}
+                  className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5 text-left transition-colors hover:border-indigo-500/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60"
                 >
-                  <option value="github-actions">GitHub Actions</option>
-                  <option value="gitlab-ci">GitLab CI</option>
-                  <option value="none">None</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs text-zinc-400 mb-1">
-                  Max Self-Healing Loops
-                </label>
-                <select
-                  value={config.maxHealingLoops}
-                  onChange={(e) =>
-                    setConfig({
-                      ...config,
-                      maxHealingLoops: Number(e.target.value),
-                    })
-                  }
-                  className="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-2.5 py-2 text-xs text-zinc-100"
-                >
-                  <option value={2}>2 Iterations</option>
-                  <option value={3}>3 Iterations (Recommended)</option>
-                  <option value={5}>5 Iterations</option>
-                </select>
-              </div>
+                  <span className="block text-xs font-semibold text-zinc-100">{p.label}</span>
+                  <span className="block text-[11px] text-zinc-500">{p.hint}</span>
+                </button>
+              ))}
             </div>
-
-            <label className="inline-flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Button onClick={() => fileInput.current?.click()}>
+                <Upload className="h-3.5 w-3.5" /> Load config
+              </Button>
               <input
-                type="checkbox"
-                checked={config.includeDocker}
-                onChange={(e) =>
-                  setConfig({ ...config, includeDocker: e.target.checked })
-                }
-                className="rounded border-zinc-700 bg-zinc-950 text-purple-500 focus:ring-0"
+                ref={fileInput}
+                type="file"
+                accept=".yaml,.yml,.json"
+                className="sr-only"
+                aria-label="Load a scaffolder config file"
+                onChange={(e) => {
+                  void loadFile(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
               />
-              Generate Multi-Stage Dockerfiles &amp; docker-compose.yml
-            </label>
-          </section>
+              <Button variant="ghost" onClick={() => setConfig(defaultConfig())}>
+                Reset
+              </Button>
+              {loadError && <span className="text-xs text-red-400" role="alert">{loadError}</span>}
+            </div>
+          </div>
+
+          <ConfigForm config={config} onChange={setConfig} issues={issues} />
         </div>
 
-        {/* Right Column: Live Output & Script Artifacts */}
-        <div className="lg:col-span-7 flex flex-col rounded-xl border border-zinc-800 bg-zinc-900/60 overflow-hidden">
-          {/* Artifact Tabs */}
-          <div className="border-b border-zinc-800 bg-zinc-950/80 px-3 pt-2.5 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-1 overflow-x-auto">
-              {(
-                [
-                  { id: "init", label: "init-project.sh", icon: Terminal },
-                  { id: "feature", label: "feature-runner.sh", icon: Play },
-                  { id: "tree", label: "Folder Tree", icon: FolderTree },
-                  { id: "docker", label: "docker-compose.yml", icon: Box },
-                  { id: "ci", label: "ci.yml", icon: GitBranch },
-                ] as const
-              ).map((tab) => {
-                const Icon = tab.icon;
-                const active = activeTab === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setActiveTab(tab.id)}
-                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-t-lg border-b-2 transition whitespace-nowrap ${
-                      active
-                        ? "border-indigo-500 text-indigo-300 bg-zinc-900"
-                        : "border-transparent text-zinc-400 hover:text-zinc-200"
-                    }`}
-                  >
-                    <Icon className="w-3.5 h-3.5" />
-                    {tab.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="flex items-center gap-2 pb-2">
-              <button
-                type="button"
-                onClick={handleCopy}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition"
-              >
-                {copied ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    Copied
-                  </>
+        <div className="space-y-4 lg:col-span-7">
+          <div className="lg:sticky lg:top-20 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+              <div className="flex flex-wrap items-center gap-2" aria-live="polite">
+                {crash ? (
+                  <Badge tone="bad"><CircleAlert className="h-3.5 w-3.5" /> Generator error</Badge>
+                ) : ready ? (
+                  <Badge tone="ok"><Check className="h-3.5 w-3.5" /> {files.length} files ready</Badge>
                 ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5" />
-                    Copy
-                  </>
+                  <Badge tone="bad"><CircleAlert className="h-3.5 w-3.5" /> {errors.length} problem{errors.length === 1 ? "" : "s"} to fix</Badge>
                 )}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleDownload}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition"
-              >
-                <Download className="w-3.5 h-3.5" />
-                Download
-              </button>
+                {warnings.length > 0 && <Badge tone="warn"><AlertTriangle className="h-3.5 w-3.5" /> {warnings.length} warning{warnings.length === 1 ? "" : "s"}</Badge>}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button onClick={copyYaml}>
+                  {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copied ? "Copied" : "Copy config"}
+                </Button>
+                <Button onClick={() => downloadBlob(yaml, "scaffolder.config.yaml", "text/yaml")}>
+                  <Download className="h-3.5 w-3.5" /> Config
+                </Button>
+                <Button variant="primary" onClick={downloadZip} disabled={!ready}>
+                  <Download className="h-3.5 w-3.5" /> Download {slug}.zip
+                </Button>
+              </div>
             </div>
-          </div>
 
-          {/* Code / Tree Preview Window */}
-          <div className="flex-1 p-4 overflow-auto bg-zinc-950 font-mono text-xs leading-relaxed text-zinc-300 max-h-[720px]">
-            <pre className="whitespace-pre">{currentContent}</pre>
-          </div>
+            {(errors.length > 0 || warnings.length > 0 || crash) && (
+              <ul className="space-y-1.5 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 text-xs" aria-label="Configuration problems">
+                {crash && <li className="text-red-300">Template error: {crash}</li>}
+                {issues.map((i, n) => (
+                  <li key={`${i.path}-${n}`} className={cx("flex gap-2", i.level === "error" ? "text-red-300" : "text-amber-300")}>
+                    <span className="font-mono text-zinc-500">{i.path}</span>
+                    <span>{i.message}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
 
-          {/* Quick Execution Footer */}
-          <div className="border-t border-zinc-800 bg-zinc-900/90 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-zinc-400">
-            <div className="flex items-center gap-2">
-              <FileCode2 className="w-4 h-4 text-indigo-400 shrink-0" />
-              <span>
-                Run{" "}
-                <code className="px-1.5 py-0.5 rounded bg-zinc-950 text-zinc-200 border border-zinc-800">
-                  chmod +x init-project.sh && ./init-project.sh
-                </code>{" "}
-                to bootstrap locally.
-              </span>
+            <div role="tablist" aria-label="Output" className="flex gap-1 border-b border-zinc-800">
+              {tabs.map((t) => (
+                <button
+                  key={t.id}
+                  role="tab"
+                  type="button"
+                  id={`tab-${t.id}`}
+                  aria-selected={tab === t.id}
+                  aria-controls={`panel-${t.id}`}
+                  onClick={() => setTab(t.id)}
+                  className={cx(
+                    "-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60",
+                    tab === t.id ? "border-indigo-500 text-zinc-100" : "border-transparent text-zinc-400 hover:text-zinc-200",
+                  )}
+                >
+                  {t.icon}
+                  {t.label}
+                </button>
+              ))}
             </div>
-            <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-              <Code2 className="w-3.5 h-3.5" />
-              <span>Ready for Vercel</span>
+
+            <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
+              {tab === "files" &&
+                (ready ? (
+                  <FileExplorer files={files} />
+                ) : (
+                  <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">
+                    Fix the highlighted problems to preview the generated project.
+                  </div>
+                ))}
+              {tab === "config" && (
+                <pre tabIndex={0} aria-label="scaffolder.config.yaml" className="max-h-[40rem] overflow-auto rounded-xl border border-zinc-800 bg-zinc-950 p-4 font-mono text-[12px] leading-relaxed text-zinc-200">
+                  {yaml}
+                </pre>
+              )}
+              {tab === "cli" && (
+                <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-300">
+                  <p>Generate the same project from a terminal or CI (same engine as this page):</p>
+                  <pre className="overflow-auto rounded-lg bg-zinc-900 p-3 font-mono text-[12px] text-zinc-200">{`npm run scaffold -- init                      # writes scaffolder.config.yaml
+npm run scaffold -- generate \\
+  --config scaffolder.config.yaml --out ../${slug}
+# override anything without editing the file:
+npm run scaffold -- generate --config scaffolder.config.yaml \\
+  --set sdlc.maxIterations=8 --set web.enabled=false --out ../${slug}`}</pre>
+                  <p>Then, inside the generated project:</p>
+                  <pre className="overflow-auto rounded-lg bg-zinc-900 p-3 font-mono text-[12px] text-zinc-200">{`cd ../${slug}
+./scripts/sdlc doctor    # toolchain ok?
+./scripts/sdlc setup     # install dependencies
+./scripts/sdlc verify    # gates + PRD facts: exactly what CI runs`}</pre>
+                </div>
+              )}
             </div>
           </div>
         </div>
