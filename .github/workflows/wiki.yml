@@ -1,0 +1,64 @@
+name: Publish wiki
+
+# The wiki pages live in docs/wiki/ (reviewed in pull requests, versioned with the code) and are
+# published to the GitHub wiki whenever they change on main. Edit docs/wiki/, never the wiki in the
+# browser: the next publish makes the wiki an exact copy of docs/wiki/.
+#
+# One-time setup: Settings -> Features -> enable "Wikis", then create the first page by hand
+# (GitHub only creates the wiki repository when it has a page). After that this workflow takes over.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/wiki/**"
+      - ".github/workflows/wiki.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write # pushing to <repo>.wiki.git uses the repository's write permission
+
+concurrency:
+  group: wiki
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish docs/wiki to the GitHub wiki
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SERVER: ${{ github.server_url }}
+        run: |
+          set -euo pipefail
+
+          # The token goes in a request header, never into the remote URL or the git config.
+          AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          echo "::add-mask::$AUTH"
+          git_wiki() { git -c "http.extraheader=AUTHORIZATION: basic $AUTH" "$@"; }
+
+          if ! git_wiki clone --quiet "$SERVER/$REPO.wiki.git" wiki-repo 2>/dev/null; then
+            echo "::error::Cannot clone the wiki. Enable Wikis in Settings -> Features and create the first page once, then re-run this workflow."
+            exit 1
+          fi
+
+          # Make the wiki an exact copy of docs/wiki/ (but keep the wiki's own .git).
+          find wiki-repo -mindepth 1 -maxdepth 1 -not -name .git -exec rm -rf {} +
+          cp -R docs/wiki/. wiki-repo/
+
+          cd wiki-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Wiki is already up to date."
+            exit 0
+          fi
+          git commit --quiet -m "docs: publish docs/wiki @ ${GITHUB_SHA::7}"
+          git_wiki push --quiet origin HEAD
+          echo "Published $(git diff --name-only HEAD~1 HEAD | wc -l | tr -d ' ') changed page(s)."

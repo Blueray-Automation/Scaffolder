@@ -42,6 +42,19 @@ cd ../my-app
 ./scripts/sdlc verify     # gates + PRD facts: exactly what CI runs
 ```
 
+## Documentation (wiki)
+
+Step-by-step guides live in [`docs/wiki/`](docs/wiki/Home.md) and are published to the GitHub wiki automatically:
+
+- **Getting Started**: from a downloaded zip to a verified, running hello world
+- **Tutorial: Add a Login API**: change a generated project the way it is meant to be changed (PRD, checks, tests, code, proof), with the complete verified code
+- **The Verification Loop** and **Troubleshooting** (every entry was hit for real)
+
+The pages are reviewed in pull requests like code, and `npm test` checks every internal link, anchor and `./scripts/sdlc` command they mention.
+**Edit `docs/wiki/`, not the wiki in the browser** (the next publish overwrites it).
+One-time setup for publishing: enable *Wikis* in the repository settings and create the first page by hand
+(GitHub only creates the wiki repository once it has a page); after that `.github/workflows/wiki.yml` takes over on every push to `main` that touches `docs/wiki/`.
+
 ## What gets generated (default: FastAPI + Next.js + PostgreSQL + GitHub Actions)
 
 | Area | Contents |
@@ -100,7 +113,7 @@ npm run e2e       # slow, needs network, python3 >= 3.12 and node >= 22 on PATH
 - `npm test`: matrix of 12 configurations, each checked for unresolved template tags, valid JSON/YAML, valid shell/Python
   syntax, CI-equals-local gate commands, PRD traceability, compose/CD/deploy consistency; plus validation and renderer tests.
 - `npm run e2e`: generates real projects (default, backend-only without a database, custom directories), installs them,
-  runs every gate, runs the facts against real processes (and the docker compose stack when a Docker daemon is running),
+  runs every gate, runs the facts against real processes and, when a Docker daemon is running, against the docker compose stack built from the generated Dockerfiles,
   then exercises the loop: heals a regression via a scripted agent, hands over to a human, stops on no progress, stops when
   an agent tampers with the spec or gate config, rejects a criterion without a check, catches a committed secret.
 - `.github/workflows/ci.yml` runs all of the above.
@@ -108,6 +121,7 @@ npm run e2e       # slow, needs network, python3 >= 3.12 and node >= 22 on PATH
 ## Limits (as of this version)
 
 - One full vertical slice: **FastAPI + Next.js (App Router) + PostgreSQL + GitHub Actions + GHCR**. Other stacks are planned.
-- Deploy targets: `none` (placeholder, prints the plan) and `ssh-compose`. Real cloud deploys are not exercised by the tests;
-  the build/publish steps and the deploy scripts' syntax are.
+- Deploy targets: `none` (placeholder, prints the plan) and `ssh-compose`. The tests exercise the image builds and the full
+  compose stack (including PostgreSQL), and check the deploy scripts' syntax. They do **not** run the generated GitHub workflows,
+  push to GHCR, or deploy to a real host; those are only checked structurally.
 - The generated `web.audit` gate is advisory (`npm audit` reports transitive advisories with no patched release yet).
