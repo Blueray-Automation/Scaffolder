@@ -1,4 +1,4 @@
-import type { ScaffolderConfig } from "./config";
+import { agentCommand, type ScaffolderConfig } from "./config";
 import { buildGates, OPENAPI_SNAPSHOT, relativeFrom, setupSteps, STAGE_ORDER } from "./gates";
 
 function titleCase(slug: string): string {
@@ -102,8 +102,9 @@ export function buildView(cfg: ScaffolderConfig) {
 
     maxIterations: cfg.sdlc.maxIterations,
     noProgressLimit: cfg.sdlc.noProgressLimit,
-    agentCommand: cfg.sdlc.agent.command,
-    agentConfigured: cfg.sdlc.agent.command.trim().length > 0,
+    agentCommand: agentCommand(cfg),
+    agentConfigured: agentCommand(cfg).length > 0,
+    agentPreset: cfg.sdlc.agent.preset,
     stages: STAGE_ORDER.join(" → "),
 
     gates: gateRows,

@@ -2,7 +2,7 @@
 
 import React from "react";
 import { Boxes, GitBranch, Layers, Plus, ShieldCheck, Smartphone, Trash2 } from "lucide-react";
-import { CAPABILITIES, type DeployTrigger, type Issue, type ScaffolderConfig } from "@/engine";
+import { AGENT_PRESETS, CAPABILITIES, type DeployTrigger, type Issue, type ScaffolderConfig } from "@/engine";
 import { setIn } from "@/lib/utils";
 import { Badge, Button, Field, NumberInput, Section, Select, TextInput, Toggle } from "./ui";
 
@@ -194,15 +194,39 @@ export function ConfigForm({ config, onChange, issues }: Props) {
           <Toggle checked={config.sdlc.failFast} onChange={(v) => set(["sdlc", "failFast"], v)} label="Stop at the first failing stage" hint="Gives the agent one focused problem" />
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="sm:col-span-2">
-            <Field label="Agent command" hint="Any CLI that reads the prompt on stdin. Empty = human in the loop." error={err("sdlc.agent.command")}>
-              {(id) => <TextInput id={id} value={config.sdlc.agent.command} onChange={(v) => set(["sdlc", "agent", "command"], v)} placeholder="e.g. my-agent --prompt-stdin" spellCheck={false} />}
+        <div className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+          <p className="text-xs text-zinc-400">
+            <span className="font-medium text-zinc-200">You write the PRD and the checks; the agent writes the rest.</span>{" "}
+            <code className="rounded bg-zinc-800 px-1 py-0.5 text-[11px]">./scripts/sdlc implement FEAT-001</code> gives the agent your spec,
+            installs the dependencies it adds, and loops until verified.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="sm:col-span-2">
+              <Field label="AI agent" hint={AGENT_PRESETS.find((p) => p.id === config.sdlc.agent.preset)?.hint} error={err("sdlc.agent.preset")}>
+                {(id) => <Select id={id} value={config.sdlc.agent.preset} options={AGENT_PRESETS} onChange={(v) => set(["sdlc", "agent", "preset"], v)} />}
+              </Field>
+            </div>
+            <Field label="Agent timeout (s)" error={err("sdlc.agent.timeoutSeconds")}>
+              {(id) => <NumberInput id={id} value={config.sdlc.agent.timeoutSeconds} onChange={(v) => set(["sdlc", "agent", "timeoutSeconds"], v)} />}
             </Field>
           </div>
-          <Field label="Agent timeout (s)" error={err("sdlc.agent.timeoutSeconds")}>
-            {(id) => <NumberInput id={id} value={config.sdlc.agent.timeoutSeconds} onChange={(v) => set(["sdlc", "agent", "timeoutSeconds"], v)} />}
-          </Field>
+          {config.sdlc.agent.preset !== "none" && (
+            <Field
+              label={config.sdlc.agent.preset === "custom" ? "Agent command" : "Command override (optional)"}
+              hint="Any CLI that reads the prompt on stdin. Leave empty to use the preset's command."
+              error={err("sdlc.agent.command")}
+            >
+              {(id) => (
+                <TextInput
+                  id={id}
+                  value={config.sdlc.agent.command}
+                  onChange={(v) => set(["sdlc", "agent", "command"], v)}
+                  placeholder={AGENT_PRESETS.find((p) => p.id === config.sdlc.agent.preset)?.command || "e.g. my-agent --prompt-stdin"}
+                  spellCheck={false}
+                />
+              )}
+            </Field>
+          )}
         </div>
       </Section>
 

@@ -26,7 +26,7 @@ If a failure below is the same as one listed above, your previous fix did not wo
 ## Procedure
 1. Reproduce: run the failing command yourself (shown above) and read the real output.
 2. Find the root cause. Say it in one sentence before you edit anything.
-3. Make the smallest change that fixes the cause. Fix the CODE so it meets the spec.
+3. Make the smallest change that fixes the cause. Fix the CODE so it meets the spec. If you add a dependency to a manifest, run `./scripts/sdlc sync`.
 4. Re-run just the failing gate: `./scripts/sdlc gates --only <gate-id>`; then the whole `./scripts/sdlc verify`.
 
 ## Hard rules (the loop enforces some of these and stops with an integrity violation)

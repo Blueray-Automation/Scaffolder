@@ -250,6 +250,78 @@ describe("generated project: specifics", () => {
   });
 });
 
+describe("agent and `implement`", () => {
+  const sdlcOf = (patch: Json) => {
+    const { files } = generate(patch);
+    return {
+      sdlc: JSON.parse(files.find((f) => f.path === ".ai/sdlc.json")!.content) as Json,
+      agents: files.find((f) => f.path === "AGENTS.md")!.content,
+      files,
+    };
+  };
+
+  it("defaults to the claude preset and writes the resolved command into sdlc.json", () => {
+    const { sdlc, agents } = sdlcOf({});
+    expect(sdlc.agent.preset).toBe("claude");
+    expect(sdlc.agent.command).toMatch(/^claude -p /);
+    expect(agents).toContain("preset `claude`");
+  });
+
+  it("supports the codex preset, a custom command, and an explicit override of a preset", () => {
+    expect(sdlcOf({ sdlc: { agent: { preset: "codex" } } }).sdlc.agent.command).toMatch(/^codex exec /);
+    expect(sdlcOf({ sdlc: { agent: { preset: "custom", command: "my-agent --stdin" } } }).sdlc.agent.command).toBe("my-agent --stdin");
+    expect(sdlcOf({ sdlc: { agent: { preset: "claude", command: "other-agent" } } }).sdlc.agent.command).toBe("other-agent");
+  });
+
+  it("with no agent the docs say a human is in the loop", () => {
+    const { sdlc, agents } = sdlcOf({ sdlc: { agent: { preset: "none" } } });
+    expect(sdlc.agent.command).toBe("");
+    expect(agents).toContain("currently empty");
+  });
+
+  it("rejects an unknown preset and a custom preset without a command", () => {
+    const errors = (patch: Json) => validateConfig(resolveConfig(patch)).filter((i) => i.level === "error").map((i) => i.path);
+    expect(errors({ sdlc: { agent: { preset: "skynet" } } })).toContain("sdlc.agent.preset");
+    expect(errors({ sdlc: { agent: { preset: "custom" } } })).toContain("sdlc.agent.command");
+  });
+
+  it("setup steps say what to install when (manifests) and how to tell it never ran (marker)", () => {
+    const { sdlc } = sdlcOf({ layout: { backendDir: "services/api", webDir: "apps/web" } });
+    const steps = sdlc.setup as Json[];
+    expect(steps.find((s) => s.id === "backend.install")).toMatchObject({
+      manifests: ["services/api/pyproject.toml"],
+      marker: "services/api/.venv",
+    });
+    expect(steps.find((s) => s.id === "web.install")).toMatchObject({
+      manifests: ["apps/web/package.json"],
+      marker: "apps/web/node_modules",
+    });
+  });
+
+  it("documents implement and sync where people look (AGENTS.md, README, Makefile, skills)", () => {
+    const { files } = sdlcOf({});
+    const text = (path: string) => files.find((f) => f.path === path)!.content;
+    for (const path of ["AGENTS.md", "README.md"]) expect(text(path), path).toContain("./scripts/sdlc implement");
+    expect(text("AGENTS.md")).toContain("./scripts/sdlc sync");
+    expect(text("Makefile")).toMatch(/^implement:/m);
+    expect(text(".ai/skills/write-prd/SKILL.md")).toContain("./scripts/sdlc implement");
+  });
+
+  it("the implement prompt only uses placeholders the tool fills in, and embeds the spec", () => {
+    const { files } = sdlcOf({});
+    const prompt = files.find((f) => f.path === ".ai/prompts/implement.md")!.content;
+    const used = [...new Set([...prompt.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]!))].sort();
+    const tool = files.find((f) => f.path === "scripts/sdlc.py")!.content;
+    const block = tool.slice(tool.indexOf('render_prompt(cfg["agent"]["prompts"]["implement"]'));
+    for (const key of used) expect(block, `sdlc.py does not fill {{${key}}}`).toContain(`"${key}":`);
+    expect(used).toEqual(expect.arrayContaining(["prd", "acceptance", "questionsFile", "specDir", "feature"]));
+    // the agent is told to ask instead of guessing, to sync dependencies, and not to commit
+    expect(prompt).toContain("./scripts/sdlc sync");
+    expect(prompt).toContain("do not guess");
+    expect(prompt).toMatch(/Do \*\*not\*\* run `git commit`/);
+  });
+});
+
 describe("validation", () => {
   const check = (patch: Json) => validateConfig(resolveConfig(patch));
   const errorPaths = (patch: Json) => check(patch).filter((i) => i.level === "error").map((i) => i.path);

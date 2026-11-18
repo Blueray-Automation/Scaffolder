@@ -35,6 +35,10 @@ export interface SetupStep {
   cwd: string;
   cmd: string;
   toolchain: "python" | "node";
+  /** Files whose change means dependencies must be reinstalled (`sdlc sync`). */
+  manifests: string[];
+  /** If this path is missing the step has never run (e.g. the venv or node_modules). */
+  marker: string;
 }
 
 /** Relative path from directory `from` (repo-relative) to repo-relative `to`. */
@@ -54,6 +58,8 @@ export function setupSteps(cfg: ScaffolderConfig): SetupStep[] {
       component: "backend",
       cwd: cfg.layout.backendDir,
       toolchain: "python",
+      manifests: [`${cfg.layout.backendDir}/pyproject.toml`],
+      marker: `${cfg.layout.backendDir}/.venv`,
       cmd: 'python3 -m venv --clear .venv && .venv/bin/python -m pip install --quiet --upgrade pip && .venv/bin/pip install --quiet -e ".[dev]"',
     });
   }
@@ -64,6 +70,8 @@ export function setupSteps(cfg: ScaffolderConfig): SetupStep[] {
       component: "web",
       cwd: cfg.layout.webDir,
       toolchain: "node",
+      manifests: [`${cfg.layout.webDir}/package.json`],
+      marker: `${cfg.layout.webDir}/node_modules`,
       cmd: "if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi",
     });
   }

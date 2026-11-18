@@ -10,7 +10,9 @@ Standard library only (Python 3.9+). Configured by .ai/sdlc.json; see .ai/README
   facts     check PRD acceptance criteria against the RUNNING system
   verify    gates + facts, one pass, no agent (this is what CI runs)
   loop      verify -> heal -> verify ... until green, stuck, or out of budget
+  implement turn a finished spec (prd.md + acceptance.json) into verified code with your agent
   feature   drive one feature through PRD -> Code -> Test (-> Deploy)
+  sync      install dependencies, only if the manifests changed since the last install
   new       create a feature spec from the template
   deploy    deploy an image tag to an environment, then verify facts there
   secrets   scan the working tree for committed secrets
@@ -751,7 +753,7 @@ def run_verify(cfg: dict, label: str, args: argparse.Namespace, *, with_facts: b
         say(c(f"\n== {stage} ==", "1"))
         if stage == "facts":
             if not (with_facts and cfg["facts"]["enabled"]):
-                say(dim("  (facts disabled)"))
+                say(dim("  (skipped)"))
                 continue
             specs = run_facts(cfg, run, args)
         else:
@@ -801,10 +803,9 @@ def fingerprint(run: Run) -> str:
 
 
 def render_prompt(path: str, values: dict) -> str:
+    """Fill {{placeholders}} in ONE pass, so text inserted by a value (e.g. a PRD) is never re-expanded."""
     text = (ROOT / path).read_text()
-    for k, v in values.items():
-        text = text.replace("{{" + k + "}}", str(v))
-    return text
+    return re.sub(r"\{\{(\w+)\}\}", lambda m: str(values.get(m.group(1), m.group(0))), text)
 
 
 def run_agent(cfg: dict, command: str, prompt: str, tag: str, run_dir: Path) -> int:
@@ -828,9 +829,253 @@ def failures_markdown(run: Run) -> str:
     return "\n\n".join(chunks)
 
 
+# --------------------------------------------------------------------------- dependencies and agent
+
+
+INSTALLED_STATE = EVIDENCE / "installed.json"
+
+
+def manifest_hash(step: dict) -> str:
+    h = hashlib.sha256()
+    for m in step.get("manifests", []):
+        p = ROOT / m
+        h.update(m.encode())
+        h.update(p.read_bytes() if p.is_file() else b"<missing>")
+    return h.hexdigest()
+
+
+def load_installed() -> dict:
+    try:
+        return json.loads(INSTALLED_STATE.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def save_installed(state: dict) -> None:
+    EVIDENCE.mkdir(parents=True, exist_ok=True)
+    INSTALLED_STATE.write_text(json.dumps(state, indent=2))
+
+
+def run_setup_step(step: dict, run: Run) -> bool:
+    """Run one setup step (picking an interpreter for Python steps) and record what was installed."""
+    command = step["cmd"]
+    minimum = step.get("minPython")
+    if minimum:  # pick (or offer to install) an interpreter that satisfies the project, never fail with a raw pip error
+        python = resolve_python(minimum, step["label"], interactive=True)
+        if python is None:
+            return False
+        ver = python_version(python) or (0, 0)
+        say(dim(f"  using {python} (Python {ver[0]}.{ver[1]})"))
+        command = command.replace("{python}", shlex.quote(python))
+    say(f"  {step['label']} ...")
+    log = run.logs / f"{step['id']}.log"
+    code = run_shell(command, ROOT / step["cwd"], log, env=os.environ.copy(), timeout=1800)
+    if code != 0:
+        say(bad(f"  FAILED ({step['id']}):\n{tail_lines(log, 30)}"))
+        return False
+    state = load_installed()
+    state[step["id"]] = manifest_hash(step)
+    save_installed(state)
+    return True
+
+
+def stale_steps(cfg: dict) -> list:
+    """Setup steps that never ran (marker missing) or whose dependency manifests changed since they last ran."""
+    state = load_installed()
+    return [
+        step for step in cfg["setup"]
+        if (step.get("marker") and not (ROOT / step["marker"]).exists()) or state.get(step["id"]) != manifest_hash(step)
+    ]
+
+
+def ensure_installed(cfg: dict, run: Run) -> bool:
+    stale = stale_steps(cfg)
+    if not stale:
+        return True
+    say(dim("  installing dependencies: " + ", ".join(step["id"] for step in stale)))
+    return all(run_setup_step(step, run) for step in stale)
+
+
+def resolve_agent(cfg: dict, args: argparse.Namespace) -> str:
+    if getattr(args, "agent", None) is not None:
+        return args.agent
+    return os.environ.get("SDLC_AGENT_CMD", cfg["agent"]["command"])
+
+
+def agent_problem(command: str) -> str | None:
+    """Why this agent command cannot run (its program is not installed), or None."""
+    try:
+        program = shlex.split(command)[0]
+    except (ValueError, IndexError):
+        return "the agent command is empty or malformed"
+    if shutil.which(program) is None:
+        return f"`{program}` is not installed or not on PATH"
+    return None
+
+
+def dirty_files(exclude: Path) -> list:
+    """Uncommitted changes other than the feature's own spec folder (empty when not a git repository)."""
+    if not (ROOT / ".git").exists():
+        return []
+    skip = rel(exclude).rstrip("/") + "/"
+    out = []
+    for line in git("status", "--porcelain").splitlines():
+        name = line[3:].split(" -> ")[-1].strip().strip('"')
+        if not name.startswith(skip) and not name.startswith(".ai/evidence"):
+            out.append(line)
+    return out
+
+
+def listing(pattern: str) -> str:
+    items = sorted(p for p in ROOT.glob(pattern))
+    return ", ".join(f"`{rel(p)}`" for p in items) or "(none)"
+
+
+def cmd_sync(cfg: dict, args: argparse.Namespace) -> int:
+    run = Run("sync")
+    stale = stale_steps(cfg)
+    if not stale:
+        say(ok("dependencies are up to date"))
+        return EXIT_OK
+    say(dim("  installing dependencies: " + ", ".join(step["id"] for step in stale)))
+    for step in stale:
+        if not run_setup_step(step, run):
+            return EXIT_FAIL
+    say(ok("dependencies installed"))
+    return EXIT_OK
+
+
+def cmd_implement(cfg: dict, args: argparse.Namespace) -> int:
+    """Spec in, verified code out: validate the spec, set up, baseline, run the agent, sync deps, verify + heal."""
+    specs_dir = cfg["facts"]["specsDir"]
+    spec_dir = find_spec(cfg, args.name)
+    if spec_dir is None:
+        existing = sorted(p.name for p in (ROOT / specs_dir).glob("FEAT-*") if not p.name.startswith("FEAT-000"))
+        say(bad(f"No feature '{args.name}' under {specs_dir}/."))
+        say("Create one with ./scripts/sdlc new <slug>, write its prd.md and acceptance.json, then run this again."
+            + (f"\nExisting features: {', '.join(existing)}" if existing else ""))
+        return EXIT_HUMAN
+    fid = spec_dir.name.split("-", 2)[0] + "-" + spec_dir.name.split("-", 2)[1]
+    say(c(f"\n=== implement {fid} from {rel(spec_dir)}/ ===", "1;35"))
+
+    # 1. the spec is the contract: it must be complete before an agent spends effort on it
+    spec = next(sp for sp in load_specs(cfg) if sp["dir"] == spec_dir)
+    good, errors = traceability(spec)
+    if not good:
+        say(bad("The spec is not ready to implement:"))
+        for e in errors:
+            say(f"  - {e}")
+        say("Finish prd.md and acceptance.json (skills: .ai/skills/write-prd, write-fact-checks), then run this again.")
+        return EXIT_HUMAN
+    say(ok(f"  spec ok: {len(spec['acs'])} acceptance criteria, {len(spec['checks'])} checks, every criterion covered"))
+
+    # 2. an agent must be configured and installed
+    agent = resolve_agent(cfg, args)
+    if not agent:
+        say(bad("No agent is configured, so nothing can write the code."))
+        say("Pick one in scaffolder.config.yaml (sdlc.agent.preset: claude | codex | custom) and regenerate, edit agent.command in .ai/sdlc.json,\n"
+            "or for one run:  SDLC_AGENT_CMD='<agent cli that reads the prompt on stdin>' ./scripts/sdlc implement " + fid)
+        return EXIT_HUMAN
+    problem = agent_problem(agent)
+    if problem and not args.dry_run:
+        say(bad(f"The agent cannot run: {problem}."))
+        say(f"  command: {agent}\nInstall it, or choose another agent (SDLC_AGENT_CMD='...' or agent.command in .ai/sdlc.json).")
+        return EXIT_HUMAN
+
+    # 3. the agent's changes must be reviewable: start from a clean tree (only the spec may be uncommitted)
+    if not (ROOT / ".git").exists():
+        say(warn("  not a git repository: the agent's changes cannot be reviewed or reverted easily (run `git init` first)"))
+    dirty = dirty_files(spec_dir)
+    if dirty and not args.allow_dirty:
+        say(bad("You have uncommitted changes outside this feature's spec:"))
+        for line in dirty[:15]:
+            say(f"  {line}")
+        say("Commit or stash them first so you can review exactly what the agent changes (or pass --allow-dirty).")
+        return EXIT_HUMAN
+
+    run = Run(f"implement-{fid}")
+    # 4. toolchain: install what is missing, so nobody runs `setup` by hand first
+    if not args.dry_run and not ensure_installed(cfg, run):
+        return EXIT_FAIL
+
+    # 5. baseline: a red start would blame the agent for problems that were already there
+    if not args.skip_baseline and not args.dry_run:
+        say(c("\n== baseline (gates, before the agent starts) ==", "1"))
+        base_args = argparse.Namespace(stage=None, only=None, keep_going=False)
+        base, _ = run_verify(cfg, "baseline", base_args, with_facts=False)
+        if not summarize(base, cfg):
+            say(bad("The project is already failing before any change. Fix that first (or pass --skip-baseline)."))
+            return EXIT_HUMAN
+
+    # 6. the prompt: the spec itself plus how this repository works
+    integ = cfg["integrity"]
+    questions = run.dir / "QUESTIONS.md"
+    stack = "\n".join(
+        f"- {st['id'].split('.')[0]}: `{st['cwd']}/` (dependency manifest: {', '.join('`' + m + '`' for m in st.get('manifests', []))})"
+        for st in cfg["setup"]
+    )
+    prompt = render_prompt(cfg["agent"]["prompts"]["implement"], {
+        "feature": fid,
+        "specDir": rel(spec_dir),
+        "prd": (spec_dir / "prd.md").read_text().strip(),
+        "acceptance": (spec_dir / "acceptance.json").read_text().strip(),
+        "stack": stack or "(no components)",
+        "gates": ", ".join(f"`{g['id']}`" for g in cfg["gates"]),
+        "rules": listing(".ai/rules/*.md"),
+        "skills": listing(".ai/skills/*/SKILL.md"),
+        "protected": ", ".join(f"`{p}`" for p in integ["protected"] + integ["protectedWhileHealing"]),
+        "questionsFile": rel(questions),
+    })
+    if args.dry_run:
+        prompt_file = run.dir / "implement.prompt.md"
+        prompt_file.write_text(prompt)
+        say(ok("\nDry run: nothing was executed."))
+        say(f"  agent command : {agent}" + (f"   (WARNING: {problem})" if problem else ""))
+        say(f"  prompt        : {rel(prompt_file)}  ({len(prompt.splitlines())} lines, includes prd.md and acceptance.json)")
+        return EXIT_OK
+
+    # 7. the agent writes tests, code, dependencies, config and the contract
+    say(c("\n== agent: implementing ==", "1"))
+    before = snapshot(integ["protected"] + integ["protectedWhileHealing"])
+    head = git("rev-parse", "HEAD")
+    code = run_agent(cfg, agent, prompt, f"implement-{fid}", run.dir)
+    if code != 0:
+        say(warn(f"  the agent exited with {code}; verification below decides whether the work is complete"))
+    if git("rev-parse", "HEAD") != head:
+        say(warn("  the agent made git commits: review them (git log), the tool never commits or pushes for you"))
+    violations = changed(before, snapshot(integ["protected"] + integ["protectedWhileHealing"]))
+    if violations:
+        say(bad("\nINTEGRITY VIOLATION: the agent changed files that define what 'correct' means:"))
+        for v in violations:
+            say(bad(f"  - {v}"))
+        say("The spec and the gate config belong to you, not the agent. Revert them (git checkout -- <path>) and run again.")
+        (run.dir / "integrity-violation.md").write_text("\n".join(violations))
+        return EXIT_INTEGRITY
+    if questions.exists() and questions.read_text().strip():
+        say(bad("\nThe agent could not proceed without answers from you:"))
+        say(questions.read_text().strip())
+        say("\nClarify the PRD / acceptance.json, then run this again.")
+        return EXIT_HUMAN
+
+    # 8. dependencies the agent added are installed even if it forgot to
+    if not ensure_installed(cfg, run):
+        return EXIT_FAIL
+
+    # 9. prove it: verify, and heal with the same agent until green, stuck, or out of budget
+    args.focus = fid
+    result = cmd_loop(cfg, args)
+
+    say(c("\n== what changed (nothing is committed) ==", "1"))
+    say(git("status", "--short") or "(no changes)")
+    if result == EXIT_OK:
+        say(ok(f"\n{fid} is implemented and verified. Review with `git diff`, then commit and open a PR."))
+        say(f"Evidence: .ai/evidence/latest/report.md")
+    return result
+
+
 def cmd_loop(cfg: dict, args: argparse.Namespace) -> int:
     max_iter = args.max or cfg["loop"]["maxIterations"]
-    agent = args.agent if args.agent is not None else os.environ.get("SDLC_AGENT_CMD", cfg["agent"]["command"])
+    agent = resolve_agent(cfg, args)
     integ = cfg["integrity"]
     base_snap = snapshot(integ["protected"] + integ["protectedWhileHealing"])
     guarded_snap = snapshot(integ["guarded"])
@@ -872,6 +1117,7 @@ def cmd_loop(cfg: dict, args: argparse.Namespace) -> int:
                 return EXIT_HUMAN
         else:
             run_agent(cfg, agent, prompt, f"heal-{i}", run.dir)
+            ensure_installed(cfg, run)  # dependencies the agent added while healing
         now = snapshot(integ["protected"] + integ["protectedWhileHealing"])
         violations = changed(base_snap, now)
         if violations:
@@ -890,20 +1136,7 @@ def cmd_loop(cfg: dict, args: argparse.Namespace) -> int:
 def cmd_setup(cfg: dict, args: argparse.Namespace) -> int:
     run = Run("setup")
     for step in cfg["setup"]:
-        command = step["cmd"]
-        minimum = step.get("minPython")
-        if minimum:  # pick (or offer to install) an interpreter that satisfies the project, never fail with a raw pip error
-            python = resolve_python(minimum, step["label"], interactive=True)
-            if python is None:
-                return EXIT_FAIL
-            ver = python_version(python) or (0, 0)
-            say(dim(f"  using {python} (Python {ver[0]}.{ver[1]})"))
-            command = command.replace("{python}", shlex.quote(python))
-        say(f"  {step['label']} ...")
-        log = run.logs / f"{step['id']}.log"
-        code = run_shell(command, ROOT / step["cwd"], log, env=os.environ.copy(), timeout=1800)
-        if code != 0:
-            say(bad(f"  FAILED ({step['id']}):\n{tail_lines(log, 30)}"))
+        if not run_setup_step(step, run):
             return EXIT_FAIL
     say(ok("setup complete"))
     return EXIT_OK
@@ -938,6 +1171,12 @@ def cmd_doctor(cfg: dict, args: argparse.Namespace) -> int:
             say(f"  {bad('MISS')}  {name:12} {step['label']} needs Python >= {minimum}; the newest found is {shown}")
             for line in install_hints(minimum):
                 say(f"        {line.strip()}")
+    agent = os.environ.get("SDLC_AGENT_CMD", cfg["agent"]["command"])
+    if not agent:
+        say(f"  {warn('note')}  {'agent':12} none configured: `implement` will ask for one (preset: {cfg['agent'].get('preset', 'none')})")
+    else:
+        problem = agent_problem(agent)
+        say(f"  {warn('note') if problem else ok('ok  ')}  {'agent':12} {agent[:70]}" + (f"   ({problem})" if problem else ""))
     say("")
     say(ok("toolchain ready") if not bad_count else bad(f"{bad_count} required tool(s) missing"))
     return EXIT_OK if not bad_count else EXIT_FAIL
@@ -1016,17 +1255,13 @@ def cmd_feature(cfg: dict, args: argparse.Namespace) -> int:
             return EXIT_HUMAN
     if args.skip_code:
         say(dim("\n=== CODE: skipped (--skip-code) ==="))
+        say(c(f"\n=== TEST: {fid} ===", "1;35"))
+        args.focus = fid  # the loop verifies EVERYTHING (regressions included); the feature only focuses the agent prompt
+        code = cmd_loop(cfg, args)
     else:
-        say(c(f"\n=== CODE: {fid} ===", "1;35"))
-        if agent:
-            values = {"feature": fid, "specDir": rel(spec)}
-            run_agent(cfg, agent, render_prompt(cfg["agent"]["prompts"]["implement"], values), f"code-{fid}", spec)
-        else:
-            say(warn(f"Implement {fid} from {rel(spec)}/prd.md (skill: .ai/skills/implement-feature), then re-run with --skip-code."))
-            return EXIT_HUMAN
-    say(c(f"\n=== TEST: {fid} ===", "1;35"))
-    args.focus = fid  # the loop verifies EVERYTHING (regressions included); the feature only focuses the agent prompt
-    code = cmd_loop(cfg, args)
+        say(c(f"\n=== CODE + TEST: {fid} ===", "1;35"))
+        args.name = fid
+        code = cmd_implement(cfg, args)
     if code != EXIT_OK or not args.deploy:
         return code
     say(c(f"\n=== DEPLOY: {args.deploy} ===", "1;35"))
@@ -1176,7 +1411,18 @@ def build_parser() -> argparse.ArgumentParser:
     ft.add_argument("--deploy", metavar="ENV", help="deploy to ENV after verification passes")
     ft.add_argument("--max", type=int)
     ft.add_argument("--agent")
+    ft.add_argument("--allow-dirty", action="store_true")
+    ft.add_argument("--skip-baseline", action="store_true")
     common(ft, facts=False)
+    im = sub.add_parser("implement")
+    im.add_argument("name", help="FEAT-001 or its slug; its prd.md and acceptance.json must be finished")
+    im.add_argument("--agent", help="agent command (reads the prompt on stdin); overrides the configured one")
+    im.add_argument("--max", type=int, help="override max heal iterations")
+    im.add_argument("--allow-dirty", action="store_true", help="proceed with uncommitted changes outside the spec")
+    im.add_argument("--skip-baseline", action="store_true", help="do not run the gates before the agent starts")
+    im.add_argument("--dry-run", action="store_true", help="validate, write the prompt, print the agent command; run nothing")
+    common(im)
+    sub.add_parser("sync")
     nw = sub.add_parser("new")
     nw.add_argument("slug")
     nw.add_argument("--title")
@@ -1192,14 +1438,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 COMMANDS = {
     "setup": cmd_setup, "doctor": cmd_doctor, "gates": cmd_gates, "facts": cmd_facts, "verify": cmd_verify, "loop": cmd_loop,
-    "feature": cmd_feature, "new": cmd_new, "deploy": cmd_deploy, "secrets": cmd_secrets, "up": cmd_up, "down": cmd_down, "report": cmd_report,
+    "feature": cmd_feature, "implement": cmd_implement, "sync": cmd_sync, "new": cmd_new, "deploy": cmd_deploy, "secrets": cmd_secrets, "up": cmd_up, "down": cmd_down, "report": cmd_report,
 }
 
 
 def main(argv: list | None = None) -> int:
     args = build_parser().parse_args(argv)
     cfg = load_config()
-    for name, default in (("runtime", None), ("no_runtime", False), ("base_url", None), ("provides", None), ("feature", None)):
+    for name, default in (("runtime", None), ("no_runtime", False), ("base_url", None), ("provides", None), ("feature", None),
+                           ("allow_dirty", False), ("skip_baseline", False), ("dry_run", False), ("agent", None), ("max", None)):
         if not hasattr(args, name):
             setattr(args, name, default)
     try:

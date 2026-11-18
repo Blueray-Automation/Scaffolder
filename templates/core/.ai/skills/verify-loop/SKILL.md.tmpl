@@ -13,7 +13,9 @@ description: Run and interpret the verification loop (gates, facts, evidence, ex
 | Prove acceptance criteria on the running system | `./scripts/sdlc facts` |
 | Everything CI runs | `./scripts/sdlc verify` |
 | Verify, heal, verify until green | `./scripts/sdlc loop` |
-| One feature, PRD to green | `./scripts/sdlc feature FEAT-xxx` |
+| Spec in, verified code out (agent writes it) | `./scripts/sdlc implement FEAT-xxx` (`--dry-run` shows the prompt first) |
+| One feature incl. PRD drafting and deploy | `./scripts/sdlc feature FEAT-xxx` |
+| Install dependencies after editing a manifest | `./scripts/sdlc sync` |
 | Read the last result | `./scripts/sdlc report` |
 
 ## Reading the result

@@ -57,9 +57,15 @@ Details: [`AGENTS.md`](AGENTS.md) and [`.ai/README.md`](.ai/README.md).
 
 ```bash
 ./scripts/sdlc new user-login          # creates .ai/specs/FEAT-001-user-login/{prd.md,acceptance.json}
-# write the PRD (skill: .ai/skills/write-prd), then:
-./scripts/sdlc feature FEAT-001        # PRD -> Code -> Test loop  (add --deploy <env> to ship)
+# you write the PRD and the checks (skills: .ai/skills/write-prd, write-fact-checks); that is the only manual part. Then:
+./scripts/sdlc implement FEAT-001      # the agent writes tests, code, dependencies and config; the loop proves it
 ```
+
+`implement` checks the spec is complete, installs the toolchain if needed, runs a baseline, gives the agent your PRD and checks as its prompt,
+installs any dependency the agent adds, then verifies and heals until green. It never commits or pushes: you review `git diff`.
+The agent is `<%agentPreset%>`<%#agentConfigured%> (`<%agentCommand%>`)<%/agentConfigured%>; change it in `scaffolder.config.yaml` or per run with `SDLC_AGENT_CMD`.
+Add `--dry-run` to see the exact prompt and command without running anything. `./scripts/sdlc feature FEAT-001` does the same and also ships (`--deploy <env>`).
+
 
 <%#hasCd%>
 ## CI/CD
