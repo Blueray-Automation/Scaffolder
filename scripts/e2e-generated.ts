@@ -88,7 +88,27 @@ function scenario(name: string, patch: Json): void {
     git("init", "-q");
 
     expectExit("doctor", dir, ["doctor"], 0);
+
+    // --- a too-old Python must produce guidance, never a raw pip error; an explicit new one is accepted ---
+    const fakePython = (version: string) => {
+      const file = join(dir, "..", `fake-python-${version}-${name}.sh`);
+      writeFileSync(file, `#!/bin/sh\necho ${version}\n`);
+      chmodSync(file, 0o755);
+      return file;
+    };
+    const tooOld = expectExit("setup refuses a too-old Python", dir, ["setup"], 1, { SDLC_PYTHON: fakePython("3.9") });
+    if (tooOld.includes(`Python >= ${cfg.backend.version}`) && tooOld.includes("SDLC_PYTHON") && !tooOld.includes("pip")) {
+      ok("it explains the problem and the fix instead of a raw pip error");
+    } else bad("too-old Python message did not explain the fix");
+    const oldDoctor = expectExit("doctor reports a too-old Python", dir, ["doctor"], 1, { SDLC_PYTHON: fakePython("3.9") });
+    if (oldDoctor.includes("MISS") && oldDoctor.includes(`python>=${cfg.backend.version}`)) ok("doctor names the missing Python");
+    else bad("doctor did not name the missing Python");
+    const okDoctor = expectExit("doctor accepts a new-enough Python", dir, ["doctor"], 0, { SDLC_PYTHON: fakePython(cfg.backend.version) });
+    if (okDoctor.includes(`Python ${cfg.backend.version}`)) ok("doctor shows which interpreter it will use");
+    else bad("doctor did not show the interpreter");
+
     expectExit("setup (pip + npm install)", dir, ["setup"], 0);
+    if (!cfg.web.enabled) expectExit("setup again is idempotent (stale venv is replaced)", dir, ["setup"], 0);
     git("add", "-A");
     git("commit", "-qm", "baseline");
 
@@ -134,10 +154,15 @@ function scenario(name: string, patch: Json): void {
     // --- the real thing: build the images and check every fact against the compose stack ---
     if (cfg.docker.enabled && cfg.sdlc.runtime === "docker") {
       if (run("docker", ["info"], dir).status === 0) {
-        const dockerFacts = expectExit("facts against the docker compose stack (builds images)", dir, ["facts"], 0);
-        const dockerSkips = (dockerFacts.match(/\bSKIP\b/g) ?? []).length;
-        if (dockerSkips === 0) ok("nothing skipped: the database readiness fact ran against real PostgreSQL");
-        else bad(`docker runtime skipped ${dockerSkips} check(s)`);
+        expectExit("facts against the docker compose stack (builds images)", dir, ["facts"], 0);
+        const dockerResults = JSON.parse(readFileSync(join(dir, ".ai/evidence/latest/results.json"), "utf8")) as Json;
+        const items = dockerResults.items as Json[];
+        const ready = items.find((i) => i.id === "FEAT-000:CHK-005");
+        if (dockerResults.passed === true && !items.some((i) => i.status === "skip")) {
+          ok("nothing skipped: the readiness fact ran against real PostgreSQL");
+        } else {
+          bad(`docker facts did not fully pass (CHK-005: ${ready?.status ?? "missing"}, skips: ${items.filter((i) => i.status === "skip").length})`);
+        }
       } else {
         log("  - docker daemon not running: Dockerfiles, compose stack and docker-mode facts were NOT exercised");
       }

@@ -102,6 +102,112 @@ def rel(p: Path) -> str:
         return str(p)
 
 
+# --------------------------------------------------------------------------- python interpreter
+
+
+def parse_version(text: str) -> tuple:
+    major, minor = (text.split(".") + ["0"])[:2]
+    return int(major), int(minor)
+
+
+def python_version(path: str) -> tuple | None:
+    """(major, minor) an interpreter reports, or None if it cannot be run."""
+    try:
+        out = subprocess.run(
+            [path, "-c", "import sys; print('%d.%d' % sys.version_info[:2])"],
+            capture_output=True, text=True, timeout=15,
+        )
+        return parse_version(out.stdout.strip())
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def find_python(minimum: str) -> tuple:
+    """Find an interpreter >= `minimum`. Returns (path, version), or (None, newest version found)."""
+    want = parse_version(minimum)
+    explicit = os.environ.get("SDLC_PYTHON")
+    if explicit:  # an explicit choice is never silently replaced by another interpreter
+        path = shutil.which(explicit)
+        ver = python_version(path) if path else None
+        return (path, ver) if ver and ver >= want else (None, ver)
+    # the exact configured version first, then newer ones, then whatever `python3` / `python` is
+    candidates = [f"python{want[0]}.{m}" for m in range(want[1], want[1] + 5)] + ["python3", "python"]
+    newest, seen = None, set()
+    for name in candidates:
+        path = shutil.which(name)
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        ver = python_version(path)
+        if ver is None:
+            continue
+        newest = ver if newest is None else max(newest, ver)
+        if ver >= want:
+            return path, ver
+    return None, newest
+
+
+def install_hints(minimum: str) -> list:
+    return [
+        f"  macOS (Homebrew):  brew install python@{minimum}",
+        f"  uv (any OS):       uv python install {minimum}",
+        f"  pyenv:             pyenv install {minimum} && pyenv local {minimum}",
+        "  other:             https://www.python.org/downloads/",
+        "Already installed somewhere unusual?  SDLC_PYTHON=/path/to/python ./scripts/sdlc setup",
+    ]
+
+
+def offer_python_install(minimum: str) -> str | None:
+    """Offer to install a suitable Python with uv or Homebrew. Runs only with explicit consent:
+    a typed 'y' at the prompt, or SDLC_INSTALL_PYTHON=yes. Returns the interpreter path or None."""
+    if shutil.which("uv"):
+        name, command = "uv", ["uv", "python", "install", minimum]
+    elif shutil.which("brew"):
+        name, command = "Homebrew", ["brew", "install", f"python@{minimum}"]
+    else:
+        return None
+    consent = os.environ.get("SDLC_INSTALL_PYTHON", "").lower() in ("1", "yes", "true")
+    if not consent:
+        if not sys.stdin.isatty():
+            return None
+        try:
+            answer = input(f"Install Python {minimum} now with {name}  ({' '.join(command)})? [y/N] ")
+        except (EOFError, KeyboardInterrupt):
+            return None
+        consent = answer.strip().lower() in ("y", "yes")
+    if not consent:
+        return None
+    if subprocess.call(command) != 0:
+        say(bad(f"{name} could not install Python {minimum}"))
+        return None
+    if name == "uv":
+        found = subprocess.run(["uv", "python", "find", minimum], capture_output=True, text=True)
+        return found.stdout.strip() or None if found.returncode == 0 else None
+    return find_python(minimum)[0]
+
+
+def resolve_python(minimum: str, what: str, *, interactive: bool) -> str | None:
+    """A suitable interpreter, or None after explaining exactly what to do about it."""
+    path, ver = find_python(minimum)
+    if path:
+        return path
+    shown = f"{ver[0]}.{ver[1]}" if ver else "none"
+    explicit = os.environ.get("SDLC_PYTHON")
+    if explicit:
+        say(bad(f"SDLC_PYTHON={explicit} is Python {shown} (or not runnable), but {what} needs Python >= {minimum}."))
+        say("Point SDLC_PYTHON at a newer interpreter, or unset it so setup can search for one.")
+        return None
+    say(bad(f"{what} needs Python >= {minimum}, but the newest Python found is {shown}."))
+    if interactive:
+        installed = offer_python_install(minimum)
+        if installed and (v := python_version(installed)) and v >= parse_version(minimum):
+            return installed
+    say(f"Install Python {minimum}, then run ./scripts/sdlc setup again:")
+    for line in install_hints(minimum):
+        say(line)
+    return None
+
+
 # --------------------------------------------------------------------------- processes
 
 
@@ -784,9 +890,18 @@ def cmd_loop(cfg: dict, args: argparse.Namespace) -> int:
 def cmd_setup(cfg: dict, args: argparse.Namespace) -> int:
     run = Run("setup")
     for step in cfg["setup"]:
+        command = step["cmd"]
+        minimum = step.get("minPython")
+        if minimum:  # pick (or offer to install) an interpreter that satisfies the project, never fail with a raw pip error
+            python = resolve_python(minimum, step["label"], interactive=True)
+            if python is None:
+                return EXIT_FAIL
+            ver = python_version(python) or (0, 0)
+            say(dim(f"  using {python} (Python {ver[0]}.{ver[1]})"))
+            command = command.replace("{python}", shlex.quote(python))
         say(f"  {step['label']} ...")
         log = run.logs / f"{step['id']}.log"
-        code = run_shell(step["cmd"], ROOT / step["cwd"], log, env=os.environ.copy(), timeout=1800)
+        code = run_shell(command, ROOT / step["cwd"], log, env=os.environ.copy(), timeout=1800)
         if code != 0:
             say(bad(f"  FAILED ({step['id']}):\n{tail_lines(log, 30)}"))
             return EXIT_FAIL
@@ -807,8 +922,22 @@ def cmd_doctor(cfg: dict, args: argparse.Namespace) -> int:
         if path:
             with contextlib.suppress(Exception):
                 version = subprocess.run([tool, "--version"], capture_output=True, text=True, timeout=10).stdout.strip().splitlines()[0]
-        say(f"  {ok('ok  ') if path else bad('MISS')}  {tool:8} {version}")
+        say(f"  {ok('ok  ') if path else bad('MISS')}  {tool:12} {version}")
         bad_count += 0 if path else 1
+    for step in cfg["setup"]:
+        minimum = step.get("minPython")
+        if not minimum:
+            continue
+        path, ver = find_python(minimum)
+        name = f"python>={minimum}"
+        if path:
+            say(f"  {ok('ok  ')}  {name:12} {path} (Python {ver[0]}.{ver[1]}) for {step['id']}")
+        else:
+            bad_count += 1
+            shown = f"{ver[0]}.{ver[1]}" if ver else "none"
+            say(f"  {bad('MISS')}  {name:12} {step['label']} needs Python >= {minimum}; the newest found is {shown}")
+            for line in install_hints(minimum):
+                say(f"        {line.strip()}")
     say("")
     say(ok("toolchain ready") if not bad_count else bad(f"{bad_count} required tool(s) missing"))
     return EXIT_OK if not bad_count else EXIT_FAIL
@@ -939,6 +1068,9 @@ SECRET_PATTERNS = [
 ]
 SECRET_SKIP_DIRS = {".git", "node_modules", ".venv", ".next", "__pycache__", ".ai/evidence"}
 SECRET_SKIP_FILES = {".env.example", "package-lock.json", "docker-compose.yml"}
+# Fake credentials are normal in tests and specs, so the generic keyword heuristic skips them.
+# High-confidence formats (cloud keys, tokens, private keys) are still caught everywhere.
+FIXTURE_PATH = re.compile(r"(^|/)(tests|__tests__)/|^\.ai/specs/")
 SECRET_BAD_NAMES = re.compile(r"(^|/)(\.env|id_rsa|id_ed25519|.*\.pem|.*\.p12|.*\.pfx)$")
 
 
@@ -966,6 +1098,8 @@ def cmd_secrets(cfg: dict, args: argparse.Namespace) -> int:
             if "sdlc:allow-secret" in line:
                 continue
             for name, rx in SECRET_PATTERNS:
+                if name == "hard-coded credential" and FIXTURE_PATH.search(r):
+                    continue
                 if rx.search(line):
                     findings.append(f"{r}:{n}: {name}")
     if findings:

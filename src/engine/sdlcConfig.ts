@@ -82,7 +82,13 @@ export function buildSdlcConfig(cfg: ScaffolderConfig): Record<string, unknown> 
       // Allowed to change, but every change is listed in the evidence report for review.
       guarded: [".ai/contract/"],
     },
-    setup: setupSteps(cfg),
+    // Python steps carry the minimum version and a {python} placeholder: `sdlc setup` finds (or offers to
+    // install) a suitable interpreter instead of failing with a raw pip error. CI uses the plain `python3`.
+    setup: setupSteps(cfg).map((step) =>
+      step.toolchain === "python"
+        ? { ...step, cmd: step.cmd.replace(/^python3 /, "{python} "), minPython: cfg.backend.version }
+        : step,
+    ),
     gates: buildGates(cfg),
     runtime: {
       mode: cfg.sdlc.runtime,
