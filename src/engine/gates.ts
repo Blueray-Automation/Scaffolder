@@ -54,7 +54,7 @@ export function setupSteps(cfg: ScaffolderConfig): SetupStep[] {
       component: "backend",
       cwd: cfg.layout.backendDir,
       toolchain: "python",
-      cmd: 'python3 -m venv .venv && .venv/bin/python -m pip install --quiet --upgrade pip && .venv/bin/pip install --quiet -e ".[dev]"',
+      cmd: 'python3 -m venv --clear .venv && .venv/bin/python -m pip install --quiet --upgrade pip && .venv/bin/pip install --quiet -e ".[dev]"',
     });
   }
   if (cfg.web.enabled) {

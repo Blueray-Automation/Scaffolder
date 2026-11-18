@@ -21,8 +21,10 @@ export function buildCompose(cfg: ScaffolderConfig): string {
         POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-" + v.db.password + "}",
         POSTGRES_DB: "${POSTGRES_DB:-" + v.db.name + "}",
       },
-      // Bound to loopback: reachable from the host for debugging, never from the network.
-      ports: ["127.0.0.1:${POSTGRES_PORT:-5432}:5432"],
+      // Loopback only (never reachable from the network). The host port is a random free one unless
+      // POSTGRES_PORT is set, so a Postgres already running on the dev machine cannot clash.
+      // Find it with: docker compose port postgres 5432
+      ports: ["127.0.0.1:${POSTGRES_PORT:-}:5432"],
       volumes: ["pg_data:/var/lib/postgresql/data"],
       healthcheck: {
         test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"],
@@ -110,9 +112,11 @@ export function buildEnvExample(cfg: ScaffolderConfig): string {
       `POSTGRES_USER=${v.db.user}`,
       `POSTGRES_PASSWORD=${v.db.password}`,
       `POSTGRES_DB=${v.db.name}`,
-      "POSTGRES_PORT=5432",
+      "# Host port for the compose database. Unset = a random free port on 127.0.0.1",
+      "# (see: docker compose port postgres 5432). Set it to use a fixed one, e.g. 5432.",
+      "# POSTGRES_PORT=5432",
       "",
-      "# Used when running the backend directly on the host (outside Docker)",
+      "# Used when running the backend directly on the host (outside Docker); needs POSTGRES_PORT above",
       `DATABASE_URL=${v.databaseUrlLocal}`,
     );
   }

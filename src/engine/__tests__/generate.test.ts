@@ -174,6 +174,28 @@ describe("generated project: specifics", () => {
     expect(compose.services.backend.build.context).toBe("./services/api");
   });
 
+  it("makes local setup Python-version aware while CI keeps plain python3", () => {
+    const { files } = generate({ backend: { version: "3.13" } });
+    const sdlc = JSON.parse(files.find((f) => f.path === ".ai/sdlc.json")!.content) as Json;
+    const step = (sdlc.setup as Json[]).find((s) => s.id === "backend.install")!;
+    expect(step.minPython).toBe("3.13");
+    expect(step.cmd).toMatch(/^\{python\} -m venv --clear \.venv/);
+
+    const ci = parse(files.find((f) => f.path === ".github/workflows/ci.yml")!.content) as Json;
+    const ciCommands = (ci.jobs.backend.steps as Json[]).map((s) => s.run as string | undefined);
+    expect(ciCommands.some((c) => c?.startsWith("python3 -m venv --clear .venv"))).toBe(true);
+    expect(JSON.stringify(ci)).not.toContain("{python}");
+    // the node step has no Python requirement
+    expect((sdlc.setup as Json[]).find((s) => s.id === "web.install")!.minPython).toBeUndefined();
+  });
+
+  it("never pins the database to a fixed host port (it would clash with a local Postgres)", () => {
+    const { files } = generate({});
+    const compose = parse(files.find((f) => f.path === "docker-compose.yml")!.content) as Json;
+    expect(compose.services.postgres.ports).toEqual(["127.0.0.1:${POSTGRES_PORT:-}:5432"]);
+    expect(files.find((f) => f.path === ".env.example")!.content).toMatch(/^# POSTGRES_PORT=5432$/m);
+  });
+
   it("bakes configuration into the loop: iterations, agent, coverage floors", () => {
     const { files } = generate({
       sdlc: { maxIterations: 9, noProgressLimit: 4, agent: { command: "my-agent" }, coverage: { backend: 91, web: 66 } },
