@@ -1,27 +1,46 @@
 # Tutorial: Add a Login API
 
-Build a small login feature (`POST /api/v1/auth/login` and `GET /api/v1/auth/me`) in a project you downloaded from Scaffolder,
-the way the project is designed to be changed: **requirements first, tests next, code last, and proof at the end.**
-
-- **Time:** about 30 minutes by hand, less with an AI agent.
-- **You need:** a project from [Getting Started](Getting-Started) that already passes `./scripts/sdlc verify`.
-- **Everything here was run for real.** The code is in [Reference: the login implementation](Reference-Login-Implementation) and
-  finished with `VERIFIED  29 passed, 0 failed` including the login checks against the Docker stack.
-
-> Scaffolder's own JWT/auth option is "coming soon", so login is built by hand. That makes it a good first exercise.
-
-## The big picture
+You write **two files**: `prd.md` (what you want) and `acceptance.json` (how to prove it). One command does everything else:
+the tests, the code, the new dependencies, the config, the API contract, and the proof that it all works.
 
 ```
-1. Create the spec        ./scripts/sdlc new user-login
-2. Write the PRD          what "done" means, as numbered acceptance criteria (AC-001 ...)
-3. Write the checks       acceptance.json: how each criterion is proven
-4. Write tests first      watch them fail
-5. Write the code         make them pass
-6. Run the gates          fix what the checks tell you
-7. verify                 green = done, with a report as evidence
-8. Commit, push, PR       CI runs the same checks
+you:      ./scripts/sdlc new user-login          creates the spec folder
+you:      write prd.md + acceptance.json         the only manual part
+you:      ./scripts/sdlc implement FEAT-001      <- everything below happens by itself
+ tool:      checks the spec is complete, installs the toolchain, runs a baseline
+ agent:     reads YOUR spec as its prompt; writes tests, code, dependencies, config, contract
+ tool:      installs the dependencies the agent added, then verifies against the running system
+ loop:      failures go back to the agent to fix, until green (or it stops and asks you)
+you:      git diff, commit, push, PR             nothing is committed for you
 ```
+
+> **How much was tested.** The whole pipeline around the agent (spec check, baseline, prompt, dependency install, integrity guard,
+> questions, verification) is tested end to end with a *scripted* agent that does what a good AI is told to do. The `claude` and `codex`
+> presets follow each tool's documented non-interactive mode but have **not been run against the real tools**. Run `--dry-run` first (below) and expect to tune your first prompt.
+
+## Before you start (once)
+
+1. A project from [Getting Started](Getting-Started) that passes `./scripts/sdlc verify`.
+2. An **AI agent CLI**, installed and signed in. Choose which in the web UI (**Verification loop -> AI agent**) or `sdlc.agent.preset` in `scaffolder.config.yaml`:
+
+| Preset | Runs | Notes |
+|---|---|---|
+| `claude` (default) | `claude -p ...` ([headless mode docs](https://code.claude.com/docs/en/headless)) | needs the Claude Code CLI on your `PATH` |
+| `codex` | `codex exec --sandbox workspace-write -` ([docs](https://developers.openai.com/codex/noninteractive)) | needs the Codex CLI; its sandbox may block network, which is why dependencies are installed by the tool, not the agent |
+| `custom` | any command that reads the prompt on stdin | e.g. another agent CLI |
+| `none` | nothing | a human does the coding; the tool prints the prompt |
+
+Check what is configured:
+
+```bash
+./scripts/sdlc doctor
+```
+
+The `agent` line shows the command and whether its program is installed. For one run you can override it:
+`SDLC_AGENT_CMD='your-agent-cli' ./scripts/sdlc implement FEAT-001`.
+
+> **Safety.** An agent runs shell commands in your project folder with your permissions (the `claude` preset pre-approves Bash so it can run the tests).
+> Work on a git branch, read the diff before committing, and use a container or VM for specs you don't trust. The tool never commits or pushes; the agent is told not to.
 
 ## Step 1. Create the spec
 
@@ -31,23 +50,10 @@ the way the project is designed to be changed: **requirements first, tests next,
 
 This creates `.ai/specs/FEAT-001-user-login/` with a `prd.md` and an `acceptance.json` full of placeholders.
 
-Run the facts now and watch it refuse:
+## Step 2. Write the PRD (`prd.md`)
 
-```bash
-./scripts/sdlc facts --runtime none
-```
-
-```text
-  FAIL  FEAT-001:traceability  ... prd.md still contains TODO(prd) placeholders: the PRD is not finished
-NOT VERIFIED
-```
-
-That is on purpose: a half-written requirement cannot pass.
-
-## Step 2. Write the PRD
-
-Open `.ai/specs/FEAT-001-user-login/prd.md`, replace the placeholders, and write the behaviour as **acceptance criteria**:
-one line each, observable from outside, including the unhappy paths.
+Replace the placeholders. Write the behaviour as **acceptance criteria**: one line each, observable from outside, including the unhappy paths.
+The agent has to guess whatever you leave vague, and it is told to *stop and ask* rather than guess, so a clear PRD saves a round trip.
 
 | ID | Behaviour |
 |---|---|
@@ -58,13 +64,12 @@ one line each, observable from outside, including the unhappy paths.
 | AC-005 | `GET /api/v1/auth/me` with a valid token -> `200` with the user's email |
 | AC-006 | `/me` with no token, a malformed token, or an expired token -> `401` |
 
-Also write down what is **out of scope** (registration, refresh tokens, password reset, a users table, rate limiting). The full PRD is in
-the [reference page](Reference-Login-Implementation#prdmd).
+Also write the **out of scope** list (registration, refresh tokens, password reset, a users table, rate limiting). The full PRD is in the
+[reference page](Reference-Login-Implementation#prdmd).
 
-## Step 3. Say how each criterion is proven
+## Step 3. Say how each criterion is proven (`acceptance.json`)
 
-Open `acceptance.json`. Every acceptance criterion needs at least one **check**, and every check must name the criterion it proves.
-There are three kinds of checks:
+Every acceptance criterion needs at least one **check**, and every check names the criterion it proves. Three kinds:
 
 | Type | Use it to | Example here |
 |---|---|---|
@@ -72,10 +77,8 @@ There are three kinds of checks:
 | `cmd` | run one specific test | AC-005 and the "expired token" case of AC-006 |
 | `file` | check a file exists or contains something | (not needed here) |
 
-Why `cmd` for AC-005? An `http` check is a single request, so it cannot take the token returned by one request and use it in the next.
-A pytest test can, so the check runs that test.
-
-Skeleton of one check (the full file is in the [reference](Reference-Login-Implementation#acceptancejson)):
+An `http` check is a single request, so it cannot reuse a token returned by an earlier request. That is why AC-005 uses a `cmd` check that runs a named test:
+the agent must then write that test, with exactly that name.
 
 ```json
 {
@@ -91,126 +94,97 @@ Skeleton of one check (the full file is in the [reference](Reference-Login-Imple
 }
 ```
 
-Check it hangs together (this needs no running system):
+The complete file is in the [reference](Reference-Login-Implementation#acceptancejson). Check the spec hangs together (needs no running system):
 
 ```bash
 ./scripts/sdlc facts --runtime none
 ```
 
-The traceability line for `FEAT-001` should now say `PASS`. If a criterion has no check you will see `AC-00x has no check: an unverified requirement is not done`.
+If a criterion has no check you will see `AC-00x has no check: an unverified requirement is not done`.
 
-## Step 4. Write the tests first
+## Step 4. Let the agent build it
 
-Create `backend/tests/test_auth.py` (the complete file is in the [reference](Reference-Login-Implementation#8-tests-backendteststest_authpy-new)).
-It covers every criterion, plus the edge cases a PRD is easy to forget: a token signed with another key, a token with no subject,
-no demo user configured.
-
-Run it and **watch it fail**; a test you never saw fail proves nothing:
+Look at exactly what it will be given, without running anything:
 
 ```bash
-cd backend && .venv/bin/pytest -q tests/test_auth.py
-```
-
-At this point it stops at an import error, because the code doesn't exist yet.
-
-## Step 5. Write the code
-
-Add the pieces from the [reference page](Reference-Login-Implementation), in this order:
-
-1. `pyjwt` in `backend/pyproject.toml`, then reinstall.
-2. Settings: `JWT_SECRET`, `DEMO_USER_EMAIL`, `DEMO_USER_PASSWORD` (no defaults, and a strong key is required).
-3. `app/core/security.py`: constant-time credential check, create/decode token.
-4. `app/schemas/auth.py`: the request and response models (the contract lives here).
-5. `app/api/v1/auth.py`: the two endpoints, then register the router.
-
-Now the tests go green:
-
-```bash
-cd backend && .venv/bin/pytest -q tests/test_auth.py
+./scripts/sdlc implement FEAT-001 --dry-run
 ```
 
 ```text
-18 passed
+Dry run: nothing was executed.
+  agent command : claude -p --permission-mode acceptEdits --allowedTools "Read" ...
+  prompt        : .ai/evidence/<run>/implement.prompt.md  (176 lines, includes prd.md and acceptance.json)
 ```
 
-### Prefer to let an AI agent do steps 4 and 5?
-
-Open the project folder in your AI coding tool and give it this prompt:
-
-```text
-Read AGENTS.md. Implement FEAT-001 (the spec is in .ai/specs/FEAT-001-user-login/) following
-.ai/skills/implement-feature and .ai/skills/write-tests. Write tests first.
-You are done only when ./scripts/sdlc verify exits 0. Do not edit .ai/sdlc.json, scripts/sdlc*,
-.github/workflows/ or anything under .ai/specs/.
-```
-
-Or let the loop drive the agent for you. Give it a command that reads a prompt on stdin (this depends on your tool):
+Open the prompt file: it contains your PRD and your checks word for word, plus how the repository works and the rules. When you are happy:
 
 ```bash
-SDLC_AGENT_CMD='your-agent-cli' ./scripts/sdlc feature FEAT-001
+./scripts/sdlc implement FEAT-001
 ```
 
-The loop runs the checks, sends failures to the agent as a "fix this" note, and checks again, up to 5 times. See [The Verification Loop](The-Verification-Loop).
+### What happens
 
-## Step 6. Run the gates and fix what they tell you
+1. **Spec check.** Every criterion has a check, no `TODO(prd)` left. Otherwise it stops and tells you what is missing.
+2. **Agent check.** The agent's program must be installed. Otherwise it tells you how to fix it.
+3. **Clean tree.** Uncommitted changes outside the spec folder stop the run, so the diff you review is only the agent's work (`--allow-dirty` to override).
+4. **Toolchain.** Missing virtualenv or `node_modules` are installed for you. No `setup` needed first.
+5. **Baseline.** The gates run before the agent starts, so an existing failure is never blamed on the agent (`--skip-baseline` to skip).
+6. **The agent works.** It writes tests first, then the code, adds any new library to `pyproject.toml` / `package.json` and installs it with `./scripts/sdlc sync`, adds new settings to `.env.example` and `docker-compose.yml`, and updates the API contract.
+7. **Guard.** If the agent changed your spec or the verification machinery, the run stops (exit 4). If it wrote questions instead, you see them (exit 2).
+8. **Dependencies.** Anything the agent added to a manifest but forgot to install is installed now.
+9. **Verify and heal.** All gates, then your checks against the **running** service. Failures go back to the same agent, up to 5 rounds, stopping early if it makes no progress.
+10. **Report.** You get the changed files and `.ai/evidence/latest/report.md`. Nothing is committed.
 
-```bash
-./scripts/sdlc gates --keep-going
-```
+### When it stops
 
-`--keep-going` shows every failure at once instead of stopping at the first failing stage. On the first run of this feature you should expect **three** things:
-
-| What you see | Why | What to do |
+| Exit | Meaning | What you do |
 |---|---|---|
-| `backend.lint` fails on line length / formatting | Your editor didn't format like ruff | `cd backend && .venv/bin/ruff format .`, then re-run |
-| `backend.lint`: `S105 hardcoded password ... "token_type"` | A false alarm: `token_type = "bearer"` is the OAuth2 token type, not a password | Add a **narrow, explained** `# noqa: S105 (the OAuth2 token type, not a password)` on that line only |
-| `backend.contract` fails with a diff | You added endpoints, so the API changed. The gate exists to make that deliberate | Step 7 |
+| 0 | Implemented and verified | Review and ship (step 5) |
+| 2 | Needs you: spec incomplete, agent missing, dirty tree, baseline red, or the agent has questions | Read the message; fix the spec or environment; run again |
+| 3 | Same failure repeated; more rounds won't help | Read the report and the last heal prompt; fix it yourself or sharpen the PRD |
+| 4 | The agent changed your spec or the gate config | `git checkout -- <path>` to revert it, then run again |
+| 1 | Verification still failing after all rounds | Read `.ai/evidence/latest/report.md` |
 
-Rules of thumb: fix the code, not the check. A `noqa` is fine for a *proven false alarm*, one line, with the reason written next to it.
-Never lower a threshold, skip a test, or delete a check to get green.
-
-## Step 7. Update the API contract (on purpose)
-
-The committed file `.ai/contract/openapi.json` is a snapshot of your API. Changing the API without updating it fails the gate, so the change is always visible in review.
-Regenerate it and **read the diff**:
+## Step 5. Review and ship
 
 ```bash
-cd backend && python -m app.export_openapi --write ../.ai/contract/openapi.json
+git status
 ```
-
-The diff should add `/api/v1/auth/login`, `/api/v1/auth/me` and the schemas `LoginRequest`, `TokenResponse`, `MeResponse`, and nothing else.
-
-## Step 8. Give Docker the demo user, then verify
-
-The Docker stack is what the facts run against, so the container needs the demo user and a signing key.
-Add three lines under `backend` -> `environment` in `docker-compose.yml` and the same names in `.env.example`
-(the exact lines are in the [reference](Reference-Login-Implementation#9-environment-for-docker)). These are **development values only**.
-
-Make sure Docker is running, then:
 
 ```bash
-./scripts/sdlc verify
+git diff
 ```
+
+Read it like any pull request: the tests, the code, the manifest change, the new settings, the contract diff (it should only add your endpoints and schemas).
+Then:
+
+```bash
+git switch -c feat/FEAT-001-user-login
+```
+
+```bash
+git add -A && git commit -m "feat(auth): login and /me (FEAT-001)"
+```
+
+Push and open a pull request. CI re-runs the same gates and the facts against the Docker stack and uploads the evidence report.
+
+## Prefer to do it by hand? Or compare with the agent's work?
+
+The [reference page](Reference-Login-Implementation) has the complete, verified code for this feature, written by hand following the same rules. Doing it manually looks like this:
+
+1. Write the tests first (`backend/tests/test_auth.py`) and watch them fail.
+2. Add the library to `backend/pyproject.toml`, then `./scripts/sdlc sync`.
+3. Write the settings, the security helpers, the schemas and the two endpoints.
+4. `./scripts/sdlc gates --keep-going`, and fix what it reports: line length (`ruff format .`), the OAuth2 `token_type` false alarm (a narrow, explained `noqa`), and contract drift.
+5. Update the contract on purpose: `cd backend && python -m app.export_openapi --write ../.ai/contract/openapi.json`, and read the diff.
+6. Add the three settings to `docker-compose.yml` and `.env.example` so the Docker stack has a demo user.
+7. `./scripts/sdlc verify`:
 
 ```text
-== facts ==
-  PASS  FEAT-001:traceability  FEAT-001 every criterion has a check
-  PASS  FEAT-001:CHK-001  Valid credentials return a bearer token
-  PASS  FEAT-001:CHK-002  Wrong password is rejected with a generic message
-  ...
 VERIFIED  29 passed, 0 failed, 1 warnings, 0 skipped
 ```
 
-The one warning is the advisory `npm audit` gate (see [Troubleshooting](Troubleshooting#npm-audit-shows-a-warning)).
-The report with every AC and the check that proves it is `.ai/evidence/latest/report.md`.
-
-No Docker? `./scripts/sdlc verify --runtime local` works, but runs the service without a demo user, so the login checks cannot pass there. Use Docker for this feature.
-
-## Step 9. Try it by hand
-
-```bash
-make up
-```
+Try it by hand with `make up`, then:
 
 ```bash
 curl -s -X POST localhost:8000/api/v1/auth/login -H 'Content-Type: application/json' \
@@ -229,35 +203,17 @@ curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer <paste the acces
 {"email":"demo@example.com"}
 ```
 
-Without a token you get `401 {"detail":"Not authenticated"}` with a `www-authenticate: Bearer` header; a wrong password gets
-`401 {"detail":"Invalid email or password"}`. The interactive API docs are at <http://localhost:8000/docs>. Stop everything with:
-
-```bash
-make down
-```
-
-## Step 10. Commit, push, open a PR
-
-```bash
-git switch -c feat/FEAT-001-user-login
-```
-
-```bash
-git add -A && git commit -m "feat(auth): add demo login and /me (FEAT-001)"
-```
-
-Push the branch and open a pull request. The PR template asks for the report summary. CI re-runs the same gates and the facts
-against the Docker stack, and uploads the evidence report as an artifact.
+Without a token you get `401 {"detail":"Not authenticated"}`; a wrong password gets `401 {"detail":"Invalid email or password"}`. API docs: <http://localhost:8000/docs>. Stop with `make down`.
 
 ## What to change before real use
 
 This sample is intentionally small. Before shipping real logins:
 
-- Replace the single demo user with a **users table** (see the PostgreSQL setup in the project) and **hashed passwords** (argon2 or scrypt, never plain text).
+- Replace the single demo user with a **users table** and **hashed passwords** (argon2 or scrypt, never plain text).
 - Add **rate limiting / lockout** on `/login`.
 - Add **refresh tokens** and a logout story if you need sessions longer than 15 minutes.
 - Serve only over **HTTPS**, keep `JWT_SECRET` in a secret manager or GitHub Environment secrets, and rotate it.
-- Write a new PRD for each of these. Each one is its own feature: `./scripts/sdlc new <name>`.
+- Each of these is its own feature: write a PRD and checks, then `./scripts/sdlc implement`.
 
 ## Where to go next
 

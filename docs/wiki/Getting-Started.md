@@ -116,4 +116,5 @@ scaffolder.config.yaml   what this project was generated from
 
 ## Next
 
-[Tutorial: Add a Login API](Tutorial-Add-a-Login-API): change the project the way it is meant to be changed.
+[Tutorial: Add a Login API](Tutorial-Add-a-Login-API): write a PRD and its checks, then `./scripts/sdlc implement` has an AI agent build and prove the feature
+(you need an agent CLI installed once; `./scripts/sdlc doctor` shows what is configured).

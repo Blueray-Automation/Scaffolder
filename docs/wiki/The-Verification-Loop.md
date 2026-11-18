@@ -13,7 +13,9 @@ The rule it enforces: *done means `./scripts/sdlc verify` exits 0 and you can sh
 | `./scripts/sdlc facts` | Checks every PRD requirement against the **running** system |
 | `./scripts/sdlc verify` | Gates + facts. This is exactly what CI runs |
 | `./scripts/sdlc loop` | verify, then heal, then verify... until green or out of budget |
-| `./scripts/sdlc feature <name>` | PRD, then code, then test (the loop) for one feature |
+| `./scripts/sdlc implement <FEAT-id>` | **Spec in, verified code out.** Gives your `prd.md` + `acceptance.json` to the agent, installs what it adds, verifies, heals |
+| `./scripts/sdlc sync` | Installs dependencies only if a manifest (`pyproject.toml`, `package.json`) changed since the last install |
+| `./scripts/sdlc feature <name>` | `implement` plus PRD drafting from a `--brief`, and `--deploy <env>` |
 | `./scripts/sdlc new <slug>` | Creates a feature spec from the template |
 | `./scripts/sdlc deploy <env>` | Runs the deploy script, then checks the live URL |
 | `./scripts/sdlc secrets` | Scans for committed secrets |
@@ -97,14 +99,27 @@ An agent that is told to "make the tests pass" can cheat by changing the tests. 
 
 ### Using an AI agent
 
-The agent is any command that reads the prompt on standard input. Set it in `scaffolder.config.yaml` (`sdlc.agent.command`) before generating, edit `agent.command` in `.ai/sdlc.json`, or set it for one run:
+The agent is any command that reads the prompt on standard input. Pick a preset (`claude`, `codex`, `custom`, `none`) with `sdlc.agent.preset` in
+`scaffolder.config.yaml` or in the web UI; an explicit `sdlc.agent.command` overrides the preset. After generating, the resolved command lives in
+`.ai/sdlc.json` -> `agent.command`. For one run:
 
 ```bash
-SDLC_AGENT_CMD='your-agent-cli' ./scripts/sdlc loop
+SDLC_AGENT_CMD='your-agent-cli' ./scripts/sdlc implement FEAT-001
 ```
 
-With no agent, the loop prints the prompt file for you (or your own AI tool) and waits. The loop's mechanics are tested with scripted agents;
-how well a particular agent follows the prompts depends on that agent.
+With no agent, the tool prints the prompt file for you (or your own AI tool) and waits.
+
+`implement` and the healing loop use the same agent. **`implement`** gives it your whole spec once (the prompt `.ai/prompts/implement.md`, with your `prd.md` and
+`acceptance.json` embedded); **heal** prompts (`.ai/prompts/heal.md`) then send it only the failures. Both tell it the hard rules: never edit the spec, never weaken a test,
+never commit or push, ask instead of guessing.
+
+The mechanics around the agent are tested end to end with a scripted agent. How well a particular AI follows the prompts depends on that AI, and the
+`claude` / `codex` presets have not been run against the real tools: use `./scripts/sdlc implement <FEAT-id> --dry-run` to inspect the command and prompt first.
+
+### Dependencies
+
+`./scripts/sdlc sync` compares a hash of each dependency manifest with what was last installed (`.ai/evidence/installed.json`) and reinstalls only what changed.
+`implement` runs it before the agent (missing toolchain) and after it (anything the agent added), and agents are told to run it after editing a manifest.
 
 ## Configure it
 

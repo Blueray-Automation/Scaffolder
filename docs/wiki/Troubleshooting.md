@@ -77,6 +77,36 @@ That gate is advisory on purpose. It reports vulnerabilities in transitive depen
 ### A deprecation warning about `httpx2` in pytest output
 Newer Starlette versions prefer a different HTTP test client. The tests pass; the warning is harmless.
 
+## `./scripts/sdlc implement`
+
+### `The spec is not ready to implement`
+The tool refuses to spend an agent's time on an unfinished spec. It lists what is missing: `TODO(prd)` placeholders still in `prd.md`, a criterion with no check, or a check that cites a criterion that doesn't exist. Fix `prd.md` / `acceptance.json` and run again.
+
+### `The agent cannot run: ... is not installed or not on PATH`
+The agent's program isn't installed. Install the CLI for your preset (see the links in the [tutorial](Tutorial-Add-a-Login-API#before-you-start-once)), choose another preset in `scaffolder.config.yaml`,
+or use `SDLC_AGENT_CMD='...'` for one run. `./scripts/sdlc doctor` shows the configured command and whether it is installed.
+
+### `No agent is configured, so nothing can write the code`
+The preset is `none` (or the command is empty). Set `sdlc.agent.preset`, or `SDLC_AGENT_CMD`.
+
+### `You have uncommitted changes outside this feature's spec`
+`implement` wants a clean tree so the diff you review is only the agent's work. Commit or stash your changes, or pass `--allow-dirty`.
+
+### `The project is already failing before any change`
+The baseline gates were red before the agent started. Fix that first (`./scripts/sdlc gates`), or pass `--skip-baseline` to let the agent try anyway.
+
+### `The agent could not proceed without answers from you`
+The agent decided the spec was ambiguous and wrote questions instead of guessing. Answer them in `prd.md` / `acceptance.json`, then run again.
+
+### `INTEGRITY VIOLATION: the agent changed files that define what 'correct' means`
+The agent edited your spec or the gate config. Revert with `git checkout -- <path>` (the tool lists the files) and run again. If it keeps happening, make the PRD clearer: an agent that "fixes" the spec usually found it contradictory.
+
+### The agent ran but nothing passes (exit 1 or 3)
+Read `.ai/evidence/latest/report.md`, then the prompt the agent got (`implement.prompt.md` in the run folder under `.ai/evidence/`) and its output (`*.agent.log`). Exit 3 means the same failure repeated. A clear fix is usually in the PRD: add the missing detail and run again.
+
+### The agent made commits
+`implement` warns if `HEAD` moved. The agent was told not to commit; review `git log` and undo with `git reset --soft <commit>` if you don't want them.
+
 ## The loop and the specs
 
 ### `verify` fails right after `./scripts/sdlc new`

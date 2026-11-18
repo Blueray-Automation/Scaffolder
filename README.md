@@ -42,6 +42,18 @@ cd ../my-app
 ./scripts/sdlc verify     # gates + PRD facts: exactly what CI runs
 ```
 
+**Build a feature by writing only the spec:**
+
+```bash
+./scripts/sdlc new user-login            # creates .ai/specs/FEAT-001-user-login/
+# you write prd.md (what you want) and acceptance.json (how to prove it); that is the only manual part
+./scripts/sdlc implement FEAT-001        # an AI agent writes tests, code, dependencies, config and the API contract; the loop proves it
+```
+
+`implement` checks the spec is complete, installs the toolchain, runs a baseline, gives the agent your PRD and checks as its prompt, installs any
+dependency the agent adds, then verifies against the running system and heals until green. It never commits or pushes. Pick the agent
+(`claude`, `codex` or any command that reads a prompt on stdin) in the UI or `sdlc.agent.preset`.
+
 ## Documentation (wiki)
 
 Step-by-step guides live in [`docs/wiki/`](docs/wiki/Home.md) and are published to the GitHub wiki automatically:
@@ -61,7 +73,7 @@ One-time setup for publishing: enable *Wikis* in the repository settings and cre
 |---|---|
 | **Hello world** | FastAPI service (`/health`, `/ready`, `/api/v1/hello`), Next.js page that renders the greeting from the API at request time, typed settings, strict mypy/ruff/eslint, pytest and Vitest with enforced coverage floors |
 | **AI operating system** (`.ai/`) | `rules/` (conventions), `skills/` (agent-neutral playbooks: write-prd, define-contract, implement-feature, write-tests, verify-loop, fix-failing-gate, review-change, release-and-deploy, write-fact-checks), `prompts/` (prd / implement / heal), `specs/` (FEAT-000 worked example + template), `contract/` (OpenAPI snapshot) |
-| **Verification loop** (`scripts/sdlc`) | stdlib-only Python: gates, **facts** (PRD acceptance criteria vs the *running* system), evidence reports, healing loop with budget, no-progress detection and an integrity guard that stops agents from editing the gates or specs |
+| **Verification loop** (`scripts/sdlc`) | stdlib-only Python: `implement` (spec to verified code via an agent), `sync` (dependencies), gates, **facts** (PRD acceptance criteria vs the *running* system), evidence reports, healing loop with budget, no-progress detection and an integrity guard that stops agents from editing the gates or specs |
 | **CI/CD** | `ci.yml` (per-component jobs + facts job, evidence artifact), `cd.yml` (CI gate → build images **once** → GHCR → staged environments → post-deploy facts), pluggable deploy targets, PR template, Dependabot |
 | **Runtime** | Dockerfiles (non-root, health checks), `docker-compose.yml` with health-gated startup, `.env.example` |
 
@@ -121,6 +133,8 @@ npm run e2e       # slow, needs network, python3 >= 3.12 and node >= 22 on PATH
 ## Limits (as of this version)
 
 - One full vertical slice: **FastAPI + Next.js (App Router) + PostgreSQL + GitHub Actions + GHCR**. Other stacks are planned.
+- Agent presets: the whole pipeline around the agent is tested with a scripted agent. The `claude` and `codex` presets follow each tool's documented
+  non-interactive mode but have **not been run against the real CLIs** (use `implement --dry-run` to inspect the command and prompt first).
 - Deploy targets: `none` (placeholder, prints the plan) and `ssh-compose`. The tests exercise the image builds and the full
   compose stack (including PostgreSQL), and check the deploy scripts' syntax. They do **not** run the generated GitHub workflows,
   push to GHCR, or deploy to a real host; those are only checked structurally.
