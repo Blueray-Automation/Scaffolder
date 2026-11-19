@@ -13,7 +13,7 @@ export type RegistryType = "ghcr" | "dockerhub" | "none";
 export type DeployTarget = "none" | "ssh-compose" | "kubernetes";
 export type RuntimeMode = "docker" | "local" | "none";
 export type DeployTrigger = "push-default-branch" | "tag" | "manual";
-export type AgentPreset = "claude" | "codex" | "custom" | "none";
+export type AgentPreset = "claude" | "codex" | "gemini" | "copilot" | "cursor" | "custom" | "none";
 
 export interface Environment {
   /** GitHub Environment name, e.g. "staging". */

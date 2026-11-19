@@ -12,6 +12,7 @@ Standard library only (Python 3.9+). Configured by .ai/sdlc.json; see .ai/README
   loop      verify -> heal -> verify ... until green, stuck, or out of budget
   spec      draft prd.md + acceptance.json from a requirements document (PDF, DOCX, Markdown, text) with your agent
   implement turn a finished spec (prd.md + acceptance.json) into verified code with your agent
+  agent     see which AI agents are installed and choose one (claude, codex, gemini, copilot, cursor, or your own)
   feature   drive one feature through PRD -> Code -> Test (-> Deploy)
   sync      install dependencies, only if the manifests changed since the last install
   new       create a feature spec from the template
@@ -45,6 +46,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / ".ai" / "sdlc.json"
 EVIDENCE = ROOT / ".ai" / "evidence"
+AGENT_LOCAL = ROOT / ".ai" / "agent.local.json"  # this person's own choice of agent; not in git
 
 EXIT_OK, EXIT_FAIL, EXIT_HUMAN, EXIT_STUCK, EXIT_INTEGRITY, EXIT_USAGE = 0, 1, 2, 3, 4, 64
 
@@ -945,6 +947,7 @@ def run_agent(cfg: dict, command: str, prompt: str, tag: str, run_dir: Path) -> 
     log = run_dir / f"{tag}.agent.log"
     env = os.environ.copy()
     env.update({"SDLC_PROMPT_FILE": str(prompt_file), "SDLC_PHASE": tag})
+    command = command.replace("{prompt_file}", rel(prompt_file))  # for agents that take the prompt as an argument, not on stdin
     say(dim(f"  running agent: {command}"))
     code = run_shell(command, ROOT, log, env=env, timeout=cfg["agent"]["timeoutSeconds"], stdin_text=prompt)
     say(dim(f"  agent finished (exit {code}); output: {rel(log)}"))
@@ -1041,10 +1044,52 @@ def ensure_installed(cfg: dict, run: Run) -> bool:
     return all(run_setup_step(step, run) for step in stale)
 
 
+def agent_presets(cfg: dict) -> list:
+    return list(cfg["agent"].get("presets", []))
+
+
+def agent_preset_command(cfg: dict, name: str) -> str | None:
+    """The command a preset name stands for ("none" = a human does the coding = ""), or None if `name` is not one."""
+    if name == "none":
+        return ""
+    for preset in agent_presets(cfg):
+        if preset["id"] == name:
+            return preset["command"]
+    return None
+
+
+def read_agent_choice() -> dict:
+    """This person's own choice (`./scripts/sdlc agent`): kept out of git, because every developer has different tools."""
+    try:
+        data = json.loads(AGENT_LOCAL.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def current_agent(cfg: dict, args: argparse.Namespace | None = None) -> tuple:
+    """(command, where it came from). The most specific wins: --agent, SDLC_AGENT_CMD, your own choice, the project default.
+    A value that is just a preset's name (`--agent gemini`) means that preset's command."""
+    explicit, source = getattr(args, "agent", None), "--agent"
+    if explicit is None:
+        explicit, source = os.environ.get("SDLC_AGENT_CMD"), "SDLC_AGENT_CMD"
+    if explicit is not None:
+        explicit = explicit.strip()
+        preset = agent_preset_command(cfg, explicit) if explicit else None
+        return (explicit if preset is None else preset), source
+    mine = "your choice (" + rel(AGENT_LOCAL) + ")"
+    choice = read_agent_choice()
+    name = str(choice.get("preset", ""))
+    if name == "custom" and str(choice.get("command", "")).strip():
+        return str(choice["command"]).strip(), mine
+    preset = agent_preset_command(cfg, name) if name else None
+    if preset is not None:
+        return preset, mine
+    return cfg["agent"]["command"], "the project default"
+
+
 def resolve_agent(cfg: dict, args: argparse.Namespace) -> str:
-    if getattr(args, "agent", None) is not None:
-        return args.agent
-    return os.environ.get("SDLC_AGENT_CMD", cfg["agent"]["command"])
+    return current_agent(cfg, args)[0]
 
 
 def agent_problem(command: str) -> str | None:
@@ -1056,6 +1101,132 @@ def agent_problem(command: str) -> str | None:
     if shutil.which(program) is None:
         return f"`{program}` is not installed or not on PATH"
     return None
+
+
+def agent_table(cfg: dict) -> list:
+    """Every agent this project knows, with where its program was found (None = not installed on this machine)."""
+    return [{**preset, "path": shutil.which(preset["program"]) if preset.get("program") else None} for preset in agent_presets(cfg)]
+
+
+def agent_name(cfg: dict, command: str) -> str:
+    """The preset a command belongs to ("claude"), "none" for no agent, or the command itself (shortened) if it is custom."""
+    if not command:
+        return "none"
+    for preset in agent_presets(cfg):
+        if preset["command"] == command:
+            return preset["id"]
+    return "custom: " + (command if len(command) <= 60 else command[:57] + "...")
+
+
+def print_agent_options(cfg: dict, command: str, source: str = "") -> None:
+    """Show every agent whether or not it is installed: what to pick now, and how to get the others."""
+    say(c("\nAI agents (what drafts specs and writes code for you):", "1"))
+    for number, row in enumerate(agent_table(cfg), 1):
+        mark = "*" if command and row["command"] == command else " "
+        state = (ok("installed    ") + dim(f" {row['path']}")) if row["path"] else warn("not installed")
+        say(f"  {mark}{number}  {row['id']:8} {row['label']:34} {state}")
+        if not row["path"] and row.get("install"):
+            say(dim(f"              install: {row['install']}"))
+    say("   c  custom   any command that reads the prompt on stdin (or names the prompt file with {prompt_file})")
+    say("   n  none     a human does the coding; the tool prints the prompt and waits")
+    say(f"\nUsing now: {agent_name(cfg, command)}   ({source})")
+
+
+def save_agent_choice(cfg: dict, name: str, custom: str = "") -> str | None:
+    """Remember this person's choice (outside git). Returns the command now in use ("" = none), or None if it is not valid."""
+    if name == "custom":
+        command = custom.strip()
+        if not command:
+            say(bad("A custom agent needs its command, e.g.  ./scripts/sdlc agent custom --command 'my-agent --prompt-stdin'"))
+            return None
+        data = {"preset": "custom", "command": command}
+    else:
+        found = agent_preset_command(cfg, name)
+        if found is None:
+            known = ", ".join([p["id"] for p in agent_presets(cfg)] + ["custom", "none"])
+            say(bad(f"Unknown agent '{name}'. Choose one of: {known}."))
+            return None
+        command, data = found, {"preset": name}
+    AGENT_LOCAL.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    say(ok(f"Saved: this project will use {name} on this machine ({rel(AGENT_LOCAL)}; not committed)."))
+    if command:
+        problem = agent_problem(command)
+        if problem:
+            install = next((p["install"] for p in agent_presets(cfg) if p["id"] == name and p.get("install")), "")
+            say(warn(f"  {problem}.") + (f" Install it with: {install}" if install else ""))
+            say(dim("  Run `./scripts/sdlc doctor` after installing to check."))
+    return command
+
+
+def choose_agent_interactive(cfg: dict) -> str | None:
+    """Ask which agent to use and remember it. Returns the command to use, or None if nothing was chosen."""
+    rows = agent_table(cfg)
+    try:
+        answer = input("\nChoose a number or a name (Enter keeps things as they are): ").strip().lower()
+        if not answer:
+            return None
+        if answer.isdigit():
+            if not 1 <= int(answer) <= len(rows):
+                say(bad(f"There is no agent number {answer}."))
+                return None
+            answer = rows[int(answer) - 1]["id"]
+        if answer in ("c", "custom"):
+            return save_agent_choice(cfg, "custom", input("Command (it reads the prompt on stdin): "))
+        return save_agent_choice(cfg, "none" if answer == "n" else answer)
+    except (EOFError, KeyboardInterrupt):
+        say("")
+        return None
+
+
+def interactive_terminal() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def require_agent(cfg: dict, args: argparse.Namespace, task: str) -> tuple:
+    """(command, problem) of the agent that will do `task`. When there is none, or it is not installed, show the options
+    (and ask, in a terminal) instead of only failing. (None, None) means nothing can run: the options were shown."""
+    agent, source = current_agent(cfg, args)
+    problem = agent_problem(agent) if agent else None
+    if agent and not problem:
+        return agent, None
+    if args.dry_run and agent:
+        return agent, problem  # a dry run only shows the command, so it may name an agent that is not installed here
+    say(bad(f"The agent cannot run: {problem}.") if agent else bad(f"No agent is configured, so nothing can {task}."))
+    print_agent_options(cfg, agent, source)
+    if interactive_terminal() and not args.dry_run:
+        chosen = choose_agent_interactive(cfg)
+        if chosen and not agent_problem(chosen):
+            return chosen, None
+        if chosen is not None:  # a pick that cannot run yet: the choice was saved and how to fix it was already said
+            say("\nWith no usable agent nothing can " + task + ". Install it (or pick another with ./scripts/sdlc agent), then run this again."
+                if chosen else "\nWith no agent nothing can " + task + ": a human does the coding. Pick one with ./scripts/sdlc agent to continue.")
+            return None, None
+    say("\nChoose one:  ./scripts/sdlc agent   (or  ./scripts/sdlc agent <name>,  or add  --agent <name>  to this command)")
+    return None, None
+
+
+def cmd_agent(cfg: dict, args: argparse.Namespace) -> int:
+    """List the agents (installed or not) and choose which one this machine uses."""
+    if args.reset:
+        with contextlib.suppress(FileNotFoundError):
+            AGENT_LOCAL.unlink()
+        command, source = current_agent(cfg)
+        say(ok("Your own choice was removed.") + f" Using {agent_name(cfg, command)}   ({source}).")
+        return EXIT_OK
+    choice = args.choice
+    if args.agent_command and not choice:
+        choice = "custom"
+    if choice:
+        return EXIT_OK if save_agent_choice(cfg, choice, args.agent_command or "") is not None else EXIT_USAGE
+    command, source = current_agent(cfg)
+    print_agent_options(cfg, command, source)
+    if args.list or not interactive_terminal():
+        say("\nChoose one:  ./scripts/sdlc agent <name>      e.g.  ./scripts/sdlc agent codex"
+            "\nOne run:     add  --agent <name>  to spec, implement or loop"
+            "\nUndo:        ./scripts/sdlc agent --reset")
+        return EXIT_OK
+    choose_agent_interactive(cfg)
+    return EXIT_OK
 
 
 def dirty_files(exclude: Path) -> list:
@@ -1082,6 +1253,9 @@ def listing(pattern: str) -> str:
 SPEC_SOURCES = (".pdf", ".docx", ".md", ".markdown", ".txt", ".rst")
 MAX_SOURCE_CHARS = 40000
 PDF_ESCAPES = {b"n": b"\n", b"r": b"\r", b"t": b"\t", b"b": b"\b", b"f": b"\f", b"(": b"(", b")": b")", b"\\": b"\\"}
+SOFT_BREAK = "\x00"
+JOIN = "\x01"
+PDF_LIGATURES = {0xFB00: "ff", 0xFB01: "fi", 0xFB02: "fl", 0xFB03: "ffi", 0xFB04: "ffl", 0xFB05: "st", 0xFB06: "st"}
 PDF_TOKEN = re.compile(rb"\((?:\\.|[^\\()])*\)|<[0-9A-Fa-f\s]*>|\[|\]|/[^\s/\[\]()<>]*|[-+]?\d*\.?\d+|[A-Za-z'\"*]+", re.S)
 
 
@@ -1267,6 +1441,10 @@ def pdf_text_builtin(data: bytes) -> str:
         stack: list = []
         array: list = []
         in_array, last_y = False, None
+        # Chrome, Skia and some other producers place EVERY glyph with its own move (`8.1 0 Td <0052> Tj`) and write
+        # spaces as real glyphs. A horizontal move then means "next letter", not "next word", so it must not add a space.
+        shown = re.findall(rb"(<[0-9A-Fa-f\s]*>|\((?:\\.|[^\\()])*\))\s*Tj", body)
+        per_glyph = len(shown) >= 8 and sum(1 for s in shown if len(decode(s)) <= 1) / len(shown) > 0.7
         for tok in PDF_TOKEN.findall(body):
             if tok == b"[":
                 in_array, array = True, []
@@ -1292,15 +1470,24 @@ def pdf_text_builtin(data: bytes) -> str:
                             pieces.append(" ")
                 elif op in ("'", '"') and top and top[0] == "str":
                     pieces.append("\n" + decode(top[1]))
-                elif op in ("T*", "ET", "BT"):
+                elif op == "T*":
                     pieces.append("\n")
+                elif op in ("ET", "BT"):
+                    pieces.append(SOFT_BREAK)  # a new text block is a new line only if the next one is placed lower
                 elif op in ("Td", "TD") and top and top[0] == "num":
-                    pieces.append("\n" if top[1] != 0 else " ")
+                    pieces.append("\n" if top[1] != 0 else ("" if per_glyph else " "))
                 elif op == "Tm" and top and top[0] == "num":
-                    pieces.append("\n" if last_y is None or abs(top[1] - last_y) > 1 else " ")
+                    while pieces and pieces[-1] == SOFT_BREAK:
+                        pieces.pop()
+                    if last_y is None or abs(top[1] - last_y) > 1:
+                        pieces.append("\n")
+                    else:  # same line: browsers start a new block for every style change (bold, code, link) and table cell
+                        pieces.append(JOIN if per_glyph else " ")
                     last_y = top[1]
                 stack = []
-    text = "".join(pieces)
+    text = "".join(pieces).replace(SOFT_BREAK, "\n").translate(PDF_LIGATURES)
+    # a JOIN between two blocks on one line is a space, unless the text already has one there or punctuation follows
+    text = re.sub(r"(?<=[\s(\[])" + JOIN + r"|" + JOIN + r"(?=[\s.,;:!?)\]]|$)", "", text).replace(JOIN, " ")
     text = re.sub(r"[ \t]+\n", "\n", text)
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
@@ -1361,16 +1548,8 @@ def cmd_spec(cfg: dict, args: argparse.Namespace) -> int:
         return EXIT_HUMAN
     say(c(f"\n=== spec from {src.name} ===", "1;35"))
 
-    agent = resolve_agent(cfg, args)
-    if not agent:
-        say(bad("No agent is configured, so nothing can draft the spec."))
-        say("Set sdlc.agent.preset (claude | codex | custom), edit agent.command in .ai/sdlc.json, or for one run:\n"
-            "  SDLC_AGENT_CMD='<agent cli that reads the prompt on stdin>' ./scripts/sdlc spec " + args.source)
-        return EXIT_HUMAN
-    problem = agent_problem(agent)
-    if problem and not args.dry_run:
-        say(bad(f"The agent cannot run: {problem}."))
-        say(f"  command: {agent}\nInstall it, or choose another agent (SDLC_AGENT_CMD='...' or agent.command in .ai/sdlc.json).")
+    agent, problem = require_agent(cfg, args, "draft the spec")
+    if agent is None:
         return EXIT_HUMAN
 
     specs_dir = ROOT / cfg["facts"]["specsDir"]
@@ -1518,16 +1697,8 @@ def cmd_implement(cfg: dict, args: argparse.Namespace) -> int:
     say(ok(f"  spec ok: {len(spec['acs'])} acceptance criteria, {len(spec['checks'])} checks, every criterion covered"))
 
     # 2. an agent must be configured and installed
-    agent = resolve_agent(cfg, args)
-    if not agent:
-        say(bad("No agent is configured, so nothing can write the code."))
-        say("Pick one in scaffolder.config.yaml (sdlc.agent.preset: claude | codex | custom) and regenerate, edit agent.command in .ai/sdlc.json,\n"
-            "or for one run:  SDLC_AGENT_CMD='<agent cli that reads the prompt on stdin>' ./scripts/sdlc implement " + fid)
-        return EXIT_HUMAN
-    problem = agent_problem(agent)
-    if problem and not args.dry_run:
-        say(bad(f"The agent cannot run: {problem}."))
-        say(f"  command: {agent}\nInstall it, or choose another agent (SDLC_AGENT_CMD='...' or agent.command in .ai/sdlc.json).")
+    agent, problem = require_agent(cfg, args, "write the code")
+    if agent is None:
         return EXIT_HUMAN
 
     # 3. the agent's changes must be reviewable: start from a clean tree (only the spec may be uncommitted)
@@ -1723,12 +1894,18 @@ def cmd_doctor(cfg: dict, args: argparse.Namespace) -> int:
             say(f"  {bad('MISS')}  {name:12} {step['label']} needs Python >= {minimum}; the newest found is {shown}")
             for line in install_hints(minimum):
                 say(f"        {line.strip()}")
-    agent = os.environ.get("SDLC_AGENT_CMD", cfg["agent"]["command"])
+    agent, source = current_agent(cfg)
     if not agent:
-        say(f"  {warn('note')}  {'agent':12} none configured: `implement` will ask for one (preset: {cfg['agent'].get('preset', 'none')})")
+        say(f"  {warn('note')}  {'agent':12} none configured: `spec` and `implement` will ask you to choose one (./scripts/sdlc agent)")
     else:
         problem = agent_problem(agent)
-        say(f"  {warn('note') if problem else ok('ok  ')}  {'agent':12} {agent[:70]}" + (f"   ({problem})" if problem else ""))
+        say(f"  {warn('note') if problem else ok('ok  ')}  {'agent':12} {agent_name(cfg, agent)}" + (f"   ({problem})" if problem else f"   ({source})"))
+    here = [row["id"] for row in agent_table(cfg) if row["path"]]
+    if here:
+        say(f"  {ok('ok  ')}  {'agents':12} installed here: {', '.join(here)}   (choose with ./scripts/sdlc agent)")
+    else:
+        names = ", ".join(p["id"] for p in agent_presets(cfg))
+        say(f"  {warn('note')}  {'agents':12} none of {names} is installed: ./scripts/sdlc agent shows how to install one")
     say(f"  {ok('ok  ')}  {'pdf reader':12} {pdf_reader_name()}   (for `spec`; .docx, .md and .txt need nothing)")
     say("")
     say(ok("toolchain ready") if not bad_count else bad(f"{bad_count} required tool(s) missing"))
@@ -1787,7 +1964,7 @@ def find_spec(cfg: dict, ref: str) -> Path | None:
 
 
 def cmd_feature(cfg: dict, args: argparse.Namespace) -> int:
-    agent = args.agent if args.agent is not None else os.environ.get("SDLC_AGENT_CMD", cfg["agent"]["command"])
+    agent = resolve_agent(cfg, args)
     say(c(f"\n=== PRD: {args.name} ===", "1;35"))
     spec = find_spec(cfg, args.name)
     if spec is None:
@@ -1975,7 +2152,7 @@ def build_parser() -> argparse.ArgumentParser:
     lp = sub.add_parser("loop")
     common(lp)
     lp.add_argument("--max", type=int, help="override max iterations")
-    lp.add_argument("--agent", help="agent command (reads the prompt on stdin); '' = human in the loop")
+    lp.add_argument("--agent", help="agent command (reads the prompt on stdin) or an agent's name (see `sdlc agent`); '' = human in the loop")
     ft = sub.add_parser("feature")
     ft.add_argument("name", help="FEAT-001, a slug, or a new feature name")
     ft.add_argument("--brief", help="one-paragraph description for the agent to draft the PRD from")
@@ -1988,7 +2165,7 @@ def build_parser() -> argparse.ArgumentParser:
     common(ft, facts=False)
     im = sub.add_parser("implement")
     im.add_argument("name", help="FEAT-001 or its slug; its prd.md and acceptance.json must be finished")
-    im.add_argument("--agent", help="agent command (reads the prompt on stdin); overrides the configured one")
+    im.add_argument("--agent", help="agent command (reads the prompt on stdin) or an agent's name (see `sdlc agent`); overrides your choice")
     im.add_argument("--max", type=int, help="override max heal iterations")
     im.add_argument("--allow-dirty", action="store_true", help="proceed with uncommitted changes outside the spec")
     im.add_argument("--skip-baseline", action="store_true", help="do not run the gates before the agent starts")
@@ -1998,10 +2175,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("source", help="requirements document: .pdf, .docx, .md or .txt")
     sp.add_argument("--name", help="feature slug (default: the file name)")
     sp.add_argument("--focus", help="cover only this part of the document, e.g. 'the login flow (section 3)'")
-    sp.add_argument("--agent", help="agent command (reads the prompt on stdin); overrides the configured one")
+    sp.add_argument("--agent", help="agent command (reads the prompt on stdin) or an agent's name (see `sdlc agent`); overrides your choice")
     sp.add_argument("--allow-dirty", action="store_true", help="proceed with uncommitted changes")
     sp.add_argument("--dry-run", action="store_true", help="extract the text, write the prompt, print the agent command; run nothing")
     sp.add_argument("--max-attempts", type=int, default=3, help="how many times the agent may fix an invalid draft")
+    ag = sub.add_parser("agent")  # list the AI agents (installed or not) and choose one for this machine
+    ag.add_argument("choice", nargs="?", help="an agent's name (see the list), 'custom' or 'none'; leave out to list and choose")
+    ag.add_argument("--command", dest="agent_command", help="with 'custom': the command that reads the prompt on stdin")
+    ag.add_argument("--list", action="store_true", help="only list, never ask")
+    ag.add_argument("--reset", action="store_true", help="forget your choice and use the project default again")
     sub.add_parser("sync")
     nw = sub.add_parser("new")
     nw.add_argument("slug")
@@ -2017,7 +2199,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 COMMANDS = {
-    "setup": cmd_setup, "doctor": cmd_doctor, "gates": cmd_gates, "facts": cmd_facts, "verify": cmd_verify, "loop": cmd_loop,
+    "setup": cmd_setup, "doctor": cmd_doctor, "agent": cmd_agent, "gates": cmd_gates, "facts": cmd_facts, "verify": cmd_verify, "loop": cmd_loop,
     "feature": cmd_feature, "spec": cmd_spec, "implement": cmd_implement, "sync": cmd_sync, "new": cmd_new, "deploy": cmd_deploy, "secrets": cmd_secrets, "up": cmd_up, "down": cmd_down, "report": cmd_report,
 }
 

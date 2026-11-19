@@ -157,11 +157,12 @@ That is why it is a draft. Fix it in `prd.md` / `acceptance.json` (the review ch
 The tool refuses to spend an agent's time on an unfinished spec. It lists what is missing: `TODO(prd)` placeholders still in `prd.md`, a criterion with no check, or a check that cites a criterion that doesn't exist. Fix `prd.md` / `acceptance.json` and run again.
 
 ### `The agent cannot run: ... is not installed or not on PATH`
-The agent's program isn't installed. Install the CLI for your preset (see the links in the [tutorial](Tutorial-Add-a-Login-API#before-you-start-once)), choose another preset in `scaffolder.config.yaml`,
-or use `SDLC_AGENT_CMD='...'` for one run. `./scripts/sdlc doctor` shows the configured command and whether it is installed.
+The agent's program isn't installed. The tool then lists every agent it knows (claude, codex, gemini, copilot, cursor), which of them are installed on this machine and the install line for the rest.
+Pick one that is installed with `./scripts/sdlc agent` (or `./scripts/sdlc agent codex`), or install the missing one (links in the [tutorial](Tutorial-Add-a-Login-API#before-you-start-once)).
+For one run add `--agent <name>`. `./scripts/sdlc doctor` shows which agent is used and which are installed.
 
 ### `No agent is configured, so nothing can write the code`
-The preset is `none` (or the command is empty). Set `sdlc.agent.preset`, or `SDLC_AGENT_CMD`.
+You (or the project) chose `none`, or the command is empty. Run `./scripts/sdlc agent` to see the options and choose one, or add `--agent <name>` for one run.
 
 ### `You have uncommitted changes outside this feature's spec`
 `implement` wants a clean tree so the diff you review is only the agent's work. Commit or stash your changes, or pass `--allow-dirty`.

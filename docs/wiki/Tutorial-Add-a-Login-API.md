@@ -22,21 +22,58 @@ Route A, from a document:          Route B, by hand:
 ```
 
 > **How much was tested.** Everything around the agent (reading the document, the prompt, validation and retries, the spec check, the baseline, dependency install,
-> the integrity guard, questions, verification) is tested end to end with a *scripted* agent that does what a good AI is told to do. The `claude` and `codex`
+> the integrity guard, questions, verification) is tested end to end with a *scripted* agent that does what a good AI is told to do. The `claude`, `codex`, `gemini`, `copilot` and `cursor`
 > presets follow each tool's documented non-interactive mode but have **not been run against the real tools**, so how well a particular AI drafts specs and writes code is untested here.
 > Use `--dry-run` first (below) and expect to tune your first prompt.
 
 ## Before you start (once)
 
 1. A project from [Getting Started](Getting-Started) that passes `./scripts/sdlc verify`.
-2. An **AI agent CLI**, installed and signed in. Choose which in the web UI (**Verification loop -> AI agent**) or `sdlc.agent.preset` in `scaffolder.config.yaml`:
+2. An **AI agent CLI**, installed and signed in. You do not have to decide this up front, and it does not have to be the project's default: see which are installed on
+   your machine and pick one with `./scripts/sdlc agent` (below). The project's default comes from the web UI (**Verification loop -> AI agent**) or `sdlc.agent.preset`
+   in `scaffolder.config.yaml`:
 
 | Preset | Runs | Notes |
 |---|---|---|
 | `claude` (default) | `claude -p ...` ([headless mode docs](https://code.claude.com/docs/en/headless)) | needs the Claude Code CLI on your `PATH`; it can also read PDFs itself |
 | `codex` | `codex exec --sandbox workspace-write -` ([docs](https://developers.openai.com/codex/noninteractive)) | needs the Codex CLI; its sandbox may block network, which is why dependencies are installed by the tool, not the agent |
-| `custom` | any command that reads the prompt on stdin | e.g. another agent CLI |
+| `gemini` | `gemini --approval-mode yolo -p ...` ([docs](https://geminicli.com/docs/cli/headless/)) | needs the Gemini CLI; `yolo` approves every action, which it needs to run the tests |
+| `copilot` | `copilot -p "Read <prompt file> ..." --allow-all-tools` ([docs](https://docs.github.com/en/copilot/how-tos/copilot-cli/automate-copilot-cli/run-cli-programmatically)) | needs the Copilot CLI and a Copilot subscription; it takes the prompt as an argument, so it is pointed at the prompt file |
+| `cursor` | `cursor-agent -p --force "Read <prompt file> ..."` ([docs](https://cursor.com/docs/cli/headless)) | needs the Cursor CLI; `--force` lets it edit files |
+| `custom` | any command that reads the prompt on stdin | e.g. another agent CLI; write `{prompt_file}` in the command to pass the prompt file's path instead |
 | `none` | nothing | a human does the coding; the tool prints the prompt |
+
+### Choose an agent: installed or not
+
+```bash
+./scripts/sdlc agent
+```
+
+```text
+AI agents (what drafts specs and writes code for you):
+  *1  claude   Claude Code (claude -p)            not installed
+              install: npm install -g @anthropic-ai/claude-code
+   2  codex    OpenAI Codex (codex exec)          installed     /usr/local/bin/codex
+   3  gemini   Google Gemini CLI (gemini -p)      not installed
+              install: npm install -g @google/gemini-cli
+   ...
+   c  custom   any command that reads the prompt on stdin (or names the prompt file with {prompt_file})
+   n  none     a human does the coding; the tool prints the prompt and waits
+```
+
+(The list is an example; the install lines come from each tool's own documentation.) In a terminal it then asks which to use. Your choice is saved in `.ai/agent.local.json`,
+which is **not committed**: every developer on a team has different tools, so the project's default stays as generated and your machine uses what you picked.
+
+| Command | Does |
+|---|---|
+| `./scripts/sdlc agent --list` | only list, never ask |
+| `./scripts/sdlc agent codex` | use Codex on this machine (any name from the list, or `none`) |
+| `./scripts/sdlc agent custom --command 'my-agent --prompt-stdin'` | use your own command |
+| `./scripts/sdlc agent --reset` | forget your choice and use the project default again |
+| `./scripts/sdlc spec requirements.pdf --agent gemini` | use that agent for this one run (a name or a full command) |
+
+You can also choose an agent that is **not installed yet**: it is saved with the install line, and `./scripts/sdlc doctor` tells you when it is ready. If `spec` or `implement`
+finds the agent missing, it shows this same list (and in a terminal asks) instead of only failing. Order of precedence: `--agent`, then `SDLC_AGENT_CMD`, then your saved choice, then the project default.
 
 Check what is configured:
 

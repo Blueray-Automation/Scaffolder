@@ -102,13 +102,20 @@ An agent that is told to "make the tests pass" can cheat by changing the tests. 
 
 ### Using an AI agent
 
-The agent is any command that reads the prompt on standard input. Pick a preset (`claude`, `codex`, `custom`, `none`) with `sdlc.agent.preset` in
-`scaffolder.config.yaml` or in the web UI; an explicit `sdlc.agent.command` overrides the preset. After generating, the resolved command lives in
-`.ai/sdlc.json` -> `agent.command`. For one run:
+The agent is any command that reads the prompt on standard input (or names the prompt file with `{prompt_file}`). The project's default is a preset (`claude`, `codex`,
+`gemini`, `copilot`, `cursor`, `custom`, `none`) set with `sdlc.agent.preset` in `scaffolder.config.yaml` or in the web UI; an explicit `sdlc.agent.command` overrides the preset.
+After generating, the resolved command lives in `.ai/sdlc.json` -> `agent.command`, next to the list of every preset (`agent.presets`).
+
+Each person chooses for their own machine, installed or not:
 
 ```bash
-SDLC_AGENT_CMD='your-agent-cli' ./scripts/sdlc implement FEAT-001
+./scripts/sdlc agent              # every agent, whether it is installed here, how to install the rest; then asks which to use
+./scripts/sdlc agent codex        # or just say which (saved in .ai/agent.local.json, which is not committed)
+./scripts/sdlc agent --reset      # back to the project default
 ```
+
+For one run: `./scripts/sdlc implement FEAT-001 --agent gemini`, or `SDLC_AGENT_CMD='your-agent-cli' ./scripts/sdlc implement FEAT-001`. Precedence: `--agent`, `SDLC_AGENT_CMD`,
+your saved choice, the project default. The choice can only select among the commands in `.ai/sdlc.json` (which the agent may not edit) or a command you typed yourself.
 
 With no agent, the tool prints the prompt file for you (or your own AI tool) and waits.
 
@@ -117,7 +124,7 @@ With no agent, the tool prints the prompt file for you (or your own AI tool) and
 never commit or push, ask instead of guessing.
 
 The mechanics around the agent are tested end to end with a scripted agent. How well a particular AI follows the prompts depends on that AI, and the
-`claude` / `codex` presets have not been run against the real tools: use `./scripts/sdlc implement <FEAT-id> --dry-run` to inspect the command and prompt first.
+`claude` / `codex` / `gemini` / `copilot` / `cursor` presets have not been run against the real tools: use `./scripts/sdlc implement <FEAT-id> --dry-run` to inspect the command and prompt first.
 
 ### Specs from documents (`spec`)
 

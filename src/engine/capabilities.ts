@@ -109,15 +109,24 @@ export const CAPABILITIES = {
 } as const;
 
 export interface AgentPresetOption extends Option {
-  /** The shell command (reads the prompt on stdin) the preset stands for. Empty = none / user-defined. */
+  /**
+   * The shell command the preset stands for. It reads the prompt on stdin, or names it with `{prompt_file}`
+   * (the tool replaces that with the path of the prompt it wrote). Empty = none / user-defined.
+   */
   command: string;
+  /** The program that command starts: how the tool tells whether the agent is installed. Empty = none / user-defined. */
+  program: string;
+  /** One line that installs it, shown whenever the program is missing. Empty = none / user-defined. */
+  install: string;
+  /** The tool's own documentation for its non-interactive mode. */
+  docs: string;
 }
 
 /**
- * Agent presets for `./scripts/sdlc build`. They follow each tool's documented non-interactive mode
- * (Claude Code: `claude -p` + `--allowedTools`; Codex: `codex exec -` with an explicit sandbox).
- * They are defaults to override with `sdlc.agent.command`, and the tools' flags can change: check
- * `<tool> --help`. Any other agent works as a custom command that reads the prompt on stdin.
+ * Agent presets for `./scripts/sdlc spec | implement | loop`. They follow each tool's documented non-interactive mode
+ * (see `docs`) but have NOT been run against the real tools here; the flags can change, so check `<tool> --help`.
+ * They are defaults: override with `sdlc.agent.command`, or pick another with `./scripts/sdlc agent`.
+ * Any other agent works as a custom command that reads the prompt on stdin.
  */
 export const AGENT_PRESETS: AgentPresetOption[] = [
   {
@@ -125,6 +134,9 @@ export const AGENT_PRESETS: AgentPresetOption[] = [
     label: "Claude Code (claude -p)",
     available: true,
     command: 'claude -p --permission-mode acceptEdits --allowedTools "Read" "Edit" "Write" "Glob" "Grep" "Bash"',
+    program: "claude",
+    install: "npm install -g @anthropic-ai/claude-code",
+    docs: "https://code.claude.com/docs/en/headless",
     hint: "Needs the Claude Code CLI on PATH. Bash is pre-approved so the agent can run the tests.",
   },
   {
@@ -132,10 +144,43 @@ export const AGENT_PRESETS: AgentPresetOption[] = [
     label: "OpenAI Codex (codex exec)",
     available: true,
     command: "codex exec --sandbox workspace-write -",
+    program: "codex",
+    install: "npm install -g @openai/codex",
+    docs: "https://developers.openai.com/codex/noninteractive",
     hint: "Needs the Codex CLI on PATH. The sandbox may block network access; `sdlc sync` installs dependencies outside it.",
   },
-  { id: "custom", label: "Custom command", available: true, command: "", hint: "Any CLI that reads the prompt on stdin." },
-  { id: "none", label: "None (a human does the coding)", available: true, command: "", hint: "The loop prints the prompt and waits." },
+  {
+    id: "gemini",
+    label: "Google Gemini CLI (gemini -p)",
+    available: true,
+    command: 'gemini --approval-mode yolo -p "Carry out the instructions given above."',
+    program: "gemini",
+    install: "npm install -g @google/gemini-cli",
+    docs: "https://geminicli.com/docs/cli/headless/",
+    hint: "Needs the Gemini CLI on PATH. `yolo` approves every action (needed to run the tests): work on a branch and read the diff.",
+  },
+  {
+    id: "copilot",
+    label: "GitHub Copilot CLI (copilot -p)",
+    available: true,
+    command: 'copilot -p "Read {prompt_file} and do exactly what it says." --allow-all-tools',
+    program: "copilot",
+    install: "npm install -g @github/copilot",
+    docs: "https://docs.github.com/en/copilot/how-tos/copilot-cli/automate-copilot-cli/run-cli-programmatically",
+    hint: "Needs the Copilot CLI on PATH and a Copilot subscription. It takes the prompt as an argument, so it is pointed at the prompt file.",
+  },
+  {
+    id: "cursor",
+    label: "Cursor CLI (cursor-agent -p)",
+    available: true,
+    command: 'cursor-agent -p --force "Read {prompt_file} and do exactly what it says."',
+    program: "cursor-agent",
+    install: "see https://cursor.com/cli",
+    docs: "https://cursor.com/docs/cli/headless",
+    hint: "Needs the Cursor CLI on PATH (its command may be `agent` on newer installs: use a custom command then). `--force` lets it edit files.",
+  },
+  { id: "custom", label: "Custom command", available: true, command: "", program: "", install: "", docs: "", hint: "Any CLI that reads the prompt on stdin (or use {prompt_file} in the command)." },
+  { id: "none", label: "None (a human does the coding)", available: true, command: "", program: "", install: "", docs: "", hint: "The loop prints the prompt and waits." },
 ];
 
 export function findOption<T extends Option>(list: readonly T[], id: string): T | undefined {

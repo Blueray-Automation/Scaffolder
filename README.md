@@ -54,8 +54,9 @@ cd ../my-app
 source in the document, gaps are listed as assumptions for you to confirm, and nothing is built until you run `implement`. Prefer to write the two files yourself? `./scripts/sdlc new user-login`.
 
 `implement` checks the spec is complete, installs the toolchain, runs a baseline, gives the agent your PRD and checks as its prompt, installs any
-dependency the agent adds, then verifies against the running system and heals until green. It never commits or pushes. Pick the agent
-(`claude`, `codex` or any command that reads a prompt on stdin) in the UI or `sdlc.agent.preset`.
+dependency the agent adds, then verifies against the running system and heals until green. It never commits or pushes. The project's default agent
+(`claude`, `codex`, `gemini`, `copilot`, `cursor` or any command that reads a prompt on stdin) is set in the UI or `sdlc.agent.preset`; whoever runs the project
+sees which agents are installed on their machine, with install lines for the rest, and picks one with `./scripts/sdlc agent`.
 
 ## Platforms
 
@@ -144,7 +145,7 @@ npm run e2e       # slow, needs network, python3 >= 3.12 and node >= 22 on PATH
 - Windows support was written without a Windows machine: its platform-specific logic is unit-tested by simulation, and `npm run smoke` on `windows-latest` in CI is the real check. The full `npm run e2e` (bash-based fake tools, Docker) is for macOS and Linux. Deploying from a Windows machine needs Git for Windows' bash or WSL (the generated `cd.yml` deploys from Linux).
 - One full vertical slice: **FastAPI + Next.js (App Router) + PostgreSQL + GitHub Actions + GHCR**. Other stacks are planned.
 - `spec` drafts are only as good as the document and the AI that reads it: the tool validates their form, a human must review their meaning. Scanned PDFs have no text to read.
-- Agent presets: the whole pipeline around the agent (document reading included) is tested with a scripted agent. The `claude` and `codex` presets follow each tool's documented
+- Agent presets: the whole pipeline around the agent (document reading included) is tested with a scripted agent. The `claude`, `codex`, `gemini`, `copilot` and `cursor` presets follow each tool's documented
   non-interactive mode but have **not been run against the real CLIs** (use `implement --dry-run` to inspect the command and prompt first).
 - Deploy targets: `none` (placeholder, prints the plan) and `ssh-compose`. The tests exercise the image builds and the full
   compose stack (including PostgreSQL), and check the deploy scripts' syntax. They do **not** run the generated GitHub workflows,
