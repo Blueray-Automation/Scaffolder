@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -171,6 +171,39 @@ describe.skipIf(process.platform === "win32")("sdlc agent: list, choose, and use
     expect(promptPath, sentence).toMatch(/^\.ai\/evidence\/.+\/spec-1\.prompt\.md$/);
     expect(readFileSync(join(dir, promptPath!), "utf8")).toContain("Login");
     expect(args).toContain("--allow-all-tools");
+  });
+
+  const evidenceRuns = () => {
+    const root = join(dir, ".ai", "evidence");
+    return readdirSync(root).filter((n) => n.endsWith("-spec-requirements")).sort();
+  };
+
+  it("an agent that is not signed in is reported as that, once, instead of 'the draft has TODO placeholders' three times", () => {
+    fake("claude", "echo 'Not logged in · Please run /login'\nexit 1\n");
+    const before = evidenceRuns().length;
+    const run = sh(["spec", "requirements.md", "--allow-dirty"]);
+    expect(run.status).toBe(2);
+    const text = out(run);
+    expect(text).toContain("agent said: Not logged in · Please run /login");
+    expect(text).toContain("The agent is not signed in, so it did nothing");
+    expect(text).toContain("Run `claude` once in a terminal and sign in (type /login)");
+    expect(text).toContain("./scripts/sdlc agent");
+    expect(text, "must not go on to validate and retry").not.toMatch(/draft is not valid|attempt 2/);
+    const runs = evidenceRuns();
+    expect(runs.length).toBe(before + 1);
+    const logs = readdirSync(join(dir, ".ai", "evidence", runs[runs.length - 1]!)).filter((n) => n.endsWith(".agent.log"));
+    expect(logs).toEqual(["spec-1.agent.log"]);
+    rmSync(join(bin, "claude"));
+  });
+
+  it("any other agent failure shows what the agent said, and validation still decides about the draft", () => {
+    fake("codex", "echo 'rate limit reached, try again in a minute'\nexit 1\n");
+    const run = sh(["spec", "requirements.md", "--allow-dirty", "--agent", "codex", "--max-attempts", "1"]);
+    const text = out(run);
+    expect(text).toContain("agent said: rate limit reached, try again in a minute");
+    expect(text).not.toContain("not signed in");
+    expect(text).toContain("the agent exited with 1; validation below decides");
+    fake("codex");
   });
 
   it("choosing in a terminal: a number saves it, Enter keeps things, a bad number or a custom command is handled", () => {

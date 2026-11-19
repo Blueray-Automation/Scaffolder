@@ -951,7 +951,36 @@ def run_agent(cfg: dict, command: str, prompt: str, tag: str, run_dir: Path) -> 
     say(dim(f"  running agent: {command}"))
     code = run_shell(command, ROOT, log, env=env, timeout=cfg["agent"]["timeoutSeconds"], stdin_text=prompt)
     say(dim(f"  agent finished (exit {code}); output: {rel(log)}"))
+    if code != 0:
+        for line in agent_output_tail(log):  # the reason is almost always the last thing the agent printed
+            say(warn(f"    agent said: {line}"))
     return code
+
+
+SIGNED_OUT = re.compile(
+    r"not logged in|/login|log ?in (is )?required|please (log|sign) ?in|unauthori[sz]ed|invalid api key|missing api key"
+    r"|api key (is )?(not set|missing|invalid)|authentication (failed|required|error)", re.I)
+
+
+def agent_output_tail(log: Path, lines: int = 4) -> list:
+    """The last few lines an agent printed (without the `$ command` header the tool writes first)."""
+    kept = [ln.strip() for ln in tail_lines(log, 20).splitlines() if ln.strip() and not ln.startswith("$ ")]
+    return [ln if len(ln) <= 200 else ln[:197] + "..." for ln in kept[-lines:]]
+
+
+def agent_signed_out(run_dir: Path, tag: str, code: int) -> bool:
+    """The agent failed because it is not signed in (so it did nothing, and trying again or validating is pointless)."""
+    return code != 0 and bool(SIGNED_OUT.search("\n".join(agent_output_tail(run_dir / f"{tag}.agent.log", 8))))
+
+
+def explain_signed_out(agent: str) -> None:
+    try:
+        program = command_program(agent)
+    except (ValueError, IndexError):
+        program = "the agent"
+    say(bad("\nThe agent is not signed in, so it did nothing: no file was drafted or changed."))
+    say(f"Run `{program}` once in a terminal and sign in" + (" (type /login)" if program == "claude" else " (or set its API key)") + ", then run this again.")
+    say("Or use another agent: ./scripts/sdlc agent")
 
 
 def failures_markdown(run: Run) -> str:
@@ -1617,6 +1646,9 @@ def cmd_spec(cfg: dict, args: argparse.Namespace) -> int:
     for attempt in range(1, args.max_attempts + 1):
         say(c(f"\n== agent: drafting the spec (attempt {attempt}/{args.max_attempts}) ==", "1"))
         code = run_agent(cfg, agent, prompt, f"spec-{attempt}", run.dir)
+        if agent_signed_out(run.dir, f"spec-{attempt}", code):
+            explain_signed_out(agent)
+            return EXIT_HUMAN
         if code != 0:
             say(warn(f"  the agent exited with {code}; validation below decides whether the draft is usable"))
         stray = sorted(set(dirty_files(spec_dir)) - before_dirty)
@@ -1758,6 +1790,9 @@ def cmd_implement(cfg: dict, args: argparse.Namespace) -> int:
     before = snapshot(integ["protected"] + integ["protectedWhileHealing"])
     head = git("rev-parse", "HEAD")
     code = run_agent(cfg, agent, prompt, f"implement-{fid}", run.dir)
+    if agent_signed_out(run.dir, f"implement-{fid}", code):
+        explain_signed_out(agent)
+        return EXIT_HUMAN
     if code != 0:
         say(warn(f"  the agent exited with {code}; verification below decides whether the work is complete"))
     if git("rev-parse", "HEAD") != head:
@@ -1835,7 +1870,10 @@ def cmd_loop(cfg: dict, args: argparse.Namespace) -> int:
             else:
                 return EXIT_HUMAN
         else:
-            run_agent(cfg, agent, prompt, f"heal-{i}", run.dir)
+            code = run_agent(cfg, agent, prompt, f"heal-{i}", run.dir)
+            if agent_signed_out(run.dir, f"heal-{i}", code):
+                explain_signed_out(agent)
+                return EXIT_HUMAN
             ensure_installed(cfg, run)  # dependencies the agent added while healing
         now = snapshot(integ["protected"] + integ["protectedWhileHealing"])
         violations = changed(base_snap, now)
