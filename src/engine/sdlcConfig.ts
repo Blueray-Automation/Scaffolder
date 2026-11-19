@@ -1,3 +1,4 @@
+import { AGENT_PRESETS } from "./capabilities";
 import { agentCommand, type ScaffolderConfig } from "./config";
 import { buildGates, NPM_CI, NPM_INSTALL, setupSteps, STAGE_ORDER, venvDirs } from "./gates";
 
@@ -63,6 +64,16 @@ export function buildSdlcConfig(cfg: ScaffolderConfig): Record<string, unknown> 
       preset: cfg.sdlc.agent.preset,
       // Resolved: an explicit command wins, otherwise the preset's command (empty = human in the loop).
       command: agentCommand(cfg),
+      // Every agent the person may pick with `./scripts/sdlc agent`, installed or not. Lives here, in the file the
+      // agent may not edit, so choosing one can only ever select a command that was generated, never invent one.
+      presets: AGENT_PRESETS.filter((p) => p.command).map((p) => ({
+        id: p.id,
+        label: p.label,
+        command: p.command,
+        program: p.program,
+        install: p.install,
+        docs: p.docs,
+      })),
       timeoutSeconds: cfg.sdlc.agent.timeoutSeconds,
       prompts: {
         prd: ".ai/prompts/prd.md",

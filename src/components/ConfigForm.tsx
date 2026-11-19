@@ -28,6 +28,13 @@ const GATE_LABELS: Array<[keyof ScaffolderConfig["sdlc"]["gates"], string, strin
   ["security", "Security scans", "secrets, pip-audit, npm audit"],
 ];
 
+/** The preset's own note, plus how to install it (shown whether or not it is installed where the project will run). */
+function agentHint(id: string): string | undefined {
+  const preset = AGENT_PRESETS.find((p) => p.id === id);
+  if (!preset) return undefined;
+  return preset.install ? `${preset.hint} Install: ${preset.install}.` : preset.hint;
+}
+
 export function ConfigForm({ config, onChange, issues }: Props) {
   const set = (path: Array<string | number>, value: unknown) => onChange(setIn(config, path, value));
   const err = (path: string) => issues.find((i) => i.level === "error" && i.path === path)?.message;
@@ -198,11 +205,13 @@ export function ConfigForm({ config, onChange, issues }: Props) {
           <p className="text-xs text-zinc-400">
             <span className="font-medium text-zinc-200">You write the PRD and the checks; the agent writes the rest.</span>{" "}
             <code className="rounded bg-zinc-800 px-1 py-0.5 text-[11px]">./scripts/sdlc implement FEAT-001</code> gives the agent your spec,
-            installs the dependencies it adds, and loops until verified.
+            installs the dependencies it adds, and loops until verified.{" "}
+            This is only the project&apos;s default: whoever runs it can see which agents are installed and switch with{" "}
+            <code className="rounded bg-zinc-800 px-1 py-0.5 text-[11px]">./scripts/sdlc agent</code>.
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div className="sm:col-span-2">
-              <Field label="AI agent" hint={AGENT_PRESETS.find((p) => p.id === config.sdlc.agent.preset)?.hint} error={err("sdlc.agent.preset")}>
+              <Field label="AI agent" hint={agentHint(config.sdlc.agent.preset)} error={err("sdlc.agent.preset")}>
                 {(id) => <Select id={id} value={config.sdlc.agent.preset} options={AGENT_PRESETS} onChange={(v) => set(["sdlc", "agent", "preset"], v)} />}
               </Field>
             </div>

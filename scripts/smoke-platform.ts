@@ -87,6 +87,19 @@ async function main() {
     if (/toolchain ready/.test(doctor)) pass("doctor says the toolchain is ready");
     else fail("doctor did not say the toolchain is ready");
 
+    // 1b. the agent chooser works on this OS whether or not any agent is installed (the CI runners have none)
+    const agents = expectExit(dir, "agent --list", ["agent", "--list"]);
+    const listed = ["claude", "codex", "gemini", "copilot", "cursor"].filter((id) => new RegExp(`\\b${id}\\b`).test(agents));
+    if (listed.length === 5 && /Using now: claude/.test(agents)) pass("agent --list shows all five agents and the current one");
+    else fail(`agent --list did not show every agent (saw: ${listed.join(", ") || "none"})`);
+    expectExit(dir, "agent gemini (remember a choice)", ["agent", "gemini"]);
+    const chosen = join(dir, ".ai", "agent.local.json");
+    if (existsSync(chosen) && /gemini/.test(readFileSync(chosen, "utf8"))) pass("the choice is remembered in .ai/agent.local.json");
+    else fail(".ai/agent.local.json was not written");
+    expectExit(dir, "agent --reset", ["agent", "--reset"]);
+    if (!existsSync(chosen)) pass("agent --reset forgets the choice");
+    else fail("agent --reset left .ai/agent.local.json behind");
+
     // 2. install: creates a venv (OS-specific path) and runs npm
     expectExit(dir, "setup (pip + npm install)", ["setup"]);
     const venvPython = WINDOWS ? "backend/.venv/Scripts/python.exe" : "backend/.venv/bin/python";
