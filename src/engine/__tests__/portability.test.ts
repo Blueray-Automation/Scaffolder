@@ -94,7 +94,7 @@ describe("generated scripts/sdlc.py: rules that keep it portable (it cannot be r
     const body = /def kill_group[\s\S]*?\n\n\n/.exec(source)![0];
     expect(body).toContain("taskkill");
     expect(body.indexOf("return")).toBeGreaterThan(-1);
-    const expected: Record<string, number> = { "os.killpg": 2, "os.getpgid": 2, "signal.SIGKILL": 1 };
+    const expected: Record<string, number> = { "os.killpg": 3, "os.getpgid": 1, "signal.SIGKILL": 1 }; // TERM, "is the group gone?", KILL
     for (const [posixOnly, count] of Object.entries(expected)) {
       expect(source.split(posixOnly).length - 1, `${posixOnly} used outside kill_group`).toBe(count);
       expect(body.indexOf(posixOnly), `${posixOnly} before the Windows return`).toBeGreaterThan(body.indexOf("return"));
@@ -243,4 +243,68 @@ sys.exit(1 if failures else 0)
       expect(source, name).toContain(`def ${name}(`);
     }
   });
+});
+
+/**
+ * Regression test for a failure seen on a CI runner: the shell exited at once, but the server it started was still
+ * shutting down (holding its port) when `kill_group` returned. It must wait for the WHOLE group, and kill what
+ * ignores SIGTERM. Needs a POSIX shell, so Windows (taskkill /T) is covered by the simulated test above.
+ */
+describe.skipIf(process.platform === "win32")("kill_group waits for the whole process group (POSIX)", () => {
+  const PROBE = `
+import importlib.util, os, subprocess, sys, tempfile, time
+spec = importlib.util.spec_from_file_location("sdlc", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+tmp = tempfile.mkdtemp()
+failures = []
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+
+def scenario(name, child_body):
+    child = os.path.join(tmp, name + ".py")
+    pidfile = os.path.join(tmp, name + ".pid")
+    open(child, "w").write("import os, signal, sys, time\\nopen(sys.argv[1], 'w').write(str(os.getpid()))\\n" + child_body)
+    # "; true" keeps the shell as the parent of the child, like \`sh -c 'uvicorn ...'\` in a real run
+    proc = subprocess.Popen(sys.executable + " " + child + " " + pidfile + "; true", shell=True, **m.GROUP_KWARGS)
+    for _ in range(100):
+        if os.path.exists(pidfile) and open(pidfile).read():
+            break
+        time.sleep(0.05)
+    pid = int(open(pidfile).read())
+    started = time.time()
+    m.kill_group(proc)
+    took = time.time() - started
+    gone = not alive(pid)
+    print(("ok   " if gone else "FAIL ") + name + ": child gone when kill_group returned" + ("" if gone else " (STILL RUNNING)") + " after %.1fs" % took)
+    if not gone:
+        failures.append(name)
+        os.kill(pid, 9)
+
+# shuts down gracefully, but takes a moment (like uvicorn closing connections)
+scenario("graceful", "def bye(*a):\\n    time.sleep(1.5)\\n    sys.exit(0)\\nsignal.signal(signal.SIGTERM, bye)\\ntime.sleep(60)\\n")
+# ignores SIGTERM entirely: must be killed
+scenario("stubborn", "signal.signal(signal.SIGTERM, signal.SIG_IGN)\\ntime.sleep(60)\\n")
+print("RESULT", "FAILED: " + ", ".join(failures) if failures else "all passed")
+sys.exit(1 if failures else 0)
+`;
+
+  it("returns only when the server the shell started is gone, and kills one that ignores SIGTERM", () => {
+    const dir = mkdtempSync(join(tmpdir(), "scaffolder-killgroup-"));
+    try {
+      const sdlc = join(dir, "sdlc.py");
+      writeFileSync(sdlc, sdlcPy());
+      const probe = join(dir, "probe.py");
+      writeFileSync(probe, PROBE);
+      const run = spawnSync("python3", ["-I", probe, sdlc], { encoding: "utf8", timeout: 60_000 });
+      if (run.error && (run.error as NodeJS.ErrnoException).code === "ENOENT") return; // no python3
+      expect(`${run.stdout}${run.stderr}`).toContain("RESULT all passed");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
 });
