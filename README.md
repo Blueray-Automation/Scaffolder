@@ -33,7 +33,7 @@ npm run scaffold -- generate --out ../api-only --set web.enabled=false --set dat
 npm run scaffold -- list                                   # what can be generated today
 ```
 
-**Then, in the generated project:**
+**Then, in the generated project** (macOS, Ubuntu and WSL; on Windows PowerShell or cmd write `.\scripts\sdlc.cmd` instead of `./scripts/sdlc`):
 
 ```bash
 cd ../my-app
@@ -57,10 +57,16 @@ source in the document, gaps are listed as assumptions for you to confirm, and n
 dependency the agent adds, then verifies against the running system and heals until green. It never commits or pushes. Pick the agent
 (`claude`, `codex` or any command that reads a prompt on stdin) in the UI or `sdlc.agent.preset`.
 
+## Platforms
+
+Generated projects run on **macOS**, **Ubuntu / other Linux** and **Windows** (natively with `scripts\sdlc.cmd`, or in WSL2). [Setup by Operating System](docs/wiki/Setup-by-Operating-System.md) lists what to install on each and how to run the tool there.
+`npm run smoke` generates a project and drives it through the launcher for the OS it runs on (doctor, setup, every gate, the facts against real local processes); CI runs it on ubuntu, macOS and Windows.
+
 ## Documentation (wiki)
 
 Step-by-step guides live in [`docs/wiki/`](docs/wiki/Home.md) and are published to the GitHub wiki automatically:
 
+- **Setup by Operating System**: install the tools on macOS, Ubuntu or Windows
 - **Getting Started**: from a downloaded zip to a verified, running hello world
 - **Tutorial: Add a Login API**: change a generated project the way it is meant to be changed (PRD, checks, tests, code, proof), with the complete verified code
 - **The Verification Loop** and **Troubleshooting** (every entry was hit for real)
@@ -135,6 +141,7 @@ npm run e2e       # slow, needs network, python3 >= 3.12 and node >= 22 on PATH
 
 ## Limits (as of this version)
 
+- Windows support was written without a Windows machine: its platform-specific logic is unit-tested by simulation, and `npm run smoke` on `windows-latest` in CI is the real check. The full `npm run e2e` (bash-based fake tools, Docker) is for macOS and Linux. Deploying from a Windows machine needs Git for Windows' bash or WSL (the generated `cd.yml` deploys from Linux).
 - One full vertical slice: **FastAPI + Next.js (App Router) + PostgreSQL + GitHub Actions + GHCR**. Other stacks are planned.
 - `spec` drafts are only as good as the document and the AI that reads it: the tool validates their form, a human must review their meaning. Scanned PDFs have no text to read.
 - Agent presets: the whole pipeline around the agent (document reading included) is tested with a scripted agent. The `claude` and `codex` presets follow each tool's documented

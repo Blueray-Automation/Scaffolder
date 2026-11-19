@@ -48,7 +48,7 @@ function outsideFences(markdown: string): string {
 describe("wiki pages (docs/wiki)", () => {
   it("has the expected pages", () => {
     expect([...pages.keys()].sort()).toEqual(
-      ["Getting-Started", "Home", "Reference-Login-Implementation", "The-Verification-Loop", "Troubleshooting", "Tutorial-Add-a-Login-API", "_Sidebar"].sort(),
+      ["Getting-Started", "Home", "Reference-Login-Implementation", "Setup-by-Operating-System", "The-Verification-Loop", "Troubleshooting", "Tutorial-Add-a-Login-API", "_Sidebar"].sort(),
     );
   });
 
@@ -80,6 +80,29 @@ describe("wiki pages (docs/wiki)", () => {
         expect(real.has(m[1]!), `${name}: "./scripts/sdlc ${m[1]}" is not a command`).toBe(true);
       }
     }
+  });
+
+  it("only mentions Windows `scripts\\sdlc.cmd` commands that exist", () => {
+    const template = readFileSync(SDLC_TEMPLATE, "utf8");
+    const real = new Set([...template.matchAll(/add_parser\("([a-z]+)"\)/g)].map((m) => m[1]!));
+    let seen = 0;
+    for (const [name, markdown] of pages) {
+      for (const m of markdown.matchAll(/scripts\\sdlc\.cmd\s+([a-z]+)/g)) {
+        seen++;
+        expect(real.has(m[1]!), `${name}: "scripts\\sdlc.cmd ${m[1]}" is not a command`).toBe(true);
+      }
+    }
+    expect(seen).toBeGreaterThan(5);
+  });
+
+  it("explains setup for macOS, Ubuntu, native Windows and WSL2, and every page says what to type on Windows", () => {
+    const setup = pages.get("Setup-by-Operating-System")!;
+    for (const heading of ["## macOS", "## Ubuntu", "## Windows (native)", "## Windows with WSL2"]) expect(setup).toContain(heading);
+    for (const id of ["Git.Git", "Python.Python.3.12", "OpenJS.NodeJS.LTS"]) expect(setup).toContain(`winget install -e --id ${id}`);
+    expect(setup).toContain("python3-venv");
+    expect(pages.get("Getting-Started")).toContain(".\\scripts\\sdlc.cmd");
+    expect(pages.get("Troubleshooting")).toContain("## Windows");
+    expect(pages.get("The-Verification-Loop")).toContain("scripts/sdlc.cmd");
   });
 
   it("documents the login tutorial's verified numbers consistently", () => {

@@ -1,6 +1,9 @@
 # Getting Started
 
-From a downloaded zip to a verified, running hello world.
+From a downloaded zip to a verified, running hello world, on macOS, Ubuntu or Windows.
+
+> **Windows:** wherever this guide writes `./scripts/sdlc <command>`, type `.\scripts\sdlc.cmd <command>` (PowerShell or cmd), and use `docker compose up -d --build` where it says `make up`.
+> Installing the tools for your system is covered in [Setup by Operating System](Setup-by-Operating-System).
 
 ## 1. Get a project
 
@@ -23,11 +26,11 @@ npm run scaffold -- generate --config scaffolder.config.yaml --out ../my-app
 | Tool | Needed for | Version |
 |---|---|---|
 | `git` | the integrity guard, the secret scan, your sanity | any |
-| `python3` | the `./scripts/sdlc` tooling, and the backend | tooling: 3.9+. Backend: the version in your config (default **3.12**). `setup` finds a suitable Python for the backend itself, and offers to install one if there is none |
+| Python | the `./scripts/sdlc` tooling, and the backend | tooling: 3.9+. Backend: the version in your config (default **3.12**). `setup` finds a suitable Python for the backend itself, and offers to install one if there is none |
 | Node.js + npm | the web app (if you included it) | 22.12 or newer |
 | Docker | the full stack and the facts stage | recent Docker Desktop / Engine with Compose v2 |
 
-`./scripts/sdlc doctor` checks all of this for you.
+`./scripts/sdlc doctor` checks all of this for you. How to install each tool on your system: [Setup by Operating System](Setup-by-Operating-System).
 
 ## 3. Unzip and check
 
@@ -35,11 +38,18 @@ npm run scaffold -- generate --config scaffolder.config.yaml --out ../my-app
 unzip hello-scaffold.zip && cd hello-scaffold
 ```
 
+On Windows (PowerShell):
+
+```powershell
+Expand-Archive hello-scaffold.zip -DestinationPath . ; cd hello-scaffold
+```
+
 ```bash
 ./scripts/sdlc doctor
 ```
 
 If you see `permission denied`, the executable bit was lost by your unzip tool: run `chmod +x scripts/*` (or use `python3 scripts/sdlc.py <command>`).
+On Windows the command is `.\scripts\sdlc.cmd doctor`; if it says Python is missing, see [Troubleshooting](Troubleshooting#windows-python-was-not-found-or-the-microsoft-store-opens).
 
 ## 4. Make it a git repository
 

@@ -34,6 +34,7 @@ Worked example: `.ai/specs/FEAT-000-hello-world/`.
 ./scripts/sdlc sync       # install dependencies if a manifest (pyproject.toml / package.json) changed
 ```
 Single gate while iterating: `./scripts/sdlc gates --only <id>`. `make help` lists the same commands.
+On Windows (PowerShell or cmd) the launcher is `.\scripts\sdlc.cmd`; every command and option is the same. Never edit the launchers (`scripts/sdlc`, `scripts/sdlc.cmd`, `scripts/sdlc.py`).
 
 ## Gates (defined once in `.ai/sdlc.json`, mirrored in CI)
 | Stage | Gate | Command | Required |
