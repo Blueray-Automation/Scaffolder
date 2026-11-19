@@ -49,6 +49,14 @@ export function relativeFrom(from: string, to: string): string {
 
 export const OPENAPI_SNAPSHOT = ".ai/contract/openapi.json";
 
+export const NPM_CI = "npm ci --no-audit --no-fund";
+export const NPM_INSTALL = "npm install --no-audit --no-fund";
+
+/** Where a virtual environment keeps its executables: `bin` on macOS/Linux, `Scripts` on Windows. Only the one that exists is used. */
+export function venvDirs(backendDir: string): string[] {
+  return [`${backendDir}/.venv/bin`, `${backendDir}/.venv/Scripts`];
+}
+
 export function setupSteps(cfg: ScaffolderConfig): SetupStep[] {
   const steps: SetupStep[] = [];
   if (cfg.backend.enabled) {
@@ -60,7 +68,7 @@ export function setupSteps(cfg: ScaffolderConfig): SetupStep[] {
       toolchain: "python",
       manifests: [`${cfg.layout.backendDir}/pyproject.toml`],
       marker: `${cfg.layout.backendDir}/.venv`,
-      cmd: 'python3 -m venv --clear .venv && .venv/bin/python -m pip install --quiet --upgrade pip && .venv/bin/pip install --quiet -e ".[dev]"',
+      cmd: 'python3 -m venv --clear .venv && .venv/bin/python -m pip install --quiet --upgrade pip && .venv/bin/python -m pip install --quiet -e ".[dev]"',
     });
   }
   if (cfg.web.enabled) {
@@ -72,7 +80,7 @@ export function setupSteps(cfg: ScaffolderConfig): SetupStep[] {
       toolchain: "node",
       manifests: [`${cfg.layout.webDir}/package.json`],
       marker: `${cfg.layout.webDir}/node_modules`,
-      cmd: "if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi",
+      cmd: `if [ -f package-lock.json ]; then ${NPM_CI}; else ${NPM_INSTALL}; fi`,
     });
   }
   return steps;
@@ -83,7 +91,7 @@ export function buildGates(cfg: ScaffolderConfig): Gate[] {
   const gates: Gate[] = [];
   const backendDir = cfg.layout.backendDir;
   const webDir = cfg.layout.webDir;
-  const venv = [`${backendDir}/.venv/bin`];
+  const venv = venvDirs(backendDir);
 
   if (cfg.backend.enabled) {
     if (g.lint) {

@@ -47,3 +47,27 @@ jobs:
       # Generates real projects, installs them, runs every gate, the facts (local processes AND the
       # docker compose stack, which exists on ubuntu runners) and the healing-loop scenarios.
       - run: npm run e2e
+
+  # The full e2e above runs on Linux. This runs a generated project through the launcher a person on each
+  # operating system would type (./scripts/sdlc, or scripts\sdlc.cmd on Windows): doctor, setup, every gate, and the
+  # facts against real local processes (no Docker: Windows and macOS runners cannot run Linux containers).
+  platforms:
+    name: Generated project works on ${{ matrix.os }}
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: npm ci
+      - run: npm run smoke

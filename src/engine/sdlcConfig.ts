@@ -1,5 +1,5 @@
 import { agentCommand, type ScaffolderConfig } from "./config";
-import { buildGates, setupSteps, STAGE_ORDER } from "./gates";
+import { buildGates, NPM_CI, NPM_INSTALL, setupSteps, STAGE_ORDER, venvDirs } from "./gates";
 
 interface LocalService {
   name: string;
@@ -30,7 +30,7 @@ export function buildSdlcConfig(cfg: ScaffolderConfig): Record<string, unknown> 
       cmd: `uvicorn app.main:app --host 127.0.0.1 --port ${cfg.backend.port}`,
       // Local mode deliberately has no database: DB-dependent facts are skipped, not faked.
       env: { APP_ENV: "test", DATABASE_URL: "" },
-      pathPrepend: [`${cfg.layout.backendDir}/.venv/bin`],
+      pathPrepend: venvDirs(cfg.layout.backendDir),
       healthUrl: `${backendUrl}/health`,
       startTimeoutSeconds: 60,
     });
@@ -77,6 +77,7 @@ export function buildSdlcConfig(cfg: ScaffolderConfig): Record<string, unknown> 
       protected: [
         ".ai/sdlc.json",
         "scripts/sdlc",
+        "scripts/sdlc.cmd",
         "scripts/sdlc.py",
         ".github/workflows/",
         ...cfg.sdlc.protectedPaths,
@@ -86,12 +87,18 @@ export function buildSdlcConfig(cfg: ScaffolderConfig): Record<string, unknown> 
       // Allowed to change, but every change is listed in the evidence report for review.
       guarded: [".ai/contract/"],
     },
-    // Python steps carry the minimum version and a {python} placeholder: `sdlc setup` finds (or offers to
-    // install) a suitable interpreter instead of failing with a raw pip error. CI uses the plain `python3`.
+    // Setup commands here are OS-neutral (they must run in sh, cmd.exe and PowerShell alike); CI uses the bash forms.
+    // Python steps carry the minimum version and placeholders that `sdlc setup` fills in: {python} is an interpreter it
+    // found (or offered to install) instead of failing with a raw pip error, {venv_python} is the venv's own interpreter
+    // (.venv/bin/python, or .venv\Scripts\python.exe on Windows). Node steps pick `npm ci` or `npm install` by whether a lockfile exists.
     setup: setupSteps(cfg).map((step) =>
       step.toolchain === "python"
-        ? { ...step, cmd: step.cmd.replace(/^python3 /, "{python} "), minPython: cfg.backend.version }
-        : step,
+        ? {
+            ...step,
+            cmd: step.cmd.replace(/^python3 /, "{python} ").split(".venv/bin/python").join("{venv_python}"),
+            minPython: cfg.backend.version,
+          }
+        : { ...step, cmd: NPM_CI, lockfile: "package-lock.json", fallbackCmd: NPM_INSTALL },
     ),
     gates: buildGates(cfg),
     runtime: {

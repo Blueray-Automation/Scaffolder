@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
-# Entry point for the SDLC loop tooling. All logic lives in scripts/sdlc.py (stdlib-only Python 3.9+).
+# Entry point for the SDLC loop tooling on macOS, Linux, WSL and Git Bash.
+# All logic lives in scripts/sdlc.py (stdlib-only Python 3.9+). On Windows (cmd, PowerShell) use scripts\sdlc.cmd.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "python3 (3.9+) is required to run the SDLC loop tooling" >&2
-  exit 127
-fi
-exec python3 "$DIR/sdlc.py" "$@"
+# The first interpreter that actually runs wins. `python3` is not enough everywhere: on Windows (Git Bash)
+# it is usually the Microsoft Store stub, and only `python` or the `py` launcher work.
+for candidate in python3 python "py -3"; do
+  # shellcheck disable=SC2086  # "py -3" is deliberately split into a command and an argument
+  if $candidate -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1; then
+    # shellcheck disable=SC2086
+    exec $candidate "$DIR/sdlc.py" "$@"
+  fi
+done
+echo "Python 3.9+ is required to run the SDLC loop tooling (tried python3, python, py -3)." >&2
+echo "Install it, then run this again:  macOS: brew install python | Ubuntu: sudo apt install python3 python3-venv | Windows: winget install -e --id Python.Python.3.12" >&2
+exit 127

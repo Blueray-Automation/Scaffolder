@@ -239,7 +239,10 @@ npm run scaffold -- generate --config scaffolder.config.yaml \\
                   <pre className="overflow-auto rounded-lg bg-zinc-900 p-3 font-mono text-[12px] text-zinc-200">{`cd ../${slug}
 ./scripts/sdlc doctor    # toolchain ok?
 ./scripts/sdlc setup     # install dependencies
-./scripts/sdlc verify    # gates + PRD facts: exactly what CI runs`}</pre>
+./scripts/sdlc verify    # gates + PRD facts: exactly what CI runs
+
+# Windows (PowerShell or cmd): the same commands with the .cmd launcher
+.\\scripts\\sdlc.cmd doctor`}</pre>
                 </div>
               )}
             </div>

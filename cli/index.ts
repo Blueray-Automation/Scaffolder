@@ -147,7 +147,10 @@ function main(): void {
         }
         console.log(`generated ${files.length} files in ${out}\n`);
         console.log(renderTree(files.map((f) => f.path), config.project.name).split("\n").slice(0, 40).join("\n"));
-        console.log(`\nnext:\n  cd ${out}\n  ./scripts/sdlc doctor && ./scripts/sdlc setup && ./scripts/sdlc verify`);
+        console.log(
+          `\nnext:\n  cd ${out}\n  ./scripts/sdlc doctor && ./scripts/sdlc setup && ./scripts/sdlc verify\n` +
+            `  (Windows PowerShell/cmd: .\\scripts\\sdlc.cmd doctor, then setup, then verify)`,
+        );
       }
       if (values.zip) {
         writeFileSync(values.zip, toZip(files, config.project.name));

@@ -30,6 +30,7 @@ import datetime
 import hashlib
 import json
 import os
+import platform
 import re
 import shlex
 import shutil
@@ -46,6 +47,23 @@ CONFIG_PATH = ROOT / ".ai" / "sdlc.json"
 EVIDENCE = ROOT / ".ai" / "evidence"
 
 EXIT_OK, EXIT_FAIL, EXIT_HUMAN, EXIT_STUCK, EXIT_INTEGRITY, EXIT_USAGE = 0, 1, 2, 3, 4, 64
+
+IS_WINDOWS = os.name == "nt"
+
+
+def _prepare_console() -> None:
+    """Windows: print UTF-8 (the legacy code page cannot encode the symbols this tool prints)
+    and switch a real console to virtual-terminal mode so colour codes render."""
+    if not IS_WINDOWS:
+        return
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(AttributeError, ValueError, OSError):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+    if sys.stdout.isatty():
+        os.system("")  # noqa: S605 (the empty command is the documented way to enable VT mode)
+
+
+_prepare_console()
 
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 USE_COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
@@ -83,7 +101,7 @@ def die(msg: str, code: int = EXIT_USAGE) -> "None":
 def load_config() -> dict:
     if not CONFIG_PATH.exists():
         die(f"{CONFIG_PATH.relative_to(ROOT)} not found")
-    return json.loads(CONFIG_PATH.read_text())
+    return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
 
 
 def strip_ansi(s: str) -> str:
@@ -92,17 +110,41 @@ def strip_ansi(s: str) -> str:
 
 def tail_lines(path: Path, n: int = 80) -> str:
     try:
-        lines = strip_ansi(path.read_text(errors="replace")).splitlines()
+        lines = strip_ansi(path.read_text(encoding="utf-8", errors="replace")).splitlines()
     except OSError:
         return ""
     return "\n".join(lines[-n:])
 
 
 def rel(p: Path) -> str:
+    """Path relative to the repository, always with forward slashes (the config and git use them on every OS)."""
     try:
-        return str(p.relative_to(ROOT))
+        return p.relative_to(ROOT).as_posix()
     except ValueError:
         return str(p)
+
+
+def describe_platform() -> str:
+    name = {"Darwin": "macOS"}.get(platform.system(), platform.system())
+    if name == "Linux" and "microsoft" in platform.release().lower():
+        name = "Linux (WSL)"
+    return f"{name} {platform.release()}"
+
+
+def quote_arg(arg: str) -> str:
+    """Quote one argument for the shell run_shell uses: sh on macOS/Linux, cmd.exe on Windows."""
+    return subprocess.list2cmdline([arg]) if IS_WINDOWS else shlex.quote(arg)
+
+
+def command_program(command: str) -> str:
+    """The program a shell command starts with, quotes removed."""
+    return shlex.split(command, posix=not IS_WINDOWS)[0].strip('"')
+
+
+def adapt_command(command: str) -> str:
+    """Commands are written for `python3`. Run them with the interpreter that runs this tool: Windows
+    has no reliable `python3` (usually the Microsoft Store stub), and elsewhere it is the same interpreter."""
+    return re.sub(r"^python3(?=\s)", lambda _m: quote_arg(sys.executable), command)
 
 
 # --------------------------------------------------------------------------- python interpreter
@@ -118,11 +160,27 @@ def python_version(path: str) -> tuple | None:
     try:
         out = subprocess.run(
             [path, "-c", "import sys; print('%d.%d' % sys.version_info[:2])"],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, encoding="utf-8", errors="replace", timeout=15,
         )
         return parse_version(out.stdout.strip())
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
+
+
+def windows_launcher_pythons(want: tuple) -> list:
+    """Interpreters the Windows `py` launcher knows (python.org installs register there, not as `python3.12`)."""
+    if not (IS_WINDOWS and shutil.which("py")):
+        return []
+    found = []
+    for minor in range(want[1], want[1] + 5):
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
+            out = subprocess.run(
+                ["py", f"-{want[0]}.{minor}", "-c", "import sys; print(sys.executable)"],
+                capture_output=True, encoding="utf-8", errors="replace", timeout=15,
+            )
+            if out.returncode == 0 and out.stdout.strip():
+                found.append(out.stdout.strip())
+    return found
 
 
 def find_python(minimum: str) -> tuple:
@@ -133,11 +191,14 @@ def find_python(minimum: str) -> tuple:
         path = shutil.which(explicit)
         ver = python_version(path) if path else None
         return (path, ver) if ver and ver >= want else (None, ver)
-    # the exact configured version first, then newer ones, then whatever `python3` / `python` is
-    candidates = [f"python{want[0]}.{m}" for m in range(want[1], want[1] + 5)] + ["python3", "python"]
+    # the exact configured version first, then newer ones, then the interpreter running this tool, then
+    # whatever `python3` / `python` is (on Windows `python3` is often only the Microsoft Store stub, which
+    # cannot run and is skipped below)
+    paths = [shutil.which(f"python{want[0]}.{m}") for m in range(want[1], want[1] + 5)]
+    paths += windows_launcher_pythons(want)
+    paths += [sys.executable] + [shutil.which(name) for name in ("python3", "python")]
     newest, seen = None, set()
-    for name in candidates:
-        path = shutil.which(name)
+    for path in paths:
         if not path or path in seen:
             continue
         seen.add(path)
@@ -151,13 +212,24 @@ def find_python(minimum: str) -> tuple:
 
 
 def install_hints(minimum: str) -> list:
-    return [
-        f"  macOS (Homebrew):  brew install python@{minimum}",
+    """How to get a suitable Python, the line for this operating system first."""
+    by_os = {
+        "macos": f"  macOS (Homebrew):  brew install python@{minimum}",
+        "windows": f"  Windows (winget):  winget install -e --id Python.Python.{minimum}",
+        "linux": f"  Ubuntu/Debian:     sudo apt install python{minimum} python{minimum}-venv   (not found? use uv)",
+    }
+    mine = "windows" if IS_WINDOWS else ("macos" if sys.platform == "darwin" else "linux")
+    lines = [by_os.pop(mine), *by_os.values()]
+    lines += [
         f"  uv (any OS):       uv python install {minimum}",
         f"  pyenv:             pyenv install {minimum} && pyenv local {minimum}",
         "  other:             https://www.python.org/downloads/",
-        "Already installed somewhere unusual?  SDLC_PYTHON=/path/to/python ./scripts/sdlc setup",
     ]
+    if IS_WINDOWS:
+        lines.append("Already installed somewhere unusual?  $env:SDLC_PYTHON='C:\\path\\to\\python.exe'; .\\scripts\\sdlc.cmd setup   (PowerShell)")
+    else:
+        lines.append("Already installed somewhere unusual?  SDLC_PYTHON=/path/to/python ./scripts/sdlc setup")
+    return lines
 
 
 def offer_python_install(minimum: str) -> str | None:
@@ -167,6 +239,10 @@ def offer_python_install(minimum: str) -> str | None:
         name, command = "uv", ["uv", "python", "install", minimum]
     elif shutil.which("brew"):
         name, command = "Homebrew", ["brew", "install", f"python@{minimum}"]
+    elif IS_WINDOWS and shutil.which("winget"):
+        name = "winget"
+        command = ["winget", "install", "-e", "--id", f"Python.Python.{minimum}",
+                   "--accept-package-agreements", "--accept-source-agreements"]
     else:
         return None
     consent = os.environ.get("SDLC_INSTALL_PYTHON", "").lower() in ("1", "yes", "true")
@@ -184,7 +260,7 @@ def offer_python_install(minimum: str) -> str | None:
         say(bad(f"{name} could not install Python {minimum}"))
         return None
     if name == "uv":
-        found = subprocess.run(["uv", "python", "find", minimum], capture_output=True, text=True)
+        found = subprocess.run(["uv", "python", "find", minimum], capture_output=True, encoding="utf-8", errors="replace")
         return found.stdout.strip() or None if found.returncode == 0 else None
     return find_python(minimum)[0]
 
@@ -220,10 +296,27 @@ def build_env(extra: dict | None = None, path_prepend: list | None = None) -> di
     dirs = [str(ROOT / p) for p in (path_prepend or []) if (ROOT / p).is_dir()]
     if dirs:
         env["PATH"] = os.pathsep.join(dirs + [env.get("PATH", "")])
+    if IS_WINDOWS:
+        env.setdefault("PYTHONUTF8", "1")  # Python tools in child processes read and write UTF-8, not the legacy code page
     return env
 
 
+# The interpreter inside a project virtual environment, relative to the component directory.
+VENV_PYTHON = r".venv\Scripts\python.exe" if IS_WINDOWS else ".venv/bin/python"
+
+# POSIX: each child gets its own session, so the shell AND the server it starts can be signalled together.
+GROUP_KWARGS: dict = {} if IS_WINDOWS else {"start_new_session": True}
+
+
 def kill_group(proc: subprocess.Popen) -> None:
+    """Stop a process and everything it started (a shell command is a tree: shell -> server)."""
+    if IS_WINDOWS:
+        # /T ends the whole tree (cmd.exe -> uvicorn / node), /F forces it; killing only cmd.exe would leave the server holding its port
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, timeout=30)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=5)
+        return
     with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
     try:
@@ -238,6 +331,8 @@ def run_shell(cmd: str, cwd: Path, log: Path, *, env: dict, timeout: int, stdin_
     with open(log, "a", encoding="utf-8") as fh:
         fh.write(f"$ {cmd}    (cwd={rel(cwd) or '.'})\n\n")
         fh.flush()
+        if IS_WINDOWS:
+            env = {"PYTHONUTF8": "1", **env}
         proc = subprocess.Popen(
             cmd,
             shell=True,
@@ -246,7 +341,7 @@ def run_shell(cmd: str, cwd: Path, log: Path, *, env: dict, timeout: int, stdin_
             stdin=subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL,
             stdout=fh,
             stderr=subprocess.STDOUT,
-            start_new_session=True,
+            **GROUP_KWARGS,
         )
         try:
             proc.communicate(input=stdin_text.encode() if stdin_text is not None else None, timeout=timeout)
@@ -301,8 +396,8 @@ class Run:
             "items": self.items,
             "notes": self.notes,
         }
-        (self.dir / "results.json").write_text(json.dumps(data, indent=2))
-        (self.dir / "report.md").write_text(render_report(data, specs or []))
+        (self.dir / "results.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
+        (self.dir / "report.md").write_text(render_report(data, specs or []), encoding="utf-8")
         latest = EVIDENCE / "latest"
         if latest.is_symlink() or latest.is_file():
             latest.unlink()
@@ -313,7 +408,7 @@ class Run:
 
 def git(*args: str) -> str:
     try:
-        out = subprocess.run(["git", *args], cwd=str(ROOT), capture_output=True, text=True, timeout=20)
+        out = subprocess.run(["git", *args], cwd=str(ROOT), capture_output=True, encoding="utf-8", errors="replace", timeout=20)
         return out.stdout.strip() if out.returncode == 0 else ""
     except (OSError, subprocess.TimeoutExpired):
         return ""
@@ -383,7 +478,7 @@ def run_gate(gate: dict, run: Run) -> dict:
     log = run.logs / f"{gate['id']}.log"
     env = build_env(gate.get("env"), gate.get("pathPrepend"))
     t0 = time.time()
-    code = run_shell(gate["cmd"], ROOT / gate["cwd"], log, env=env, timeout=gate.get("timeoutSeconds", 600))
+    code = run_shell(adapt_command(gate["cmd"]), ROOT / gate["cwd"], log, env=env, timeout=gate.get("timeoutSeconds", 600))
     status = "pass" if code == 0 else ("fail" if gate.get("required", True) else "warn")
     item = {
         "kind": "gate",
@@ -470,7 +565,7 @@ class Runtime:
             proc = subprocess.Popen(
                 svc["cmd"], shell=True, cwd=str(ROOT / svc["cwd"]),
                 env=build_env(svc.get("env"), svc.get("pathPrepend")),
-                stdout=fh, stderr=subprocess.STDOUT, start_new_session=True,
+                stdout=fh, stderr=subprocess.STDOUT, **GROUP_KWARGS,
             )
             self.procs.append((svc["name"], proc, fh))
             deadline = time.time() + svc.get("startTimeoutSeconds", 60)
@@ -511,14 +606,14 @@ def load_specs(cfg: dict) -> list:
                 "dir": d, "acs": {}, "checks": [], "errors": []}
         prd, acc = d / "prd.md", d / "acceptance.json"
         if prd.exists():
-            spec["acs"] = {m.group(1): m.group(2).strip() for m in AC_LINE.finditer(prd.read_text())}
-            if "TODO(prd)" in prd.read_text():
+            spec["acs"] = {m.group(1): m.group(2).strip() for m in AC_LINE.finditer(prd.read_text(encoding="utf-8"))}
+            if "TODO(prd)" in prd.read_text(encoding="utf-8"):
                 spec["errors"].append("prd.md still contains TODO(prd) placeholders: the PRD is not finished")
         else:
             spec["errors"].append("prd.md is missing")
         if acc.exists():
             try:
-                data = json.loads(acc.read_text())
+                data = json.loads(acc.read_text(encoding="utf-8"))
                 spec["checks"] = data.get("checks", [])
                 if data.get("feature") and data["feature"] != spec["feature"]:
                     spec["errors"].append(f"acceptance.json feature '{data['feature']}' != folder '{spec['feature']}'")
@@ -634,7 +729,7 @@ def check_http(chk: dict, base: str) -> tuple:
 
 def check_cmd(chk: dict, run: Run, key: str) -> tuple:
     log = run.logs / f"fact-{re.sub(r'[^A-Za-z0-9_.-]', '_', key)}.log"
-    code = run_shell(chk["run"], ROOT / chk.get("cwd", "."), log, env=build_env(chk.get("env"), chk.get("pathPrepend")), timeout=chk.get("timeoutSeconds", 120))
+    code = run_shell(adapt_command(chk["run"]), ROOT / chk.get("cwd", "."), log, env=build_env(chk.get("env"), chk.get("pathPrepend")), timeout=chk.get("timeoutSeconds", 120))
     out, problems = tail_lines(log, 400), []
     if code != chk.get("expectExit", 0):
         problems.append(f"exit {code}, expected {chk.get('expectExit', 0)}")
@@ -650,7 +745,7 @@ def check_file(chk: dict) -> tuple:
         return (not p.exists()), ("absent" if not p.exists() else f"{chk['path']} must not exist")
     if not p.exists():
         return False, f"{chk['path']} does not exist"
-    text, problems = p.read_text(errors="replace"), []
+    text, problems = p.read_text(encoding="utf-8", errors="replace"), []
     for needle in chk.get("contains", []):
         if needle not in text:
             problems.append(f"does not contain {needle!r}")
@@ -807,13 +902,13 @@ def fingerprint(run: Run) -> str:
 
 def render_prompt(path: str, values: dict) -> str:
     """Fill {{placeholders}} in ONE pass, so text inserted by a value (e.g. a PRD) is never re-expanded."""
-    text = (ROOT / path).read_text()
+    text = (ROOT / path).read_text(encoding="utf-8")
     return re.sub(r"\{\{(\w+)\}\}", lambda m: str(values.get(m.group(1), m.group(0))), text)
 
 
 def run_agent(cfg: dict, command: str, prompt: str, tag: str, run_dir: Path) -> int:
     prompt_file = run_dir / f"{tag}.prompt.md"
-    prompt_file.write_text(prompt)
+    prompt_file.write_text(prompt, encoding="utf-8")
     log = run_dir / f"{tag}.agent.log"
     env = os.environ.copy()
     env.update({"SDLC_PROMPT_FILE": str(prompt_file), "SDLC_PHASE": tag})
@@ -849,27 +944,41 @@ def manifest_hash(step: dict) -> str:
 
 def load_installed() -> dict:
     try:
-        return json.loads(INSTALLED_STATE.read_text())
+        return json.loads(INSTALLED_STATE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
 
 
 def save_installed(state: dict) -> None:
     EVIDENCE.mkdir(parents=True, exist_ok=True)
-    INSTALLED_STATE.write_text(json.dumps(state, indent=2))
+    INSTALLED_STATE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+
+def setup_command(step: dict, python: str | None) -> str:
+    """The shell command for a setup step, with the OS-specific parts filled in: {python} (an interpreter that
+    satisfies the project) and {venv_python} (the project's virtual environment). Plain strings, no shell syntax
+    beyond `&&`, so the same step runs in sh, cmd.exe and PowerShell."""
+    command = step["cmd"]
+    # `npm ci` needs a lockfile; without one fall back to `npm install` (decided here, not with `if [ -f ... ]`, which cmd.exe cannot run)
+    if step.get("fallbackCmd") and step.get("lockfile") and not (ROOT / step["cwd"] / step["lockfile"]).exists():
+        command = step["fallbackCmd"]
+    command = command.replace("{venv_python}", VENV_PYTHON)
+    if python:
+        command = command.replace("{python}", quote_arg(python))
+    return command
 
 
 def run_setup_step(step: dict, run: Run) -> bool:
     """Run one setup step (picking an interpreter for Python steps) and record what was installed."""
-    command = step["cmd"]
     minimum = step.get("minPython")
+    python = None
     if minimum:  # pick (or offer to install) an interpreter that satisfies the project, never fail with a raw pip error
         python = resolve_python(minimum, step["label"], interactive=True)
         if python is None:
             return False
         ver = python_version(python) or (0, 0)
         say(dim(f"  using {python} (Python {ver[0]}.{ver[1]})"))
-        command = command.replace("{python}", shlex.quote(python))
+    command = setup_command(step, python)
     say(f"  {step['label']} ...")
     log = run.logs / f"{step['id']}.log"
     code = run_shell(command, ROOT / step["cwd"], log, env=os.environ.copy(), timeout=1800)
@@ -908,7 +1017,7 @@ def resolve_agent(cfg: dict, args: argparse.Namespace) -> str:
 def agent_problem(command: str) -> str | None:
     """Why this agent command cannot run (its program is not installed), or None."""
     try:
-        program = shlex.split(command)[0]
+        program = command_program(command)
     except (ValueError, IndexError):
         return "the agent command is empty or malformed"
     if shutil.which(program) is None:
@@ -974,7 +1083,7 @@ def pdf_text_poppler(path: Path) -> str | None:
     if not exe:
         return None
     try:
-        out = subprocess.run([exe, "-layout", "-enc", "UTF-8", str(path), "-"], capture_output=True, text=True, timeout=180)
+        out = subprocess.run([exe, "-layout", "-enc", "UTF-8", str(path), "-"], capture_output=True, encoding="utf-8", errors="replace", timeout=180)
     except (OSError, subprocess.SubprocessError):
         return None
     return out.stdout if out.returncode == 0 else None
@@ -998,7 +1107,7 @@ def pdf_text_mutool(path: Path) -> str | None:
     if not exe:
         return None
     try:
-        out = subprocess.run([exe, "draw", "-q", "-F", "txt", "-o", "-", str(path)], capture_output=True, text=True, timeout=180)
+        out = subprocess.run([exe, "draw", "-q", "-F", "txt", "-o", "-", str(path)], capture_output=True, encoding="utf-8", errors="replace", timeout=180)
     except (OSError, subprocess.SubprocessError):
         return None
     return out.stdout if out.returncode == 0 else None
@@ -1184,7 +1293,7 @@ def extract_source(path: Path) -> tuple:
         except Exception as e:  # not a valid docx
             return None, f"could not read the .docx ({e})"
     if ext != ".pdf":
-        return path.read_text(errors="replace"), "plain text"
+        return path.read_text(encoding="utf-8", errors="replace"), "plain text"
     for how, fn in (("pdftotext", pdf_text_poppler), ("pypdf", pdf_text_pypdf), ("mutool", pdf_text_mutool)):
         text = fn(path)
         if looks_like_text(text):
@@ -1204,7 +1313,7 @@ def create_spec_dir(cfg: dict, slug: str, title: str) -> Path:
     dest = base / f"{fid}-{slug}"
     shutil.copytree(base / "_template", dest)
     for f in dest.iterdir():
-        f.write_text(f.read_text().replace("{{ID}}", fid).replace("{{TITLE}}", title).replace("{{SLUG}}", slug))
+        f.write_text(f.read_text(encoding="utf-8").replace("{{ID}}", fid).replace("{{TITLE}}", title).replace("{{SLUG}}", slug), encoding="utf-8")
     return dest
 
 
@@ -1237,7 +1346,7 @@ def cmd_spec(cfg: dict, args: argparse.Namespace) -> int:
     spec_dir = existing[0] if existing else None
     if spec_dir is not None:
         prd = spec_dir / "prd.md"
-        if prd.exists() and "TODO(prd)" not in prd.read_text():
+        if prd.exists() and "TODO(prd)" not in prd.read_text(encoding="utf-8"):
             say(bad(f"{rel(spec_dir)} already has a finished PRD; this would overwrite your work."))
             say("Choose another name with --name, or delete the folder first.")
             return EXIT_HUMAN
@@ -1255,7 +1364,7 @@ def cmd_spec(cfg: dict, args: argparse.Namespace) -> int:
     text, how = extract_source(src)
     run = Run(f"spec-{slug}")
     if text:
-        (run.dir / "source.txt").write_text(text)
+        (run.dir / "source.txt").write_text(text, encoding="utf-8")
         say(ok(f"  read {src.name}: {len(text):,} characters via {how.split(':')[0]}"))
     else:
         say(warn(f"  {how}"))
@@ -1274,7 +1383,7 @@ def cmd_spec(cfg: dict, args: argparse.Namespace) -> int:
     prompt = render_prompt(cfg["agent"]["prompts"]["spec"], values)
     if args.dry_run:
         prompt_file = run.dir / "spec.prompt.md"
-        prompt_file.write_text(prompt)
+        prompt_file.write_text(prompt, encoding="utf-8")
         say(ok("\nDry run: nothing was executed or created."))
         say(f"  agent command : {agent}" + (f"   (WARNING: {problem})" if problem else ""))
         say(f"  would create  : {rel(planned)}/  (prd.md, acceptance.json, and a copy of the source in source/)")
@@ -1305,11 +1414,11 @@ def cmd_spec(cfg: dict, args: argparse.Namespace) -> int:
             for v in violations:
                 say(bad(f"  - {v}"))
             say("Revert them (git checkout -- <path>; remove untracked files) and run again.")
-            (run.dir / "integrity-violation.md").write_text("\n".join(violations))
+            (run.dir / "integrity-violation.md").write_text("\n".join(violations), encoding="utf-8")
             return EXIT_INTEGRITY
-        if questions.exists() and questions.read_text().strip():
+        if questions.exists() and questions.read_text(encoding="utf-8").strip():
             say(bad("\nThe agent could not draft a spec:"))
-            say(questions.read_text().strip())
+            say(questions.read_text(encoding="utf-8").strip())
             return EXIT_HUMAN
         spec = next((sp for sp in load_specs(cfg) if sp["dir"] == spec_dir), None)
         good, errors = traceability(spec, targets_set) if spec else (False, ["the spec folder disappeared"])
@@ -1326,7 +1435,7 @@ def cmd_spec(cfg: dict, args: argparse.Namespace) -> int:
             "attempt": attempt + 1, "maxAttempts": args.max_attempts, "errors": "\n".join(f"- {e}" for e in errors),
         })
 
-    prd_text = (spec_dir / "prd.md").read_text()
+    prd_text = (spec_dir / "prd.md").read_text(encoding="utf-8")
     assumptions = len(re.findall(r"ASSUMPTION", prd_text))
     say(ok(f"\nDraft ready: {rel(spec_dir)}/"))
     say(f"  {len(spec['acs'])} acceptance criteria, {len(spec['checks'])} checks, {assumptions} assumption(s) for you to confirm")
@@ -1423,8 +1532,8 @@ def cmd_implement(cfg: dict, args: argparse.Namespace) -> int:
     prompt = render_prompt(cfg["agent"]["prompts"]["implement"], {
         "feature": fid,
         "specDir": rel(spec_dir),
-        "prd": (spec_dir / "prd.md").read_text().strip(),
-        "acceptance": (spec_dir / "acceptance.json").read_text().strip(),
+        "prd": (spec_dir / "prd.md").read_text(encoding="utf-8").strip(),
+        "acceptance": (spec_dir / "acceptance.json").read_text(encoding="utf-8").strip(),
         "stack": stack or "(no components)",
         "gates": ", ".join(f"`{g['id']}`" for g in cfg["gates"]),
         "rules": listing(".ai/rules/*.md"),
@@ -1434,7 +1543,7 @@ def cmd_implement(cfg: dict, args: argparse.Namespace) -> int:
     })
     if args.dry_run:
         prompt_file = run.dir / "implement.prompt.md"
-        prompt_file.write_text(prompt)
+        prompt_file.write_text(prompt, encoding="utf-8")
         say(ok("\nDry run: nothing was executed."))
         say(f"  agent command : {agent}" + (f"   (WARNING: {problem})" if problem else ""))
         say(f"  prompt        : {rel(prompt_file)}  ({len(prompt.splitlines())} lines, includes prd.md and acceptance.json)")
@@ -1455,11 +1564,11 @@ def cmd_implement(cfg: dict, args: argparse.Namespace) -> int:
         for v in violations:
             say(bad(f"  - {v}"))
         say("The spec and the gate config belong to you, not the agent. Revert them (git checkout -- <path>) and run again.")
-        (run.dir / "integrity-violation.md").write_text("\n".join(violations))
+        (run.dir / "integrity-violation.md").write_text("\n".join(violations), encoding="utf-8")
         return EXIT_INTEGRITY
-    if questions.exists() and questions.read_text().strip():
+    if questions.exists() and questions.read_text(encoding="utf-8").strip():
         say(bad("\nThe agent could not proceed without answers from you:"))
-        say(questions.read_text().strip())
+        say(questions.read_text(encoding="utf-8").strip())
         say("\nClarify the PRD / acceptance.json, then run this again.")
         return EXIT_HUMAN
 
@@ -1512,7 +1621,7 @@ def cmd_loop(cfg: dict, args: argparse.Namespace) -> int:
         })
         if not agent:
             path = run.dir / f"heal-{i}.prompt.md"
-            path.write_text(prompt)
+            path.write_text(prompt, encoding="utf-8")
             say(warn(f"\nNo agent configured. Fix the failures above (prompt for your AI assistant: {rel(path)})."))
             if sys.stdin.isatty():
                 try:
@@ -1531,7 +1640,7 @@ def cmd_loop(cfg: dict, args: argparse.Namespace) -> int:
             for v in violations:
                 say(bad(f"  - {v}"))
             say("Healing must fix the code, not the checks. Revert these changes (git checkout -- <path>) and re-run.")
-            (run.dir / "integrity-violation.md").write_text("\n".join(violations))
+            (run.dir / "integrity-violation.md").write_text("\n".join(violations), encoding="utf-8")
             return EXIT_INTEGRITY
     return EXIT_FAIL
 
@@ -1549,18 +1658,22 @@ def cmd_setup(cfg: dict, args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(cfg: dict, args: argparse.Namespace) -> int:
-    needed = {"git": True, "python3": True}
+    needed = {"git": True}
     if any(s["toolchain"] == "node" for s in cfg["setup"]):
         needed.update({"node": True, "npm": True})
     if cfg["runtime"]["mode"] == "docker":
         needed["docker"] = True
     bad_count = 0
+    say(f"  {ok('ok  ')}  {'system':12} {describe_platform()}")
+    # the interpreter running this tool is the proof that Python works; `python3` on PATH may be a Windows Store stub
+    say(f"  {ok('ok  ')}  {'python':12} {sys.executable} (Python {sys.version_info[0]}.{sys.version_info[1]}, runs this tool)")
     for tool, required in needed.items():
         path = shutil.which(tool)
         version = ""
         if path:
             with contextlib.suppress(Exception):
-                version = subprocess.run([tool, "--version"], capture_output=True, text=True, timeout=10).stdout.strip().splitlines()[0]
+                # the resolved path, not the bare name: on Windows `npm` is npm.cmd, which only the PATHEXT-aware lookup finds
+                version = subprocess.run([path, "--version"], capture_output=True, encoding="utf-8", errors="replace", timeout=10).stdout.strip().splitlines()[0]
         say(f"  {ok('ok  ') if path else bad('MISS')}  {tool:12} {version}")
         bad_count += 0 if path else 1
     for step in cfg["setup"]:
@@ -1627,7 +1740,7 @@ def cmd_new(cfg: dict, args: argparse.Namespace) -> int:
     dest = base / f"{fid}-{slug}"
     shutil.copytree(base / "_template", dest)
     for f in dest.iterdir():
-        f.write_text(f.read_text().replace("{{ID}}", fid).replace("{{TITLE}}", title).replace("{{SLUG}}", slug))
+        f.write_text(f.read_text(encoding="utf-8").replace("{{ID}}", fid).replace("{{TITLE}}", title).replace("{{SLUG}}", slug), encoding="utf-8")
     say(ok(f"created {rel(dest)}/  (edit prd.md + acceptance.json, or run: ./scripts/sdlc feature {fid})"))
     return EXIT_OK
 
@@ -1651,7 +1764,7 @@ def cmd_feature(cfg: dict, args: argparse.Namespace) -> int:
         spec = find_spec(cfg, slugify(args.name))
     assert spec is not None
     fid = spec.name.split("-", 2)[0] + "-" + spec.name.split("-", 2)[1]
-    prd_text = (spec / "prd.md").read_text()
+    prd_text = (spec / "prd.md").read_text(encoding="utf-8")
     if "TODO(prd)" in prd_text:
         if agent and args.brief:
             values = {"feature": fid, "specDir": rel(spec), "brief": args.brief}
@@ -1675,6 +1788,18 @@ def cmd_feature(cfg: dict, args: argparse.Namespace) -> int:
     return cmd_deploy(cfg, argparse.Namespace(environment=args.deploy, tag=None))
 
 
+def find_git_bash() -> str | None:
+    """bash.exe that ships with Git for Windows. `bash` on PATH may be WSL's, which cannot read Windows paths."""
+    git_exe = shutil.which("git")
+    if not git_exe:
+        return None
+    root = Path(git_exe).resolve().parent.parent  # <Git>\cmd\git.exe -> <Git>
+    for parts in (("bin", "bash.exe"), ("usr", "bin", "bash.exe")):
+        if (root.joinpath(*parts)).exists():
+            return str(root.joinpath(*parts))
+    return None
+
+
 def cmd_deploy(cfg: dict, args: argparse.Namespace) -> int:
     envs = {e["name"]: e for e in cfg["deploy"]["environments"]}
     if args.environment not in envs:
@@ -1684,7 +1809,14 @@ def cmd_deploy(cfg: dict, args: argparse.Namespace) -> int:
     if not script.exists():
         die("deployment is not configured (cd.enabled=false at generation time)")
     say(f"deploying {tag} -> {args.environment} (target: {cfg['deploy']['target']})")
-    code = subprocess.call([str(script), args.environment, tag], cwd=str(ROOT))
+    command = [str(script), args.environment, tag]
+    if IS_WINDOWS:  # the deploy scripts are bash scripts: Windows needs Git for Windows' bash (not the WSL bash.exe)
+        bash = find_git_bash()
+        if bash is None:
+            die("deploying from Windows needs bash: install Git for Windows (https://git-scm.com) or run this from WSL. "
+                "The generated cd.yml workflow deploys from a Linux runner and needs neither.")
+        command = [bash, script.as_posix(), args.environment, tag]
+    code = subprocess.call(command, cwd=str(ROOT))
     if code != 0:
         say(bad("deploy script failed; nothing was verified"))
         return EXIT_FAIL
@@ -1733,7 +1865,7 @@ def cmd_secrets(cfg: dict, args: argparse.Namespace) -> int:
         if f.suffix in (".md", ".png", ".jpg", ".ico", ".zip", ".gz", ".woff2") or f.stat().st_size > 1_000_000:
             continue
         try:
-            text = f.read_text(errors="strict")
+            text = f.read_text(encoding="utf-8", errors="strict")
         except (UnicodeDecodeError, OSError):
             continue
         for n, line in enumerate(text.splitlines(), 1):
@@ -1774,7 +1906,7 @@ def cmd_report(cfg: dict, args: argparse.Namespace) -> int:
     path = EVIDENCE / "latest" / "report.md"
     if not path.exists():
         die("no report yet: run ./scripts/sdlc verify", EXIT_FAIL)
-    say(path.read_text())
+    say(path.read_text(encoding="utf-8"))
     return EXIT_OK
 
 

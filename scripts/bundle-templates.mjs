@@ -28,7 +28,8 @@ for (const full of walk(templatesDir)) {
     stray.push(key);
     continue;
   }
-  files[key] = { content: readFileSync(full, "utf8") };
+  // LF whatever Git did on checkout: a Windows checkout with autocrlf would otherwise put CR into every generated file
+  files[key] = { content: readFileSync(full, "utf8").replace(/\r\n/g, "\n") };
 }
 
 if (stray.length > 0) {
