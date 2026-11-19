@@ -169,6 +169,15 @@ check("no lockfile: npm install", m.setup_command(web, None) == "npm install")
 (root / "web" / "package-lock.json").write_text("{}")
 check("lockfile: npm ci", m.setup_command(web, None) == "npm ci")
 
+# --- a spec that names .venv/bin also finds .venv/Scripts (the failure seen on windows-latest: pytest not found)
+check("venv_alternatives: bin -> Scripts", m.venv_alternatives("backend/.venv/bin") == ["backend/.venv/bin", "backend/.venv/Scripts"], m.venv_alternatives("backend/.venv/bin"))
+check("venv_alternatives: Scripts -> bin", m.venv_alternatives("services/api/.venv/Scripts") == ["services/api/.venv/Scripts", "services/api/.venv/bin"])
+check("venv_alternatives: other paths untouched", m.venv_alternatives("tools/bin") == ["tools/bin"])
+(root / "backend" / ".venv" / "Scripts").mkdir(parents=True)
+only_scripts = m.build_env(None, ["backend/.venv/bin"])["PATH"].split(os.pathsep)
+check("a .venv/bin entry puts the existing .venv/Scripts on PATH", str(root / "backend" / ".venv" / "Scripts") in only_scripts, only_scripts[:2])
+check("a directory that does not exist is not added", str(root / "backend" / ".venv" / "bin") not in only_scripts)
+
 # --- install hints list this OS first
 check("hints start with winget on Windows", "winget install -e --id Python.Python.3.12" in m.install_hints("3.12")[0], m.install_hints("3.12")[0])
 check("hints end with the PowerShell way to point at a Python", "SDLC_PYTHON" in m.install_hints("3.12")[-1] and "sdlc.cmd" in m.install_hints("3.12")[-1])

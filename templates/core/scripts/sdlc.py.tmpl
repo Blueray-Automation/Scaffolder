@@ -290,10 +290,20 @@ def resolve_python(minimum: str, what: str, *, interactive: bool) -> str | None:
 # --------------------------------------------------------------------------- processes
 
 
+def venv_alternatives(path: str) -> list:
+    """A virtual environment keeps its executables in .venv/bin on macOS and Linux and in .venv/Scripts on Windows.
+    A spec (written by a person or an agent on one OS) that names one is also run where only the other exists."""
+    posix = path.replace("\\", "/").rstrip("/")
+    for here, there in ((".venv/bin", ".venv/Scripts"), (".venv/Scripts", ".venv/bin")):
+        if posix.endswith(here):
+            return [path, posix[: -len(here)] + there]
+    return [path]
+
+
 def build_env(extra: dict | None = None, path_prepend: list | None = None) -> dict:
     env = os.environ.copy()
     env.update({k: str(v) for k, v in (extra or {}).items()})
-    dirs = [str(ROOT / p) for p in (path_prepend or []) if (ROOT / p).is_dir()]
+    dirs = [str(ROOT / q) for p in (path_prepend or []) for q in venv_alternatives(p) if (ROOT / q).is_dir()]
     if dirs:
         env["PATH"] = os.pathsep.join(dirs + [env.get("PATH", "")])
     if IS_WINDOWS:
