@@ -1,22 +1,60 @@
-# Task: implement {{feature}}
+# Task: build {{feature}} from its specification
 
-Implement the feature specified in `{{specDir}}/` (`prd.md` and `acceptance.json`).
+You are an AI coding agent working inside this repository. The product owner wrote the specification below. It is the only
+source of truth: implement it completely, with tests, so that `./scripts/sdlc verify` passes. Nobody can answer questions while
+you work, so follow the steps and rules below and keep going until the work is done.
 
-## Read first
-- `AGENTS.md`, then every file in `.ai/rules/`.
-- `.ai/skills/implement-feature/SKILL.md`, `.ai/skills/write-tests/SKILL.md`, and `.ai/skills/define-contract/SKILL.md` if the API changes.
+## The specification (read-only)
 
-## How to work
-1. List the acceptance criteria (AC-xxx) from `prd.md`. They are the definition of done.
-2. Work in small vertical slices, test first: write the failing test for one AC, make it pass, refactor.
-3. If the HTTP API changes, update the contract deliberately (see the define-contract skill).
-4. Every AC must be proven by `acceptance.json` checks (HTTP/cmd/file). Add or refine checks only for THIS feature's spec.
-5. Run `./scripts/sdlc gates` while you work and `./scripts/sdlc verify` before you finish.
+### {{specDir}}/prd.md
 
-## Rules
-- Do not touch `.ai/sdlc.json`, `scripts/sdlc*`, `.github/workflows/`, or other features' specs.
-- No placeholder implementations, no skipped tests, no commented-out code, no secrets.
-- Keep changes scoped to this feature.
+{{prd}}
+
+### {{specDir}}/acceptance.json
+
+```json
+{{acceptance}}
+```
+
+Every `http` check calls the **running** system with exactly that method, path, body and headers and compares the answer with `expect`.
+Study each check and make the implementation satisfy it exactly. A `cmd` check runs one named test: that test must exist and pass.
+
+## How this repository works
+
+{{stack}}
+
+- Read `AGENTS.md` first, then the rules: {{rules}}
+- Playbooks you can follow: {{skills}}
+- `.ai/specs/FEAT-000-hello-world/` and its code show the expected style: copy its structure and conventions.
+- Gates that must pass: {{gates}}
+
+## What to do, in this order
+
+1. **Read** `AGENTS.md`, the rules, and the hello-world feature and its code.
+2. **List** every acceptance criterion (`AC-xxx`) and the check(s) that prove it.
+3. **Tests first.** Write the failing test for each behaviour (including every unhappy path and boundary in the PRD), run it, watch it fail
+   for the right reason, then implement. Follow the repository's conventions (typed code, thin handlers, settings from environment variables).
+4. **Dependencies.** If you need a new library, add it to the dependency manifest listed above, then run `./scripts/sdlc sync` to install it.
+   Never leave the manifest and the installed packages out of step.
+5. **Configuration.** Every new environment variable needs a safe *development* default in `.env.example` **and** in `docker-compose.yml`
+   (the facts run against the compose stack). Never put real secrets anywhere. The app must refuse unsafe configuration rather than guess.
+<%#hasBackend%>
+6. **API contract.** If you added or changed HTTP endpoints, update the committed contract with
+   `cd <%backendDir%> && python -m app.export_openapi --write <%openapiFromBackend%>` and check that the diff contains only your changes.
+<%/hasBackend%>
+7. **Prove it.** Run `./scripts/sdlc gates` until it is green (use `--only <gate-id>` while iterating). After you finish, the loop runs the facts
+   against the running system and sends you any failure to fix.
+
+## Hard rules
+
+- Do **not** edit the specification or anything protected: {{protected}}. A change there stops the run (integrity violation).
+- Never delete, skip or weaken a test or a threshold, and never silence a real problem with `noqa` / `eslint-disable` / `type: ignore`.
+  A one-line, explained `noqa` for a proven false alarm is fine.
+- Do **not** run `git commit`, `git push`, `git reset`, `git stash` or change git configuration: a human reviews your diff and commits.
+- No secrets, no debug leftovers, no commented-out code, no changes unrelated to this feature.
+- **If the specification is ambiguous, contradictory or impossible, do not guess.** Write your questions (one per line, with what you would
+  otherwise have assumed) to `{{questionsFile}}` and stop.
 
 ## Final message
-List each AC with the test(s) and check id(s) that prove it, plus anything you could not verify and why.
+
+For each acceptance criterion: the test(s) and check id(s) that prove it. Then anything you could not verify and why.

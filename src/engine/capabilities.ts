@@ -108,6 +108,36 @@ export const CAPABILITIES = {
   ] as Option[],
 } as const;
 
+export interface AgentPresetOption extends Option {
+  /** The shell command (reads the prompt on stdin) the preset stands for. Empty = none / user-defined. */
+  command: string;
+}
+
+/**
+ * Agent presets for `./scripts/sdlc build`. They follow each tool's documented non-interactive mode
+ * (Claude Code: `claude -p` + `--allowedTools`; Codex: `codex exec -` with an explicit sandbox).
+ * They are defaults to override with `sdlc.agent.command`, and the tools' flags can change: check
+ * `<tool> --help`. Any other agent works as a custom command that reads the prompt on stdin.
+ */
+export const AGENT_PRESETS: AgentPresetOption[] = [
+  {
+    id: "claude",
+    label: "Claude Code (claude -p)",
+    available: true,
+    command: 'claude -p --permission-mode acceptEdits --allowedTools "Read" "Edit" "Write" "Glob" "Grep" "Bash"',
+    hint: "Needs the Claude Code CLI on PATH. Bash is pre-approved so the agent can run the tests.",
+  },
+  {
+    id: "codex",
+    label: "OpenAI Codex (codex exec)",
+    available: true,
+    command: "codex exec --sandbox workspace-write -",
+    hint: "Needs the Codex CLI on PATH. The sandbox may block network access; `sdlc sync` installs dependencies outside it.",
+  },
+  { id: "custom", label: "Custom command", available: true, command: "", hint: "Any CLI that reads the prompt on stdin." },
+  { id: "none", label: "None (a human does the coding)", available: true, command: "", hint: "The loop prints the prompt and waits." },
+];
+
 export function findOption<T extends Option>(list: readonly T[], id: string): T | undefined {
   return list.find((o) => o.id === id);
 }

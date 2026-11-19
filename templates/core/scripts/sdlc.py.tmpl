@@ -10,7 +10,10 @@ Standard library only (Python 3.9+). Configured by .ai/sdlc.json; see .ai/README
   facts     check PRD acceptance criteria against the RUNNING system
   verify    gates + facts, one pass, no agent (this is what CI runs)
   loop      verify -> heal -> verify ... until green, stuck, or out of budget
+  spec      draft prd.md + acceptance.json from a requirements document (PDF, DOCX, Markdown, text) with your agent
+  implement turn a finished spec (prd.md + acceptance.json) into verified code with your agent
   feature   drive one feature through PRD -> Code -> Test (-> Deploy)
+  sync      install dependencies, only if the manifests changed since the last install
   new       create a feature spec from the template
   deploy    deploy an image tag to an environment, then verify facts there
   secrets   scan the working tree for committed secrets
@@ -527,7 +530,7 @@ def load_specs(cfg: dict) -> list:
     return specs
 
 
-def traceability(spec: dict) -> tuple:
+def traceability(spec: dict, targets: set | None = None) -> tuple:
     """Every acceptance criterion needs at least one check; every check must point at a real criterion."""
     errors = list(spec["errors"])
     if not spec["acs"] and not errors:
@@ -546,6 +549,8 @@ def traceability(spec: dict) -> tuple:
             covered.add(ac)
         if chk.get("type") not in ("http", "cmd", "file"):
             errors.append(f"check {cid} has unknown type {chk.get('type')!r}")
+        if chk.get("type") == "http" and targets is not None and chk.get("target") not in targets:
+            errors.append(f"check {cid} calls target {chk.get('target')!r}, which does not exist (available: {', '.join(sorted(targets)) or 'none'})")
     for ac in spec["acs"]:
         if ac not in covered:
             errors.append(f"{ac} has no check: an unverified requirement is not done")
@@ -670,7 +675,7 @@ def run_facts(cfg: dict, run: Run, opts: argparse.Namespace) -> list:
         return specs
 
     for spec in specs:
-        good, errors = traceability(spec)
+        good, errors = traceability(spec, set(cfg["runtime"]["targets"]))
         item = run.add({"kind": "fact", "id": f"{spec['feature']}:traceability", "label": f"{spec['feature']} every criterion has a check",
                         "status": "pass" if good else "fail", "required": True, "feature": spec["feature"], "covers": [],
                         "detail": "; ".join(errors) if errors else f"{len(spec['acs'])} criteria, {len(spec['checks'])} checks"})
@@ -751,7 +756,7 @@ def run_verify(cfg: dict, label: str, args: argparse.Namespace, *, with_facts: b
         say(c(f"\n== {stage} ==", "1"))
         if stage == "facts":
             if not (with_facts and cfg["facts"]["enabled"]):
-                say(dim("  (facts disabled)"))
+                say(dim("  (skipped)"))
                 continue
             specs = run_facts(cfg, run, args)
         else:
@@ -801,10 +806,9 @@ def fingerprint(run: Run) -> str:
 
 
 def render_prompt(path: str, values: dict) -> str:
+    """Fill {{placeholders}} in ONE pass, so text inserted by a value (e.g. a PRD) is never re-expanded."""
     text = (ROOT / path).read_text()
-    for k, v in values.items():
-        text = text.replace("{{" + k + "}}", str(v))
-    return text
+    return re.sub(r"\{\{(\w+)\}\}", lambda m: str(values.get(m.group(1), m.group(0))), text)
 
 
 def run_agent(cfg: dict, command: str, prompt: str, tag: str, run_dir: Path) -> int:
@@ -828,9 +832,656 @@ def failures_markdown(run: Run) -> str:
     return "\n\n".join(chunks)
 
 
+# --------------------------------------------------------------------------- dependencies and agent
+
+
+INSTALLED_STATE = EVIDENCE / "installed.json"
+
+
+def manifest_hash(step: dict) -> str:
+    h = hashlib.sha256()
+    for m in step.get("manifests", []):
+        p = ROOT / m
+        h.update(m.encode())
+        h.update(p.read_bytes() if p.is_file() else b"<missing>")
+    return h.hexdigest()
+
+
+def load_installed() -> dict:
+    try:
+        return json.loads(INSTALLED_STATE.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def save_installed(state: dict) -> None:
+    EVIDENCE.mkdir(parents=True, exist_ok=True)
+    INSTALLED_STATE.write_text(json.dumps(state, indent=2))
+
+
+def run_setup_step(step: dict, run: Run) -> bool:
+    """Run one setup step (picking an interpreter for Python steps) and record what was installed."""
+    command = step["cmd"]
+    minimum = step.get("minPython")
+    if minimum:  # pick (or offer to install) an interpreter that satisfies the project, never fail with a raw pip error
+        python = resolve_python(minimum, step["label"], interactive=True)
+        if python is None:
+            return False
+        ver = python_version(python) or (0, 0)
+        say(dim(f"  using {python} (Python {ver[0]}.{ver[1]})"))
+        command = command.replace("{python}", shlex.quote(python))
+    say(f"  {step['label']} ...")
+    log = run.logs / f"{step['id']}.log"
+    code = run_shell(command, ROOT / step["cwd"], log, env=os.environ.copy(), timeout=1800)
+    if code != 0:
+        say(bad(f"  FAILED ({step['id']}):\n{tail_lines(log, 30)}"))
+        return False
+    state = load_installed()
+    state[step["id"]] = manifest_hash(step)
+    save_installed(state)
+    return True
+
+
+def stale_steps(cfg: dict) -> list:
+    """Setup steps that never ran (marker missing) or whose dependency manifests changed since they last ran."""
+    state = load_installed()
+    return [
+        step for step in cfg["setup"]
+        if (step.get("marker") and not (ROOT / step["marker"]).exists()) or state.get(step["id"]) != manifest_hash(step)
+    ]
+
+
+def ensure_installed(cfg: dict, run: Run) -> bool:
+    stale = stale_steps(cfg)
+    if not stale:
+        return True
+    say(dim("  installing dependencies: " + ", ".join(step["id"] for step in stale)))
+    return all(run_setup_step(step, run) for step in stale)
+
+
+def resolve_agent(cfg: dict, args: argparse.Namespace) -> str:
+    if getattr(args, "agent", None) is not None:
+        return args.agent
+    return os.environ.get("SDLC_AGENT_CMD", cfg["agent"]["command"])
+
+
+def agent_problem(command: str) -> str | None:
+    """Why this agent command cannot run (its program is not installed), or None."""
+    try:
+        program = shlex.split(command)[0]
+    except (ValueError, IndexError):
+        return "the agent command is empty or malformed"
+    if shutil.which(program) is None:
+        return f"`{program}` is not installed or not on PATH"
+    return None
+
+
+def dirty_files(exclude: Path) -> list:
+    """Uncommitted changes other than the feature's own spec folder (empty when not a git repository)."""
+    if not (ROOT / ".git").exists():
+        return []
+    skip = rel(exclude).rstrip("/") + "/"
+    out = []
+    for line in git("status", "--porcelain").splitlines():
+        name = line[3:].split(" -> ")[-1].strip().strip('"')
+        if not name.startswith(skip) and not name.startswith(".ai/evidence"):
+            out.append(line)
+    return out
+
+
+def listing(pattern: str) -> str:
+    items = sorted(p for p in ROOT.glob(pattern))
+    return ", ".join(f"`{rel(p)}`" for p in items) or "(none)"
+
+
+# --------------------------------------------------------------------------- requirements documents -> spec
+
+
+SPEC_SOURCES = (".pdf", ".docx", ".md", ".markdown", ".txt", ".rst")
+MAX_SOURCE_CHARS = 40000
+PDF_ESCAPES = {b"n": b"\n", b"r": b"\r", b"t": b"\t", b"b": b"\b", b"f": b"\f", b"(": b"(", b")": b")", b"\\": b"\\"}
+PDF_TOKEN = re.compile(rb"\((?:\\.|[^\\()])*\)|<[0-9A-Fa-f\s]*>|\[|\]|/[^\s/\[\]()<>]*|[-+]?\d*\.?\d+|[A-Za-z'\"*]+", re.S)
+
+
+def looks_like_text(text: str | None) -> bool:
+    """Enough real words to be a usable extraction (a garbled or empty one must not be trusted)."""
+    return bool(text) and len(re.findall(r"[A-Za-z]{3,}", text)) >= 15
+
+
+def docx_text(path: Path) -> str:
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    w = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    with zipfile.ZipFile(path) as z:
+        root = ET.fromstring(z.read("word/document.xml"))
+    lines = []
+    for para in root.iter(w + "p"):
+        parts = []
+        for node in para.iter():
+            if node.tag == w + "t":
+                parts.append(node.text or "")
+            elif node.tag == w + "tab":
+                parts.append("\t")
+            elif node.tag in (w + "br", w + "cr"):
+                parts.append("\n")
+        lines.append("".join(parts))
+    return "\n".join(lines)
+
+
+def pdf_text_poppler(path: Path) -> str | None:
+    exe = shutil.which("pdftotext")
+    if not exe:
+        return None
+    try:
+        out = subprocess.run([exe, "-layout", "-enc", "UTF-8", str(path), "-"], capture_output=True, text=True, timeout=180)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout if out.returncode == 0 else None
+
+
+def pdf_text_pypdf(path: Path) -> str | None:
+    for name in ("pypdf", "PyPDF2"):
+        try:
+            lib = __import__(name)
+        except ImportError:
+            continue
+        try:
+            return "\n\n".join((page.extract_text() or "") for page in lib.PdfReader(str(path)).pages)
+        except Exception:  # a damaged or encrypted PDF: let the next extractor try
+            return None
+    return None
+
+
+def pdf_text_mutool(path: Path) -> str | None:
+    exe = shutil.which("mutool")
+    if not exe:
+        return None
+    try:
+        out = subprocess.run([exe, "draw", "-q", "-F", "txt", "-o", "-", str(path)], capture_output=True, text=True, timeout=180)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout if out.returncode == 0 else None
+
+
+def pdf_literal(token: bytes) -> bytes:
+    body, out, i = token[1:-1], bytearray(), 0
+    while i < len(body):
+        ch = body[i:i + 1]
+        if ch == b"\\" and i + 1 < len(body):
+            nxt = body[i + 1:i + 2]
+            if nxt in PDF_ESCAPES:
+                out += PDF_ESCAPES[nxt]
+                i += 2
+            elif nxt.isdigit():  # octal \ddd
+                j = i + 1
+                while j < len(body) and j < i + 4 and body[j:j + 1].isdigit():
+                    j += 1
+                out.append(int(body[i + 1:j], 8) & 0xFF)
+                i = j
+            else:  # line continuation or an unknown escape
+                i += 2
+            continue
+        out += ch
+        i += 1
+    return bytes(out)
+
+
+def pdf_unfilter(header: bytes, body: bytes) -> bytes | None:
+    """Apply a PDF stream's /Filter chain. None = a filter we cannot undo (images, LZW, encryption)."""
+    import base64
+    import zlib
+
+    found = re.search(rb"/Filter\s*(\[[^\]]*\]|/[A-Za-z0-9]+)", header)
+    if not found:
+        return body
+    for name in re.findall(rb"/([A-Za-z0-9]+)", found.group(1)):
+        if name in (b"FlateDecode", b"Fl"):
+            try:
+                body = zlib.decompress(body)
+            except zlib.error:
+                try:
+                    body = zlib.decompressobj().decompress(body)
+                except zlib.error:
+                    return None
+        elif name in (b"ASCII85Decode", b"A85"):
+            data = body.strip()
+            data = data[2:] if data.startswith(b"<~") else data
+            data = data[:-2] if data.endswith(b"~>") else data
+            try:
+                body = base64.a85decode(data)
+            except ValueError:
+                return None
+        elif name in (b"ASCIIHexDecode", b"AHx"):
+            digits = re.sub(rb"[^0-9A-Fa-f]", b"", body.split(b">")[0])
+            body = bytes.fromhex((digits + b"0" * (len(digits) % 2)).decode())
+        else:
+            return None
+    return body
+
+
+def parse_cmap(text: str) -> tuple:
+    """(code -> text, code width in bytes or 0 if unknown) from a PDF ToUnicode CMap (bfchar and bfrange)."""
+    def dec(h: str) -> str:
+        raw = bytes.fromhex(h if len(h) % 2 == 0 else h + "0")
+        return raw.decode("utf-16-be", errors="ignore") if len(raw) % 2 == 0 else raw.decode("latin-1")
+
+    mapping: dict = {}
+    width = 0
+    for block in re.findall(r"begincodespacerange(.*?)endcodespacerange", text, re.S):
+        for lo, _hi in re.findall(r"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>", block):
+            width = max(width, len(lo) // 2)
+    for block in re.findall(r"beginbfchar(.*?)endbfchar", text, re.S):
+        for src, dst in re.findall(r"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>", block):
+            mapping[int(src, 16)] = dec(dst)
+    for block in re.findall(r"beginbfrange(.*?)endbfrange", text, re.S):
+        for lo, hi, rest in re.findall(r"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(\[[^\]]*\]|<[0-9A-Fa-f]+>)", block):
+            lo_i, hi_i = int(lo, 16), min(int(hi, 16), int(lo, 16) + 65535)
+            if rest.startswith("["):
+                for k, d in enumerate(re.findall(r"<([0-9A-Fa-f]+)>", rest)):
+                    mapping[lo_i + k] = dec(d)
+            else:
+                base = dec(rest[1:-1])
+                for k in range(hi_i - lo_i + 1):
+                    mapping[lo_i + k] = (base[:-1] + chr(ord(base[-1]) + k)) if base else ""
+    return mapping, width
+
+
+def pdf_text_builtin(data: bytes) -> str:
+    """A basic, dependency-free extractor: stream filters, text operators, ToUnicode maps. Best effort only."""
+    cmap: dict = {}
+    cmap_width = 0
+    contents = []
+    for m in re.finditer(rb"(?<!end)stream\r?\n(.*?)\r?\n?endstream", data, re.S):
+        header = data[max(0, m.start() - 500):m.start()].rsplit(b"obj", 1)[-1]
+        body = pdf_unfilter(header, m.group(1))
+        if body is None:
+            continue
+        if b"beginbfchar" in body or b"beginbfrange" in body:
+            mapping, width = parse_cmap(body.decode("latin-1"))
+            cmap.update(mapping)
+            cmap_width = max(cmap_width, width)
+        elif b"BT" in body and b"ET" in body:
+            contents.append(body)
+
+    def decode(tok: bytes) -> str:
+        if tok.startswith(b"("):
+            raw, hexa = pdf_literal(tok), False
+        else:
+            digits = re.sub(rb"\s", b"", tok[1:-1]).decode()
+            raw, hexa = bytes.fromhex(digits if len(digits) % 2 == 0 else digits + "0"), True
+        if not cmap:
+            return raw.decode("latin-1")
+        two_byte = cmap_width == 2 or (cmap_width == 0 and hexa and max(cmap) > 255)
+        width = 2 if (two_byte and len(raw) % 2 == 0) else 1
+        out = []
+        for i in range(0, len(raw), width):
+            code = int.from_bytes(raw[i:i + width], "big")
+            out.append(cmap.get(code, chr(code) if width == 1 and 32 <= code < 127 else ""))
+        return "".join(out)
+
+    pieces: list = []
+    for body in contents:
+        stack: list = []
+        array: list = []
+        in_array, last_y = False, None
+        for tok in PDF_TOKEN.findall(body):
+            if tok == b"[":
+                in_array, array = True, []
+            elif tok == b"]":
+                in_array = False
+                stack.append(("array", array))
+            elif tok[:1] in (b"(", b"<"):
+                (array if in_array else stack).append(("str", tok))
+            elif tok[:1] in (b"+", b"-", b".") or tok[:1].isdigit():
+                (array if in_array else stack).append(("num", float(tok)))
+            elif tok.startswith(b"/"):
+                stack.append(("name", tok))
+            else:
+                op = tok.decode("latin-1")
+                top = stack[-1] if stack else None
+                if op == "Tj" and top and top[0] == "str":
+                    pieces.append(decode(top[1]))
+                elif op == "TJ" and top and top[0] == "array":
+                    for kind, val in top[1]:
+                        if kind == "str":
+                            pieces.append(decode(val))
+                        elif kind == "num" and val < -200:
+                            pieces.append(" ")
+                elif op in ("'", '"') and top and top[0] == "str":
+                    pieces.append("\n" + decode(top[1]))
+                elif op in ("T*", "ET", "BT"):
+                    pieces.append("\n")
+                elif op in ("Td", "TD") and top and top[0] == "num":
+                    pieces.append("\n" if top[1] != 0 else " ")
+                elif op == "Tm" and top and top[0] == "num":
+                    pieces.append("\n" if last_y is None or abs(top[1] - last_y) > 1 else " ")
+                    last_y = top[1]
+                stack = []
+    text = "".join(pieces)
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def pdf_reader_name() -> str:
+    if shutil.which("pdftotext"):
+        return "pdftotext"
+    for name in ("pypdf", "PyPDF2"):
+        try:
+            __import__(name)
+            return name
+        except ImportError:
+            pass
+    return "mutool" if shutil.which("mutool") else "built-in basic extractor"
+
+
+def extract_source(path: Path) -> tuple:
+    """(text or None, how it was extracted)."""
+    ext = path.suffix.lower()
+    if ext == ".docx":
+        try:
+            return docx_text(path), "docx (paragraph text; tables are flattened)"
+        except Exception as e:  # not a valid docx
+            return None, f"could not read the .docx ({e})"
+    if ext != ".pdf":
+        return path.read_text(errors="replace"), "plain text"
+    for how, fn in (("pdftotext", pdf_text_poppler), ("pypdf", pdf_text_pypdf), ("mutool", pdf_text_mutool)):
+        text = fn(path)
+        if looks_like_text(text):
+            return text, how
+    try:
+        text = pdf_text_builtin(path.read_bytes())
+    except Exception:
+        text = None
+    if looks_like_text(text):
+        return text, "the built-in basic extractor: text may be incomplete or out of order, so prefer the original file if your tools can read PDFs"
+    return None, "no text could be extracted (a scanned/image PDF needs OCR, or the PDF is protected); read the original file with your own tools"
+
+
+def create_spec_dir(cfg: dict, slug: str, title: str) -> Path:
+    base = ROOT / cfg["facts"]["specsDir"]
+    fid = next_feature_id(cfg)
+    dest = base / f"{fid}-{slug}"
+    shutil.copytree(base / "_template", dest)
+    for f in dest.iterdir():
+        f.write_text(f.read_text().replace("{{ID}}", fid).replace("{{TITLE}}", title).replace("{{SLUG}}", slug))
+    return dest
+
+
+def cmd_spec(cfg: dict, args: argparse.Namespace) -> int:
+    """Requirements document in, reviewed-by-you spec out: the agent drafts, the tool validates and sends errors back."""
+    src = Path(args.source).expanduser().resolve()
+    if not src.is_file():
+        say(bad(f"No such file: {args.source}"))
+        return EXIT_HUMAN
+    if src.suffix.lower() not in SPEC_SOURCES:
+        say(bad(f"Unsupported file type '{src.suffix}'. Supported: {', '.join(SPEC_SOURCES)}"))
+        return EXIT_HUMAN
+    say(c(f"\n=== spec from {src.name} ===", "1;35"))
+
+    agent = resolve_agent(cfg, args)
+    if not agent:
+        say(bad("No agent is configured, so nothing can draft the spec."))
+        say("Set sdlc.agent.preset (claude | codex | custom), edit agent.command in .ai/sdlc.json, or for one run:\n"
+            "  SDLC_AGENT_CMD='<agent cli that reads the prompt on stdin>' ./scripts/sdlc spec " + args.source)
+        return EXIT_HUMAN
+    problem = agent_problem(agent)
+    if problem and not args.dry_run:
+        say(bad(f"The agent cannot run: {problem}."))
+        say(f"  command: {agent}\nInstall it, or choose another agent (SDLC_AGENT_CMD='...' or agent.command in .ai/sdlc.json).")
+        return EXIT_HUMAN
+
+    specs_dir = ROOT / cfg["facts"]["specsDir"]
+    slug = slugify(args.name or src.stem)
+    existing = [p for p in sorted(specs_dir.glob("FEAT-*")) if p.name.split("-", 2)[2] == slug]
+    spec_dir = existing[0] if existing else None
+    if spec_dir is not None:
+        prd = spec_dir / "prd.md"
+        if prd.exists() and "TODO(prd)" not in prd.read_text():
+            say(bad(f"{rel(spec_dir)} already has a finished PRD; this would overwrite your work."))
+            say("Choose another name with --name, or delete the folder first.")
+            return EXIT_HUMAN
+    planned = spec_dir or specs_dir / f"{next_feature_id(cfg)}-{slug}"
+    if not (ROOT / ".git").exists():
+        say(warn("  not a git repository: the agent's changes cannot be reviewed or reverted easily (run `git init` first)"))
+    dirty = dirty_files(planned)
+    if dirty and not args.allow_dirty:
+        say(bad("You have uncommitted changes outside the new spec:"))
+        for line in dirty[:15]:
+            say(f"  {line}")
+        say("Commit or stash them first so you can see exactly what the agent changes (or pass --allow-dirty).")
+        return EXIT_HUMAN
+
+    text, how = extract_source(src)
+    run = Run(f"spec-{slug}")
+    if text:
+        (run.dir / "source.txt").write_text(text)
+        say(ok(f"  read {src.name}: {len(text):,} characters via {how.split(':')[0]}"))
+    else:
+        say(warn(f"  {how}"))
+    shown = text[:MAX_SOURCE_CHARS] if text else "(no text could be extracted: read the file at the path above with your own file tools)"
+    if text and len(text) > MAX_SOURCE_CHARS:
+        shown += f"\n\n[... truncated: {len(text) - MAX_SOURCE_CHARS:,} more characters. The full text is in {rel(run.dir / 'source.txt')}, and the original file is at the path above ...]"
+    targets = ", ".join(f"`{n}` ({u})" for n, u in cfg["runtime"]["targets"].items()) or "(none)"
+    source_in_spec = planned / "source" / src.name
+    questions = run.dir / "QUESTIONS.md"
+    values = {
+        "feature": planned.name.split("-", 2)[0] + "-" + planned.name.split("-", 2)[1],
+        "specDir": rel(planned), "sourceName": src.name, "sourcePath": rel(source_in_spec),
+        "focus": args.focus or "the whole document", "extractor": how, "sourceText": shown,
+        "targets": targets, "questionsFile": rel(questions),
+    }
+    prompt = render_prompt(cfg["agent"]["prompts"]["spec"], values)
+    if args.dry_run:
+        prompt_file = run.dir / "spec.prompt.md"
+        prompt_file.write_text(prompt)
+        say(ok("\nDry run: nothing was executed or created."))
+        say(f"  agent command : {agent}" + (f"   (WARNING: {problem})" if problem else ""))
+        say(f"  would create  : {rel(planned)}/  (prd.md, acceptance.json, and a copy of the source in source/)")
+        say(f"  prompt        : {rel(prompt_file)}  ({len(prompt.splitlines())} lines, includes the document text)")
+        return EXIT_OK
+
+    if spec_dir is None:
+        spec_dir = create_spec_dir(cfg, slug, args.name.replace("-", " ").title() if args.name else src.stem.replace("-", " ").replace("_", " ").title())
+        say(f"  created {rel(spec_dir)}/")
+    (spec_dir / "source").mkdir(exist_ok=True)
+    shutil.copy2(src, spec_dir / "source" / src.name)
+
+    # the agent may write the two spec files and nothing else
+    integ = cfg["integrity"]
+    others = [rel(d) for d in specs_dir.iterdir() if d.is_dir() and d != spec_dir]
+    guard = integ["protected"] + others
+    before_snap, before_dirty = snapshot(guard), set(dirty_files(spec_dir))
+    targets_set = set(cfg["runtime"]["targets"])
+    for attempt in range(1, args.max_attempts + 1):
+        say(c(f"\n== agent: drafting the spec (attempt {attempt}/{args.max_attempts}) ==", "1"))
+        code = run_agent(cfg, agent, prompt, f"spec-{attempt}", run.dir)
+        if code != 0:
+            say(warn(f"  the agent exited with {code}; validation below decides whether the draft is usable"))
+        stray = sorted(set(dirty_files(spec_dir)) - before_dirty)
+        violations = changed(before_snap, snapshot(guard)) + stray
+        if violations:
+            say(bad("\nINTEGRITY VIOLATION: spec drafting may only write files inside the new spec folder, but these changed:"))
+            for v in violations:
+                say(bad(f"  - {v}"))
+            say("Revert them (git checkout -- <path>; remove untracked files) and run again.")
+            (run.dir / "integrity-violation.md").write_text("\n".join(violations))
+            return EXIT_INTEGRITY
+        if questions.exists() and questions.read_text().strip():
+            say(bad("\nThe agent could not draft a spec:"))
+            say(questions.read_text().strip())
+            return EXIT_HUMAN
+        spec = next((sp for sp in load_specs(cfg) if sp["dir"] == spec_dir), None)
+        good, errors = traceability(spec, targets_set) if spec else (False, ["the spec folder disappeared"])
+        if good:
+            break
+        say(warn(f"  the draft is not valid yet ({len(errors)} problem(s)):"))
+        for e in errors[:10]:
+            say(f"    - {e}")
+        if attempt == args.max_attempts:
+            say(bad(f"\nThe draft is still invalid after {attempt} attempts. Fix {rel(spec_dir)}/ by hand (skills: write-prd, write-fact-checks)."))
+            return EXIT_FAIL
+        prompt = render_prompt(cfg["agent"]["prompts"]["specFix"], {
+            "feature": values["feature"], "specDir": values["specDir"], "sourceName": src.name, "targets": targets,
+            "attempt": attempt + 1, "maxAttempts": args.max_attempts, "errors": "\n".join(f"- {e}" for e in errors),
+        })
+
+    prd_text = (spec_dir / "prd.md").read_text()
+    assumptions = len(re.findall(r"ASSUMPTION", prd_text))
+    say(ok(f"\nDraft ready: {rel(spec_dir)}/"))
+    say(f"  {len(spec['acs'])} acceptance criteria, {len(spec['checks'])} checks, {assumptions} assumption(s) for you to confirm")
+    say(warn("This is a DRAFT written by an AI. Read it before anyone implements it (skill: .ai/skills/review-spec):"))
+    say(f"  1. compare {rel(spec_dir / 'prd.md')} and acceptance.json with {src.name} (each criterion cites its source)")
+    say("  2. confirm or change every ASSUMPTION and answer the open questions, then set `Status: Accepted`")
+    say(f"  3. ./scripts/sdlc implement {values['feature']}")
+    return EXIT_OK
+
+
+def cmd_sync(cfg: dict, args: argparse.Namespace) -> int:
+    run = Run("sync")
+    stale = stale_steps(cfg)
+    if not stale:
+        say(ok("dependencies are up to date"))
+        return EXIT_OK
+    say(dim("  installing dependencies: " + ", ".join(step["id"] for step in stale)))
+    for step in stale:
+        if not run_setup_step(step, run):
+            return EXIT_FAIL
+    say(ok("dependencies installed"))
+    return EXIT_OK
+
+
+def cmd_implement(cfg: dict, args: argparse.Namespace) -> int:
+    """Spec in, verified code out: validate the spec, set up, baseline, run the agent, sync deps, verify + heal."""
+    specs_dir = cfg["facts"]["specsDir"]
+    spec_dir = find_spec(cfg, args.name)
+    if spec_dir is None:
+        existing = sorted(p.name for p in (ROOT / specs_dir).glob("FEAT-*") if not p.name.startswith("FEAT-000"))
+        say(bad(f"No feature '{args.name}' under {specs_dir}/."))
+        say("Create one with ./scripts/sdlc new <slug>, write its prd.md and acceptance.json, then run this again."
+            + (f"\nExisting features: {', '.join(existing)}" if existing else ""))
+        return EXIT_HUMAN
+    fid = spec_dir.name.split("-", 2)[0] + "-" + spec_dir.name.split("-", 2)[1]
+    say(c(f"\n=== implement {fid} from {rel(spec_dir)}/ ===", "1;35"))
+
+    # 1. the spec is the contract: it must be complete before an agent spends effort on it
+    spec = next(sp for sp in load_specs(cfg) if sp["dir"] == spec_dir)
+    good, errors = traceability(spec, set(cfg["runtime"]["targets"]))
+    if not good:
+        say(bad("The spec is not ready to implement:"))
+        for e in errors:
+            say(f"  - {e}")
+        say("Finish prd.md and acceptance.json (skills: .ai/skills/write-prd, write-fact-checks), then run this again.")
+        return EXIT_HUMAN
+    say(ok(f"  spec ok: {len(spec['acs'])} acceptance criteria, {len(spec['checks'])} checks, every criterion covered"))
+
+    # 2. an agent must be configured and installed
+    agent = resolve_agent(cfg, args)
+    if not agent:
+        say(bad("No agent is configured, so nothing can write the code."))
+        say("Pick one in scaffolder.config.yaml (sdlc.agent.preset: claude | codex | custom) and regenerate, edit agent.command in .ai/sdlc.json,\n"
+            "or for one run:  SDLC_AGENT_CMD='<agent cli that reads the prompt on stdin>' ./scripts/sdlc implement " + fid)
+        return EXIT_HUMAN
+    problem = agent_problem(agent)
+    if problem and not args.dry_run:
+        say(bad(f"The agent cannot run: {problem}."))
+        say(f"  command: {agent}\nInstall it, or choose another agent (SDLC_AGENT_CMD='...' or agent.command in .ai/sdlc.json).")
+        return EXIT_HUMAN
+
+    # 3. the agent's changes must be reviewable: start from a clean tree (only the spec may be uncommitted)
+    if not (ROOT / ".git").exists():
+        say(warn("  not a git repository: the agent's changes cannot be reviewed or reverted easily (run `git init` first)"))
+    dirty = dirty_files(spec_dir)
+    if dirty and not args.allow_dirty:
+        say(bad("You have uncommitted changes outside this feature's spec:"))
+        for line in dirty[:15]:
+            say(f"  {line}")
+        say("Commit or stash them first so you can review exactly what the agent changes (or pass --allow-dirty).")
+        return EXIT_HUMAN
+
+    run = Run(f"implement-{fid}")
+    # 4. toolchain: install what is missing, so nobody runs `setup` by hand first
+    if not args.dry_run and not ensure_installed(cfg, run):
+        return EXIT_FAIL
+
+    # 5. baseline: a red start would blame the agent for problems that were already there
+    if not args.skip_baseline and not args.dry_run:
+        say(c("\n== baseline (gates, before the agent starts) ==", "1"))
+        base_args = argparse.Namespace(stage=None, only=None, keep_going=False)
+        base, _ = run_verify(cfg, "baseline", base_args, with_facts=False)
+        if not summarize(base, cfg):
+            say(bad("The project is already failing before any change. Fix that first (or pass --skip-baseline)."))
+            return EXIT_HUMAN
+
+    # 6. the prompt: the spec itself plus how this repository works
+    integ = cfg["integrity"]
+    questions = run.dir / "QUESTIONS.md"
+    stack = "\n".join(
+        f"- {st['id'].split('.')[0]}: `{st['cwd']}/` (dependency manifest: {', '.join('`' + m + '`' for m in st.get('manifests', []))})"
+        for st in cfg["setup"]
+    )
+    prompt = render_prompt(cfg["agent"]["prompts"]["implement"], {
+        "feature": fid,
+        "specDir": rel(spec_dir),
+        "prd": (spec_dir / "prd.md").read_text().strip(),
+        "acceptance": (spec_dir / "acceptance.json").read_text().strip(),
+        "stack": stack or "(no components)",
+        "gates": ", ".join(f"`{g['id']}`" for g in cfg["gates"]),
+        "rules": listing(".ai/rules/*.md"),
+        "skills": listing(".ai/skills/*/SKILL.md"),
+        "protected": ", ".join(f"`{p}`" for p in integ["protected"] + integ["protectedWhileHealing"]),
+        "questionsFile": rel(questions),
+    })
+    if args.dry_run:
+        prompt_file = run.dir / "implement.prompt.md"
+        prompt_file.write_text(prompt)
+        say(ok("\nDry run: nothing was executed."))
+        say(f"  agent command : {agent}" + (f"   (WARNING: {problem})" if problem else ""))
+        say(f"  prompt        : {rel(prompt_file)}  ({len(prompt.splitlines())} lines, includes prd.md and acceptance.json)")
+        return EXIT_OK
+
+    # 7. the agent writes tests, code, dependencies, config and the contract
+    say(c("\n== agent: implementing ==", "1"))
+    before = snapshot(integ["protected"] + integ["protectedWhileHealing"])
+    head = git("rev-parse", "HEAD")
+    code = run_agent(cfg, agent, prompt, f"implement-{fid}", run.dir)
+    if code != 0:
+        say(warn(f"  the agent exited with {code}; verification below decides whether the work is complete"))
+    if git("rev-parse", "HEAD") != head:
+        say(warn("  the agent made git commits: review them (git log), the tool never commits or pushes for you"))
+    violations = changed(before, snapshot(integ["protected"] + integ["protectedWhileHealing"]))
+    if violations:
+        say(bad("\nINTEGRITY VIOLATION: the agent changed files that define what 'correct' means:"))
+        for v in violations:
+            say(bad(f"  - {v}"))
+        say("The spec and the gate config belong to you, not the agent. Revert them (git checkout -- <path>) and run again.")
+        (run.dir / "integrity-violation.md").write_text("\n".join(violations))
+        return EXIT_INTEGRITY
+    if questions.exists() and questions.read_text().strip():
+        say(bad("\nThe agent could not proceed without answers from you:"))
+        say(questions.read_text().strip())
+        say("\nClarify the PRD / acceptance.json, then run this again.")
+        return EXIT_HUMAN
+
+    # 8. dependencies the agent added are installed even if it forgot to
+    if not ensure_installed(cfg, run):
+        return EXIT_FAIL
+
+    # 9. prove it: verify, and heal with the same agent until green, stuck, or out of budget
+    args.focus = fid
+    result = cmd_loop(cfg, args)
+
+    say(c("\n== what changed (nothing is committed) ==", "1"))
+    say(git("status", "--short") or "(no changes)")
+    if result == EXIT_OK:
+        say(ok(f"\n{fid} is implemented and verified. Review with `git diff`, then commit and open a PR."))
+        say(f"Evidence: .ai/evidence/latest/report.md")
+    return result
+
+
 def cmd_loop(cfg: dict, args: argparse.Namespace) -> int:
     max_iter = args.max or cfg["loop"]["maxIterations"]
-    agent = args.agent if args.agent is not None else os.environ.get("SDLC_AGENT_CMD", cfg["agent"]["command"])
+    agent = resolve_agent(cfg, args)
     integ = cfg["integrity"]
     base_snap = snapshot(integ["protected"] + integ["protectedWhileHealing"])
     guarded_snap = snapshot(integ["guarded"])
@@ -872,6 +1523,7 @@ def cmd_loop(cfg: dict, args: argparse.Namespace) -> int:
                 return EXIT_HUMAN
         else:
             run_agent(cfg, agent, prompt, f"heal-{i}", run.dir)
+            ensure_installed(cfg, run)  # dependencies the agent added while healing
         now = snapshot(integ["protected"] + integ["protectedWhileHealing"])
         violations = changed(base_snap, now)
         if violations:
@@ -890,20 +1542,7 @@ def cmd_loop(cfg: dict, args: argparse.Namespace) -> int:
 def cmd_setup(cfg: dict, args: argparse.Namespace) -> int:
     run = Run("setup")
     for step in cfg["setup"]:
-        command = step["cmd"]
-        minimum = step.get("minPython")
-        if minimum:  # pick (or offer to install) an interpreter that satisfies the project, never fail with a raw pip error
-            python = resolve_python(minimum, step["label"], interactive=True)
-            if python is None:
-                return EXIT_FAIL
-            ver = python_version(python) or (0, 0)
-            say(dim(f"  using {python} (Python {ver[0]}.{ver[1]})"))
-            command = command.replace("{python}", shlex.quote(python))
-        say(f"  {step['label']} ...")
-        log = run.logs / f"{step['id']}.log"
-        code = run_shell(command, ROOT / step["cwd"], log, env=os.environ.copy(), timeout=1800)
-        if code != 0:
-            say(bad(f"  FAILED ({step['id']}):\n{tail_lines(log, 30)}"))
+        if not run_setup_step(step, run):
             return EXIT_FAIL
     say(ok("setup complete"))
     return EXIT_OK
@@ -938,6 +1577,13 @@ def cmd_doctor(cfg: dict, args: argparse.Namespace) -> int:
             say(f"  {bad('MISS')}  {name:12} {step['label']} needs Python >= {minimum}; the newest found is {shown}")
             for line in install_hints(minimum):
                 say(f"        {line.strip()}")
+    agent = os.environ.get("SDLC_AGENT_CMD", cfg["agent"]["command"])
+    if not agent:
+        say(f"  {warn('note')}  {'agent':12} none configured: `implement` will ask for one (preset: {cfg['agent'].get('preset', 'none')})")
+    else:
+        problem = agent_problem(agent)
+        say(f"  {warn('note') if problem else ok('ok  ')}  {'agent':12} {agent[:70]}" + (f"   ({problem})" if problem else ""))
+    say(f"  {ok('ok  ')}  {'pdf reader':12} {pdf_reader_name()}   (for `spec`; .docx, .md and .txt need nothing)")
     say("")
     say(ok("toolchain ready") if not bad_count else bad(f"{bad_count} required tool(s) missing"))
     return EXIT_OK if not bad_count else EXIT_FAIL
@@ -1016,17 +1662,13 @@ def cmd_feature(cfg: dict, args: argparse.Namespace) -> int:
             return EXIT_HUMAN
     if args.skip_code:
         say(dim("\n=== CODE: skipped (--skip-code) ==="))
+        say(c(f"\n=== TEST: {fid} ===", "1;35"))
+        args.focus = fid  # the loop verifies EVERYTHING (regressions included); the feature only focuses the agent prompt
+        code = cmd_loop(cfg, args)
     else:
-        say(c(f"\n=== CODE: {fid} ===", "1;35"))
-        if agent:
-            values = {"feature": fid, "specDir": rel(spec)}
-            run_agent(cfg, agent, render_prompt(cfg["agent"]["prompts"]["implement"], values), f"code-{fid}", spec)
-        else:
-            say(warn(f"Implement {fid} from {rel(spec)}/prd.md (skill: .ai/skills/implement-feature), then re-run with --skip-code."))
-            return EXIT_HUMAN
-    say(c(f"\n=== TEST: {fid} ===", "1;35"))
-    args.focus = fid  # the loop verifies EVERYTHING (regressions included); the feature only focuses the agent prompt
-    code = cmd_loop(cfg, args)
+        say(c(f"\n=== CODE + TEST: {fid} ===", "1;35"))
+        args.name = fid
+        code = cmd_implement(cfg, args)
     if code != EXIT_OK or not args.deploy:
         return code
     say(c(f"\n=== DEPLOY: {args.deploy} ===", "1;35"))
@@ -1176,7 +1818,26 @@ def build_parser() -> argparse.ArgumentParser:
     ft.add_argument("--deploy", metavar="ENV", help="deploy to ENV after verification passes")
     ft.add_argument("--max", type=int)
     ft.add_argument("--agent")
+    ft.add_argument("--allow-dirty", action="store_true")
+    ft.add_argument("--skip-baseline", action="store_true")
     common(ft, facts=False)
+    im = sub.add_parser("implement")
+    im.add_argument("name", help="FEAT-001 or its slug; its prd.md and acceptance.json must be finished")
+    im.add_argument("--agent", help="agent command (reads the prompt on stdin); overrides the configured one")
+    im.add_argument("--max", type=int, help="override max heal iterations")
+    im.add_argument("--allow-dirty", action="store_true", help="proceed with uncommitted changes outside the spec")
+    im.add_argument("--skip-baseline", action="store_true", help="do not run the gates before the agent starts")
+    im.add_argument("--dry-run", action="store_true", help="validate, write the prompt, print the agent command; run nothing")
+    common(im)
+    sp = sub.add_parser("spec")
+    sp.add_argument("source", help="requirements document: .pdf, .docx, .md or .txt")
+    sp.add_argument("--name", help="feature slug (default: the file name)")
+    sp.add_argument("--focus", help="cover only this part of the document, e.g. 'the login flow (section 3)'")
+    sp.add_argument("--agent", help="agent command (reads the prompt on stdin); overrides the configured one")
+    sp.add_argument("--allow-dirty", action="store_true", help="proceed with uncommitted changes")
+    sp.add_argument("--dry-run", action="store_true", help="extract the text, write the prompt, print the agent command; run nothing")
+    sp.add_argument("--max-attempts", type=int, default=3, help="how many times the agent may fix an invalid draft")
+    sub.add_parser("sync")
     nw = sub.add_parser("new")
     nw.add_argument("slug")
     nw.add_argument("--title")
@@ -1192,14 +1853,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 COMMANDS = {
     "setup": cmd_setup, "doctor": cmd_doctor, "gates": cmd_gates, "facts": cmd_facts, "verify": cmd_verify, "loop": cmd_loop,
-    "feature": cmd_feature, "new": cmd_new, "deploy": cmd_deploy, "secrets": cmd_secrets, "up": cmd_up, "down": cmd_down, "report": cmd_report,
+    "feature": cmd_feature, "spec": cmd_spec, "implement": cmd_implement, "sync": cmd_sync, "new": cmd_new, "deploy": cmd_deploy, "secrets": cmd_secrets, "up": cmd_up, "down": cmd_down, "report": cmd_report,
 }
 
 
 def main(argv: list | None = None) -> int:
     args = build_parser().parse_args(argv)
     cfg = load_config()
-    for name, default in (("runtime", None), ("no_runtime", False), ("base_url", None), ("provides", None), ("feature", None)):
+    for name, default in (("runtime", None), ("no_runtime", False), ("base_url", None), ("provides", None), ("feature", None),
+                           ("allow_dirty", False), ("skip_baseline", False), ("dry_run", False), ("agent", None), ("max", None)):
         if not hasattr(args, name):
             setattr(args, name, default)
     try:

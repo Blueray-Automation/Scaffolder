@@ -77,6 +77,62 @@ That gate is advisory on purpose. It reports vulnerabilities in transitive depen
 ### A deprecation warning about `httpx2` in pytest output
 Newer Starlette versions prefer a different HTTP test client. The tests pass; the warning is harmless.
 
+## `./scripts/sdlc spec`
+
+### `No such file` or `Unsupported file type`
+Pass an existing `.pdf`, `.docx`, `.md`, `.markdown`, `.txt` or `.rst` file. Convert other formats (for example `.doc`, `.pages`, Google Docs) to one of these first.
+
+### `no text could be extracted`
+The PDF has no text layer (a scan or photo), or it is protected. The agent may still be able to read the file itself (the `claude` preset can read PDFs), but a reliable route is OCR first, or exporting the source document to `.docx` / `.md`.
+
+### `the built-in basic extractor: text may be incomplete or out of order`
+No PDF tool was found, so the tool fell back to its basic reader, which handles ordinary text PDFs but can misorder complex layouts (columns, tables). Install poppler for much better results: `brew install poppler` (macOS) or `apt install poppler-utils` (Debian/Ubuntu), then run `spec` again.
+
+### `The draft is still invalid after 3 attempts`
+The agent could not produce a well-formed spec. The problems are printed (for example a criterion with no check). Fix `prd.md` / `acceptance.json` by hand (skills `write-prd`, `write-fact-checks`), or raise `--max-attempts`. If the document is vague, the agent usually cannot make testable criteria out of it: improve the document.
+
+### `INTEGRITY VIOLATION: spec drafting may only write files inside the new spec folder`
+The agent edited or created other files. Revert them (`git checkout -- <path>`, delete untracked files), then run again.
+
+### `The agent could not draft a spec`
+The agent found nothing usable in the document for the scope you gave (or it is unreadable) and explained why instead of inventing a spec. Fix the document or widen `--focus`.
+
+### `... already has a finished PRD; this would overwrite your work`
+A spec with that name exists and has no `TODO(prd)` markers. Choose another `--name`, or delete the folder if you really want to start over.
+
+### The draft looks wrong or invents things
+That is why it is a draft. Fix it in `prd.md` / `acceptance.json` (the review checklist is the `review-spec` skill), or fix the *document* and run `spec` again under a new `--name`.
+
+## `./scripts/sdlc implement`
+
+### `The spec is not ready to implement`
+The tool refuses to spend an agent's time on an unfinished spec. It lists what is missing: `TODO(prd)` placeholders still in `prd.md`, a criterion with no check, or a check that cites a criterion that doesn't exist. Fix `prd.md` / `acceptance.json` and run again.
+
+### `The agent cannot run: ... is not installed or not on PATH`
+The agent's program isn't installed. Install the CLI for your preset (see the links in the [tutorial](Tutorial-Add-a-Login-API#before-you-start-once)), choose another preset in `scaffolder.config.yaml`,
+or use `SDLC_AGENT_CMD='...'` for one run. `./scripts/sdlc doctor` shows the configured command and whether it is installed.
+
+### `No agent is configured, so nothing can write the code`
+The preset is `none` (or the command is empty). Set `sdlc.agent.preset`, or `SDLC_AGENT_CMD`.
+
+### `You have uncommitted changes outside this feature's spec`
+`implement` wants a clean tree so the diff you review is only the agent's work. Commit or stash your changes, or pass `--allow-dirty`.
+
+### `The project is already failing before any change`
+The baseline gates were red before the agent started. Fix that first (`./scripts/sdlc gates`), or pass `--skip-baseline` to let the agent try anyway.
+
+### `The agent could not proceed without answers from you`
+The agent decided the spec was ambiguous and wrote questions instead of guessing. Answer them in `prd.md` / `acceptance.json`, then run again.
+
+### `INTEGRITY VIOLATION: the agent changed files that define what 'correct' means`
+The agent edited your spec or the gate config. Revert with `git checkout -- <path>` (the tool lists the files) and run again. If it keeps happening, make the PRD clearer: an agent that "fixes" the spec usually found it contradictory.
+
+### The agent ran but nothing passes (exit 1 or 3)
+Read `.ai/evidence/latest/report.md`, then the prompt the agent got (`implement.prompt.md` in the run folder under `.ai/evidence/`) and its output (`*.agent.log`). Exit 3 means the same failure repeated. A clear fix is usually in the PRD: add the missing detail and run again.
+
+### The agent made commits
+`implement` warns if `HEAD` moved. The agent was told not to commit; review `git log` and undo with `git reset --soft <commit>` if you don't want them.
+
 ## The loop and the specs
 
 ### `verify` fails right after `./scripts/sdlc new`

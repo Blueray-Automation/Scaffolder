@@ -1,4 +1,4 @@
-import type { ScaffolderConfig } from "./config";
+import { agentCommand, type ScaffolderConfig } from "./config";
 import { buildGates, setupSteps, STAGE_ORDER } from "./gates";
 
 interface LocalService {
@@ -60,10 +60,14 @@ export function buildSdlcConfig(cfg: ScaffolderConfig): Record<string, unknown> 
       failFast: cfg.sdlc.failFast,
     },
     agent: {
-      command: cfg.sdlc.agent.command,
+      preset: cfg.sdlc.agent.preset,
+      // Resolved: an explicit command wins, otherwise the preset's command (empty = human in the loop).
+      command: agentCommand(cfg),
       timeoutSeconds: cfg.sdlc.agent.timeoutSeconds,
       prompts: {
         prd: ".ai/prompts/prd.md",
+        spec: ".ai/prompts/spec.md",
+        specFix: ".ai/prompts/spec-fix.md",
         implement: ".ai/prompts/implement.md",
         heal: ".ai/prompts/heal.md",
       },

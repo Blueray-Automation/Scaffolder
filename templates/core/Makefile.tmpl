@@ -2,7 +2,7 @@
 .DEFAULT_GOAL := help
 SDLC := ./scripts/sdlc
 
-.PHONY: help setup doctor verify gates facts loop new feature report secrets<%#hasDocker%> up down<%/hasDocker%><%#hasCd%> deploy<%/hasCd%>
+.PHONY: help setup doctor verify gates facts loop new feature spec implement sync report secrets<%#hasDocker%> up down<%/hasDocker%><%#hasCd%> deploy<%/hasCd%>
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -30,6 +30,15 @@ new: ## Create a feature spec:  make new name=user-login
 
 feature: ## PRD -> Code -> Test for one feature:  make feature name=FEAT-001
 	$(SDLC) feature $(name)
+
+spec: ## Draft prd.md + acceptance.json from a document with your agent:  make spec file=requirements.pdf
+	$(SDLC) spec $(file)
+
+implement: ## Spec (prd.md + acceptance.json) to verified code with your agent:  make implement name=FEAT-001
+	$(SDLC) implement $(name)
+
+sync: ## Install dependencies if a manifest changed
+	$(SDLC) sync
 
 report: ## Print the latest evidence report
 	$(SDLC) report

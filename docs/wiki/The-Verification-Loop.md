@@ -13,7 +13,10 @@ The rule it enforces: *done means `./scripts/sdlc verify` exits 0 and you can sh
 | `./scripts/sdlc facts` | Checks every PRD requirement against the **running** system |
 | `./scripts/sdlc verify` | Gates + facts. This is exactly what CI runs |
 | `./scripts/sdlc loop` | verify, then heal, then verify... until green or out of budget |
-| `./scripts/sdlc feature <name>` | PRD, then code, then test (the loop) for one feature |
+| `./scripts/sdlc spec <file>` | **Document in, draft spec out.** An agent drafts `prd.md` + `acceptance.json` from a `.pdf`, `.docx`, `.md` or `.txt`; the tool validates the draft and sends problems back to fix; **you review it** |
+| `./scripts/sdlc implement <FEAT-id>` | **Spec in, verified code out.** Gives your `prd.md` + `acceptance.json` to the agent, installs what it adds, verifies, heals |
+| `./scripts/sdlc sync` | Installs dependencies only if a manifest (`pyproject.toml`, `package.json`) changed since the last install |
+| `./scripts/sdlc feature <name>` | `implement` plus PRD drafting from a `--brief`, and `--deploy <env>` |
 | `./scripts/sdlc new <slug>` | Creates a feature spec from the template |
 | `./scripts/sdlc deploy <env>` | Runs the deploy script, then checks the live URL |
 | `./scripts/sdlc secrets` | Scans for committed secrets |
@@ -97,14 +100,43 @@ An agent that is told to "make the tests pass" can cheat by changing the tests. 
 
 ### Using an AI agent
 
-The agent is any command that reads the prompt on standard input. Set it in `scaffolder.config.yaml` (`sdlc.agent.command`) before generating, edit `agent.command` in `.ai/sdlc.json`, or set it for one run:
+The agent is any command that reads the prompt on standard input. Pick a preset (`claude`, `codex`, `custom`, `none`) with `sdlc.agent.preset` in
+`scaffolder.config.yaml` or in the web UI; an explicit `sdlc.agent.command` overrides the preset. After generating, the resolved command lives in
+`.ai/sdlc.json` -> `agent.command`. For one run:
 
 ```bash
-SDLC_AGENT_CMD='your-agent-cli' ./scripts/sdlc loop
+SDLC_AGENT_CMD='your-agent-cli' ./scripts/sdlc implement FEAT-001
 ```
 
-With no agent, the loop prints the prompt file for you (or your own AI tool) and waits. The loop's mechanics are tested with scripted agents;
-how well a particular agent follows the prompts depends on that agent.
+With no agent, the tool prints the prompt file for you (or your own AI tool) and waits.
+
+`implement` and the healing loop use the same agent. **`implement`** gives it your whole spec once (the prompt `.ai/prompts/implement.md`, with your `prd.md` and
+`acceptance.json` embedded); **heal** prompts (`.ai/prompts/heal.md`) then send it only the failures. Both tell it the hard rules: never edit the spec, never weaken a test,
+never commit or push, ask instead of guessing.
+
+The mechanics around the agent are tested end to end with a scripted agent. How well a particular AI follows the prompts depends on that AI, and the
+`claude` / `codex` presets have not been run against the real tools: use `./scripts/sdlc implement <FEAT-id> --dry-run` to inspect the command and prompt first.
+
+### Specs from documents (`spec`)
+
+`spec` reads a requirements document, has the agent draft the two spec files with the prompt `.ai/prompts/spec.md` (the document's text is embedded; every criterion must cite its source;
+gaps become `ASSUMPTION:` lines; anything that cannot be machine-verified is listed as out of scope), and then validates the draft itself:
+
+| The tool checks | The tool cannot check (you do, see the `review-spec` skill) |
+|---|---|
+| every `AC-xxx` has a check; every check cites a real criterion; unique ids | that a criterion matches what the document says |
+| check types are valid; `http` targets exist (a typo used to be skipped silently) | that nothing was invented or dropped |
+| no `TODO(prd)` left; `acceptance.json` is valid JSON for this feature | that a check would really fail if the behaviour were wrong |
+| the agent wrote only the two spec files (anything else is an integrity violation) | whether the assumptions are acceptable |
+
+How PDFs are read, in order: `pdftotext` (poppler), `pypdf`, `mutool`, then a basic built-in reader. A scanned (image-only) PDF has no text; the agent must read the file itself or you OCR it first.
+`./scripts/sdlc doctor` shows which reader is available. Text longer than 40,000 characters is truncated in the prompt (the agent is told where the full text and the original file are); for big documents run
+`spec` once per feature with `--focus` and `--name`.
+
+### Dependencies
+
+`./scripts/sdlc sync` compares a hash of each dependency manifest with what was last installed (`.ai/evidence/installed.json`) and reinstalls only what changed.
+`implement` runs it before the agent (missing toolchain) and after it (anything the agent added), and agents are told to run it after editing a manifest.
 
 ## Configure it
 

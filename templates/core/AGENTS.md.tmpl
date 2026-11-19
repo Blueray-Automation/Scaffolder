@@ -16,7 +16,9 @@ The report is `.ai/evidence/latest/report.md`. If you cannot run something, say 
 | Test | Run the loop until green | `.ai/skills/verify-loop/`, `.ai/skills/fix-failing-gate/` |
 | Deploy | Tag, let CD promote, verify the live URL | `.ai/skills/release-and-deploy/` |
 
-Start a feature: `./scripts/sdlc new <slug>` (creates `.ai/specs/FEAT-xxx-<slug>/`) then `./scripts/sdlc feature FEAT-xxx`.
+Start a feature in one of two ways, then run `./scripts/sdlc implement FEAT-xxx` (the agent writes tests, code, dependencies and config from the spec, and the loop verifies it):
+- **From a document:** `./scripts/sdlc spec requirements.pdf` (also .docx, .md, .txt). An agent drafts `prd.md` and `acceptance.json`, the tool validates them, and **you review the draft** before implementing (skill `.ai/skills/review-spec`).
+- **By hand:** `./scripts/sdlc new <slug>` creates `.ai/specs/FEAT-xxx-<slug>/`; you write `prd.md` and `acceptance.json`.
 Worked example: `.ai/specs/FEAT-000-hello-world/`.
 
 ## Commands
@@ -27,6 +29,9 @@ Worked example: `.ai/specs/FEAT-000-hello-world/`.
 ./scripts/sdlc facts      # PRD acceptance criteria vs the RUNNING system (<%runtimeMode%> runtime)
 ./scripts/sdlc verify     # gates + facts: exactly what CI runs
 ./scripts/sdlc loop       # verify -> heal -> verify (max <%maxIterations%> iterations)
+./scripts/sdlc spec requirements.pdf   # an agent drafts prd.md + acceptance.json from a document; you review the draft
+./scripts/sdlc implement FEAT-001   # spec in (prd.md + acceptance.json), verified code out; needs an agent
+./scripts/sdlc sync       # install dependencies if a manifest (pyproject.toml / package.json) changed
 ```
 Single gate while iterating: `./scripts/sdlc gates --only <id>`. `make help` lists the same commands.
 
@@ -68,6 +73,7 @@ Read `.ai/skills/fix-failing-gate/SKILL.md`. In short: reproduce, find the root 
 The loop stops on its own after `<%noProgressLimit%>` identical failures in a row (exit 3) or `<%maxIterations%>` iterations (exit 1): a human looks at it then.
 
 ## Agent integration
-`.ai/sdlc.json` -> `agent.command` is a shell command that reads the prompt on stdin<%#agentConfigured%> (currently `<%agentCommand%>`)<%/agentConfigured%><%^agentConfigured%> (currently empty: the loop prints the prompt and waits for you)<%/agentConfigured%>.
-Override per run: `SDLC_AGENT_CMD='<your-agent-cli>' ./scripts/sdlc loop`. Prompts: `.ai/prompts/`.
+`./scripts/sdlc implement` and the healing loop run an agent: `.ai/sdlc.json` -> `agent.command`, a shell command that reads the prompt on stdin<%#agentConfigured%> (preset `<%agentPreset%>`, currently `<%agentCommand%>`)<%/agentConfigured%><%^agentConfigured%> (currently empty: the tool prints the prompt and waits for you)<%/agentConfigured%>.
+Override per run: `SDLC_AGENT_CMD='<your-agent-cli>' ./scripts/sdlc implement FEAT-001`. Prompts: `.ai/prompts/` (`implement.md` is filled with the feature's prd.md and acceptance.json).
+If you are the agent: after adding a dependency to a manifest run `./scripts/sdlc sync`; never edit the spec; never commit or push; if the spec is unclear, write your questions to the file named in the prompt and stop.
 Skills are plain Markdown in `.ai/skills/<name>/SKILL.md` (frontmatter: name, description). To expose them to a tool that expects another folder, symlink it, e.g. `ln -s ../.ai/skills .claude/skills`.

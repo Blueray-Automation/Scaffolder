@@ -1,4 +1,4 @@
-import { CAPABILITIES, availableIds, findOption } from "./capabilities";
+import { AGENT_PRESETS, CAPABILITIES, availableIds, findOption } from "./capabilities";
 
 export const CONFIG_VERSION = 1;
 
@@ -13,6 +13,7 @@ export type RegistryType = "ghcr" | "dockerhub" | "none";
 export type DeployTarget = "none" | "ssh-compose" | "kubernetes";
 export type RuntimeMode = "docker" | "local" | "none";
 export type DeployTrigger = "push-default-branch" | "tag" | "manual";
+export type AgentPreset = "claude" | "codex" | "custom" | "none";
 
 export interface Environment {
   /** GitHub Environment name, e.g. "staging". */
@@ -79,7 +80,9 @@ export interface ScaffolderConfig {
     failFast: boolean;
     runtime: RuntimeMode;
     agent: {
-      /** Shell command that reads the prompt on stdin. Empty = human-in-the-loop. */
+      /** Which agent CLI runs `sdlc build` and the healing loop. */
+      preset: AgentPreset;
+      /** Shell command that reads the prompt on stdin. Overrides the preset when set. */
       command: string;
       timeoutSeconds: number;
     };
@@ -138,7 +141,7 @@ export function defaultConfig(): ScaffolderConfig {
       noProgressLimit: 2,
       failFast: true,
       runtime: "docker",
-      agent: { command: "", timeoutSeconds: 900 },
+      agent: { preset: "claude", command: "", timeoutSeconds: 900 },
       coverage: { backend: 80, web: 70 },
       gates: { lint: true, types: true, unit: true, build: true, contract: true, facts: true, security: true },
       protectedPaths: [],
@@ -345,8 +348,20 @@ export function validateConfig(cfg: ScaffolderConfig): Issue[] {
   if (s.agent.command && /[\r\n]/.test(s.agent.command)) {
     err("sdlc.agent.command", "Must be a single-line shell command.");
   }
+  if (!findOption(AGENT_PRESETS, s.agent.preset)) {
+    err("sdlc.agent.preset", `Unknown agent preset "${s.agent.preset}". Choose one of: ${AGENT_PRESETS.map((p) => p.id).join(", ")}.`);
+  } else if (s.agent.preset === "custom" && !s.agent.command.trim()) {
+    err("sdlc.agent.command", 'Preset "custom" needs a command that reads the prompt on stdin.');
+  }
 
   return issues;
+}
+
+/** The command that will run the agent: an explicit override wins, otherwise the preset's command. */
+export function agentCommand(cfg: ScaffolderConfig): string {
+  const explicit = cfg.sdlc.agent.command.trim();
+  if (explicit) return explicit;
+  return AGENT_PRESETS.find((p) => p.id === cfg.sdlc.agent.preset)?.command ?? "";
 }
 
 export function hasErrors(issues: Issue[]): boolean {
