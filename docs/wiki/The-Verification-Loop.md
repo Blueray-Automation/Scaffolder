@@ -13,6 +13,7 @@ The rule it enforces: *done means `./scripts/sdlc verify` exits 0 and you can sh
 | `./scripts/sdlc facts` | Checks every PRD requirement against the **running** system |
 | `./scripts/sdlc verify` | Gates + facts. This is exactly what CI runs |
 | `./scripts/sdlc loop` | verify, then heal, then verify... until green or out of budget |
+| `./scripts/sdlc spec <file>` | **Document in, draft spec out.** An agent drafts `prd.md` + `acceptance.json` from a `.pdf`, `.docx`, `.md` or `.txt`; the tool validates the draft and sends problems back to fix; **you review it** |
 | `./scripts/sdlc implement <FEAT-id>` | **Spec in, verified code out.** Gives your `prd.md` + `acceptance.json` to the agent, installs what it adds, verifies, heals |
 | `./scripts/sdlc sync` | Installs dependencies only if a manifest (`pyproject.toml`, `package.json`) changed since the last install |
 | `./scripts/sdlc feature <name>` | `implement` plus PRD drafting from a `--brief`, and `--deploy <env>` |
@@ -115,6 +116,22 @@ never commit or push, ask instead of guessing.
 
 The mechanics around the agent are tested end to end with a scripted agent. How well a particular AI follows the prompts depends on that AI, and the
 `claude` / `codex` presets have not been run against the real tools: use `./scripts/sdlc implement <FEAT-id> --dry-run` to inspect the command and prompt first.
+
+### Specs from documents (`spec`)
+
+`spec` reads a requirements document, has the agent draft the two spec files with the prompt `.ai/prompts/spec.md` (the document's text is embedded; every criterion must cite its source;
+gaps become `ASSUMPTION:` lines; anything that cannot be machine-verified is listed as out of scope), and then validates the draft itself:
+
+| The tool checks | The tool cannot check (you do, see the `review-spec` skill) |
+|---|---|
+| every `AC-xxx` has a check; every check cites a real criterion; unique ids | that a criterion matches what the document says |
+| check types are valid; `http` targets exist (a typo used to be skipped silently) | that nothing was invented or dropped |
+| no `TODO(prd)` left; `acceptance.json` is valid JSON for this feature | that a check would really fail if the behaviour were wrong |
+| the agent wrote only the two spec files (anything else is an integrity violation) | whether the assumptions are acceptable |
+
+How PDFs are read, in order: `pdftotext` (poppler), `pypdf`, `mutool`, then a basic built-in reader. A scanned (image-only) PDF has no text; the agent must read the file itself or you OCR it first.
+`./scripts/sdlc doctor` shows which reader is available. Text longer than 40,000 characters is truncated in the prompt (the agent is told where the full text and the original file are); for big documents run
+`spec` once per feature with `--focus` and `--name`.
 
 ### Dependencies
 

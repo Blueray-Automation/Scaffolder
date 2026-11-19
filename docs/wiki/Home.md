@@ -16,7 +16,7 @@ then lets an AI agent (or you) heal failures until everything is green.
 ## Start here
 
 1. **[Getting Started](Getting-Started)**: download a project, run it, get a green `verify`.
-2. **[Tutorial: Add a Login API](Tutorial-Add-a-Login-API)**: you write the PRD and the checks, run one command, and an AI agent builds and proves it.
+2. **[Tutorial: Add a Login API](Tutorial-Add-a-Login-API)**: start from a requirements document (PDF, Word, Markdown), review the spec an agent drafts, and let an agent build and prove it.
 3. **[The Verification Loop](The-Verification-Loop)**: how gates, facts, evidence and agent healing work.
 4. **[Troubleshooting](Troubleshooting)**: common problems and fixes.
 5. **[Reference: the login implementation](Reference-Login-Implementation)**: the complete, verified code for the tutorial.

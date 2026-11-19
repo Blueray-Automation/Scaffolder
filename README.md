@@ -42,13 +42,16 @@ cd ../my-app
 ./scripts/sdlc verify     # gates + PRD facts: exactly what CI runs
 ```
 
-**Build a feature by writing only the spec:**
+**Build a feature from a requirements document (or from a spec you write):**
 
 ```bash
-./scripts/sdlc new user-login            # creates .ai/specs/FEAT-001-user-login/
-# you write prd.md (what you want) and acceptance.json (how to prove it); that is the only manual part
+./scripts/sdlc spec requirements.pdf    # an agent drafts .ai/specs/FEAT-001-requirements/{prd.md,acceptance.json} from the PDF; the tool validates the draft
+# YOU REVIEW the draft: it is the contract, and an AI only drafted it (skill: .ai/skills/review-spec)
 ./scripts/sdlc implement FEAT-001        # an AI agent writes tests, code, dependencies, config and the API contract; the loop proves it
 ```
+
+`spec` reads `.pdf`, `.docx`, `.md` and `.txt` (PDFs via `pdftotext`, `pypdf` or `mutool` if installed, otherwise a basic built-in reader; scanned PDFs need OCR). Each criterion cites its
+source in the document, gaps are listed as assumptions for you to confirm, and nothing is built until you run `implement`. Prefer to write the two files yourself? `./scripts/sdlc new user-login`.
 
 `implement` checks the spec is complete, installs the toolchain, runs a baseline, gives the agent your PRD and checks as its prompt, installs any
 dependency the agent adds, then verifies against the running system and heals until green. It never commits or pushes. Pick the agent
@@ -133,7 +136,8 @@ npm run e2e       # slow, needs network, python3 >= 3.12 and node >= 22 on PATH
 ## Limits (as of this version)
 
 - One full vertical slice: **FastAPI + Next.js (App Router) + PostgreSQL + GitHub Actions + GHCR**. Other stacks are planned.
-- Agent presets: the whole pipeline around the agent is tested with a scripted agent. The `claude` and `codex` presets follow each tool's documented
+- `spec` drafts are only as good as the document and the AI that reads it: the tool validates their form, a human must review their meaning. Scanned PDFs have no text to read.
+- Agent presets: the whole pipeline around the agent (document reading included) is tested with a scripted agent. The `claude` and `codex` presets follow each tool's documented
   non-interactive mode but have **not been run against the real CLIs** (use `implement --dry-run` to inspect the command and prompt first).
 - Deploy targets: `none` (placeholder, prints the plan) and `ssh-compose`. The tests exercise the image builds and the full
   compose stack (including PostgreSQL), and check the deploy scripts' syntax. They do **not** run the generated GitHub workflows,
