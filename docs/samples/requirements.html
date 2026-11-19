@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Requirements: Customer Login</title>
+<style>
+  @page { size: A4; margin: 22mm 20mm; }
+  body { font-family: Helvetica, Arial, sans-serif; font-size: 11pt; line-height: 1.45; color: #1a1a1a; }
+  h1 { font-size: 22pt; margin: 0 0 4pt; }
+  h2 { font-size: 14pt; margin: 20pt 0 6pt; border-bottom: 1px solid #bbb; padding-bottom: 3pt; }
+  .meta { color: #555; font-size: 10pt; margin-bottom: 14pt; }
+  table { border-collapse: collapse; width: 100%; margin: 8pt 0; }
+  th, td { border: 1px solid #bbb; padding: 5pt 7pt; text-align: left; vertical-align: top; font-size: 10pt; }
+  th { background: #f0f0f0; }
+  code { font-family: Menlo, Courier, monospace; font-size: 9.5pt; }
+  li { margin-bottom: 3pt; }
+</style>
+</head>
+<body>
+
+<h1>Customer Login</h1>
+<div class="meta">Requirements document &middot; Customer Portal &middot; Version 1.0 &middot; Author: Product team</div>
+
+<h2>1. Background</h2>
+<p>
+The Customer Portal currently has no way for a known customer to prove who they are. Before we can build account pages,
+we need a small, secure login: the customer sends an email address and a password and receives a short-lived access token,
+which the portal then uses to call protected endpoints on their behalf.
+</p>
+<p>
+This first release is deliberately small. There is one test customer, configured through the environment, and no sign-up.
+Everything in section 6 is intentionally left for later.
+</p>
+
+<h2>2. Goal</h2>
+<p>
+A customer with valid credentials can log in and then ask the API who they are. Anyone else is turned away
+with a clear, safe answer that never helps an attacker guess which accounts exist.
+</p>
+
+<h2>3. Functional requirements</h2>
+
+<p><b>3.1 Logging in</b></p>
+<ul>
+  <li><b>R1.</b> A client logs in by sending a <code>POST</code> request to <code>/api/v1/auth/login</code> with a JSON body containing
+      <code>email</code> and <code>password</code>.</li>
+  <li><b>R2.</b> When the email and password are correct, the API answers <code>200</code> with a JSON body containing an
+      <code>access_token</code> (a string) and a <code>token_type</code> whose value is <code>bearer</code>.</li>
+  <li><b>R3.</b> When the email is known but the password is wrong, the API answers <code>401</code> with the body
+      <code>{"detail": "Invalid email or password"}</code>.</li>
+  <li><b>R4.</b> When the email does not belong to any customer, the API gives exactly the same <code>401</code> answer as in R3.
+      The two cases must be impossible to tell apart from the outside, so the login cannot be used to find out which emails are registered.</li>
+  <li><b>R5.</b> When the request body is malformed (the email is not a valid email address, or the password is empty),
+      the API answers <code>422</code>.</li>
+</ul>
+
+<p><b>3.2 Using the token</b></p>
+<ul>
+  <li><b>R6.</b> A client can call <code>GET /api/v1/auth/me</code> with the header <code>Authorization: Bearer &lt;token&gt;</code>.
+      With a valid token the API answers <code>200</code> with the customer&rsquo;s email: <code>{"email": "..."}</code>.</li>
+  <li><b>R7.</b> If the token is missing, malformed or expired, <code>/api/v1/auth/me</code> answers <code>401</code>.</li>
+  <li><b>R8.</b> The login endpoint is public. The <code>/me</code> endpoint is the only protected endpoint in this release.</li>
+</ul>
+
+<h2>4. Data and security rules</h2>
+<table>
+  <tr><th>Item</th><th>Rule</th></tr>
+  <tr><td>Email</td><td>Must look like <code>name@domain.tld</code>; at most 254 characters.</td></tr>
+  <tr><td>Password</td><td>Between 1 and 128 characters.</td></tr>
+  <tr><td>Access token</td><td>A signed JWT (HS256). The subject is the customer&rsquo;s email. It expires 15 minutes after it is issued.</td></tr>
+  <tr><td>Signing key</td><td>Comes from the environment variable <code>JWT_SECRET</code> (at least 32 characters). There must be no built-in default key:
+      if a test customer is configured but the key is missing or too short, the application must refuse to start.</td></tr>
+  <tr><td>Test customer</td><td>Comes from the environment variables <code>DEMO_USER_EMAIL</code> and <code>DEMO_USER_PASSWORD</code>.
+      If none is configured, every login is rejected with the answer from R3.</td></tr>
+  <tr><td>Passwords</td><td>Never written to logs and never returned in any response.</td></tr>
+</table>
+
+<h2>5. Test data</h2>
+<p>For acceptance testing, the environment is set up with this customer:</p>
+<table>
+  <tr><th>Email</th><th>Password</th></tr>
+  <tr><td><code>demo@example.com</code></td><td><code>demo-pass</code></td></tr>
+</table>
+
+<h2>6. Out of scope for this release</h2>
+<ul>
+  <li>Sign-up and registration, and a database table of customers.</li>
+  <li>Refresh tokens, &ldquo;remember me&rdquo; and logout.</li>
+  <li>Password reset and email verification.</li>
+  <li>Roles and permissions.</li>
+  <li>Rate limiting and account lockout.</li>
+  <li>The login screen in the web application (a separate piece of work).</li>
+</ul>
+
+<h2>7. Quality expectations</h2>
+<ul>
+  <li>The login screen and API responses should feel fast to customers. (No numeric target has been agreed yet.)</li>
+  <li>Error messages must be understandable by a non-technical customer.</li>
+</ul>
+
+<h2>8. Open questions</h2>
+<ul>
+  <li>Should the email comparison ignore upper and lower case? Product has not decided; for now treat the email exactly as typed.</li>
+</ul>
+
+</body>
+</html>
