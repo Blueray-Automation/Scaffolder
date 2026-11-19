@@ -54,7 +54,7 @@
       "covers": ["AC-005"],
       "type": "cmd",
       "cwd": "<%backendDir%>",
-      "pathPrepend": ["<%backendDir%>/.venv/bin"],
+      "pathPrepend": ["<%backendDir%>/.venv/bin", "<%backendDir%>/.venv/Scripts"],
       "run": "pytest -q tests/test_ready.py::test_ready_returns_503_when_database_is_down",
       "expectExit": 0
     },

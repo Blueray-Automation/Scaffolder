@@ -290,10 +290,20 @@ def resolve_python(minimum: str, what: str, *, interactive: bool) -> str | None:
 # --------------------------------------------------------------------------- processes
 
 
+def venv_alternatives(path: str) -> list:
+    """A virtual environment keeps its executables in .venv/bin on macOS and Linux and in .venv/Scripts on Windows.
+    A spec (written by a person or an agent on one OS) that names one is also run where only the other exists."""
+    posix = path.replace("\\", "/").rstrip("/")
+    for here, there in ((".venv/bin", ".venv/Scripts"), (".venv/Scripts", ".venv/bin")):
+        if posix.endswith(here):
+            return [path, posix[: -len(here)] + there]
+    return [path]
+
+
 def build_env(extra: dict | None = None, path_prepend: list | None = None) -> dict:
     env = os.environ.copy()
     env.update({k: str(v) for k, v in (extra or {}).items()})
-    dirs = [str(ROOT / p) for p in (path_prepend or []) if (ROOT / p).is_dir()]
+    dirs = [str(ROOT / q) for p in (path_prepend or []) for q in venv_alternatives(p) if (ROOT / q).is_dir()]
     if dirs:
         env["PATH"] = os.pathsep.join(dirs + [env.get("PATH", "")])
     if IS_WINDOWS:
@@ -317,13 +327,36 @@ def kill_group(proc: subprocess.Popen) -> None:
         with contextlib.suppress(subprocess.TimeoutExpired):
             proc.wait(timeout=5)
         return
-    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
     try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
+        pgid = os.getpgid(proc.pid)
+    except (ProcessLookupError, PermissionError, OSError):
+        with contextlib.suppress(subprocess.TimeoutExpired):  # already gone
+            proc.wait(timeout=5)
+        return
+    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+        os.killpg(pgid, signal.SIGTERM)
+    # Wait for the WHOLE group, not just the shell: the shell exits at once while the server it started is still
+    # shutting down gracefully and holding its port. Reaping the shell (poll) keeps it from lingering as a zombie,
+    # which would keep the group alive.
+    def group_exists() -> bool:
+        proc.poll()
+        try:
+            os.killpg(pgid, 0)  # signal 0 only asks: does any process of the group still exist?
+        except (ProcessLookupError, PermissionError, OSError):
+            return False
+        return True
+
+    deadline = time.time() + 5
+    while group_exists() and time.time() < deadline:
+        time.sleep(0.1)
+    if group_exists():  # ignored SIGTERM
         with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            os.killpg(pgid, signal.SIGKILL)
+        deadline = time.time() + 3
+        while group_exists() and time.time() < deadline:
+            time.sleep(0.1)
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        proc.wait(timeout=5)
 
 
 def run_shell(cmd: str, cwd: Path, log: Path, *, env: dict, timeout: int, stdin_text: str | None = None) -> int:
