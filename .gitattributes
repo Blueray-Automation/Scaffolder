@@ -1,0 +1,4 @@
+# Templates, scripts and docs are LF on every OS: generated projects (and the shell scripts in them) must not get CRLF.
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf

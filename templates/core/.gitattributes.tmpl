@@ -1,0 +1,19 @@
+# Line endings. Git for Windows converts text files to CRLF on checkout by default, which breaks
+# anything a Linux shell or container reads (a script whose first line ends in \r cannot start).
+* text=auto eol=lf
+
+# Windows batch files need CRLF
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary files: never touch
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.zip binary
+*.woff binary
+*.woff2 binary

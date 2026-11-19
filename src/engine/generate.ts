@@ -96,6 +96,11 @@ function isExecutable(path: string): boolean {
   return EXEC.some((re) => re.test(path));
 }
 
+/** Windows batch files must use CRLF line endings (labels and `goto` can misbehave with bare LF); everything else stays LF. */
+function withLineEndings(path: string, content: string): string {
+  return /\.(cmd|bat)$/i.test(path) ? content.replace(/\r?\n/g, "\r\n") : content;
+}
+
 function join(dir: string, rel: string): string {
   return dir ? `${dir}/${rel}` : rel;
 }
@@ -114,7 +119,7 @@ function renderPack(pack: Pack, cfg: ScaffolderConfig, view: Record<string, unkn
     const path = join(mount.to(cfg), rel);
     out.push({
       path,
-      content: renderTemplate(tpl.content, view, key),
+      content: withLineEndings(path, renderTemplate(tpl.content, view, key)),
       executable: isExecutable(path),
     });
   }

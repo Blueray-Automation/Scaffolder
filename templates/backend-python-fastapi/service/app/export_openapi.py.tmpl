@@ -62,7 +62,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.write:
         Path(args.write).parent.mkdir(parents=True, exist_ok=True)
-        Path(args.write).write_text(current)
+        # UTF-8 and LF on every OS, so the snapshot is byte-identical wherever it is written
+        Path(args.write).write_text(current, encoding="utf-8", newline="\n")
         print(f"wrote {args.write}")
         return 0
 
@@ -71,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
         if not path.exists():
             print(f"contract snapshot {path} does not exist (create it with --write).")
             return 1
-        committed = path.read_text()
+        committed = path.read_text(encoding="utf-8")
         if committed == current:
             print("API contract matches the committed snapshot.")
             return 0

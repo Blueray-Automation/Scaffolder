@@ -22,6 +22,8 @@ The rule it enforces: *done means `./scripts/sdlc verify` exits 0 and you can sh
 | `./scripts/sdlc secrets` | Scans for committed secrets |
 | `./scripts/sdlc report` | Prints the latest report |
 
+Two launchers start the same program (`scripts/sdlc.py`): `scripts/sdlc` (bash: macOS, Linux, WSL, Git Bash) and `scripts/sdlc.cmd` (Windows: `.\scripts\sdlc.cmd <command>`). Every command and flag is identical.
+
 Useful flags: `--only <gate-id>`, `--stage <stage>`, `--keep-going`, `--runtime docker|local|none`, `--feature FEAT-001`.
 
 ## Gates

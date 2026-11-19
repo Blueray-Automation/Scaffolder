@@ -1,0 +1,23 @@
+@echo off
+rem Entry point for the SDLC loop tooling on Windows (cmd.exe and PowerShell).
+rem All logic lives in scripts\sdlc.py (stdlib-only Python 3.9+).  macOS, Linux, WSL and Git Bash use scripts/sdlc.
+rem Usage:  scripts\sdlc.cmd doctor     (PowerShell: .\scripts\sdlc.cmd doctor)
+setlocal
+set "PYTHONUTF8=1"
+set "SDLC_PY=%~dp0sdlc.py"
+rem The `py` launcher comes with python.org installs. Plain `python` may be the Microsoft Store stub, so it is the fallback.
+where py >nul 2>nul
+if %errorlevel%==0 goto :with_py
+where python >nul 2>nul
+if %errorlevel%==0 goto :with_python
+echo Python 3.9+ is required to run the SDLC loop tooling. 1>&2
+echo Install it, then run this again:  winget install -e --id Python.Python.3.12 1>&2
+exit /b 127
+
+:with_py
+py -3 "%SDLC_PY%" %*
+exit /b %errorlevel%
+
+:with_python
+python "%SDLC_PY%" %*
+exit /b %errorlevel%

@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Every entry below was hit for real while building and testing Scaffolder.
+Every entry below was hit for real while building and testing Scaffolder, except the ones under **Windows** and the Ubuntu `python3-venv` entry, which describe known behaviour of the tools involved and have not yet been confirmed on a real machine. If one of them is wrong or incomplete for you, please report it.
 
 ## Setup and tools
 
@@ -10,7 +10,7 @@ Your unzip tool dropped the executable bit. Run `chmod +x scripts/*`, or call `p
 ### `Python >= 3.12 is required ... but the newest Python found is 3.9` (from `setup` or `doctor`)
 The `./scripts/sdlc` tooling runs on Python 3.9+, but the **backend** needs the version in your config (default 3.12), and macOS ships 3.9.
 `setup` already searches for a suitable interpreter by itself (`python3.12`, newer ones, then `python3`). If it finds none, it tells you, and in a terminal it
-**offers to install one** with uv or Homebrew. Nothing is installed unless you answer `y` (or set `SDLC_INSTALL_PYTHON=yes` for scripts and CI).
+**offers to install one** with uv, Homebrew or (on Windows) winget. Nothing is installed unless you answer `y` (or set `SDLC_INSTALL_PYTHON=yes` for scripts and CI).
 To install it yourself:
 
 ```bash
@@ -35,6 +35,54 @@ The failed attempt may have left a `backend/.venv` built with the wrong Python. 
 
 ### Node errors during `setup` or `build`
 The web app needs Node 22.12 or newer.
+
+### `The virtual environment was not created successfully` / `ensurepip is not available` (Ubuntu, Debian)
+Python's `venv` module is a separate package on Debian-based systems. Install it for the version you use: `sudo apt install python3-venv` (or `python3.12-venv`). Then run `setup` again; it replaces the half-made `backend/.venv`.
+
+## Windows
+
+The Windows support has unit tests that simulate its logic and a CI job that runs the real thing on `windows-latest`; these entries come from how Windows and its tools behave, not from a failure observed on a real machine.
+
+### `.\scripts\sdlc` is not recognized, or opens an editor
+`scripts/sdlc` is a bash script. In PowerShell or cmd use the launcher with its extension: `.\scripts\sdlc.cmd doctor` (cmd: `scripts\sdlc.cmd doctor`). Without a project folder at hand you can always run `py -3 scripts\sdlc.py doctor`.
+
+### Windows: `Python was not found` or the Microsoft Store opens
+Windows ships a `python.exe` / `python3.exe` stub that opens the Store instead of running Python. The `sdlc` launcher uses the `py` launcher, which the python.org installer provides, and ignores the stub. Install Python and open a new terminal:
+
+```powershell
+winget install -e --id Python.Python.3.12
+```
+
+Then check `py -3.12 --version` and run `.\scripts\sdlc.cmd doctor` again. To get rid of the stub for other tools too: *Settings, Apps, Advanced app settings, App execution aliases*, and turn off `python.exe` and `python3.exe`.
+If Python is installed somewhere unusual: `$env:SDLC_PYTHON='C:\path\to\python.exe'; .\scripts\sdlc.cmd setup`.
+
+### Windows: `filename too long` or `path too long`
+Windows limits paths to 260 characters unless long paths are enabled, and `node_modules` can get deep. Create the project in a short folder such as `C:\dev\app`, and enable long paths once (administrator PowerShell):
+
+```powershell
+git config --system core.longpaths true
+```
+
+Also turn on *LongPathsEnabled* (Windows 10 1607 and later): see Microsoft's "Maximum Path Length Limitation" page.
+
+### Windows: scripts fail with `\r: command not found` or `no such file or directory` inside a container
+The files have CRLF line endings, which Linux shells and Docker cannot read. Generated projects include a `.gitattributes` that keeps LF; a project made by an older version does not. Add the generated `.gitattributes`, then:
+
+```powershell
+git add --renormalize .
+```
+
+### Windows: `image operating system "linux" cannot be used on this platform`
+Docker Desktop is in Windows-containers mode. Switch it to Linux containers (tray icon, *Switch to Linux containers*). Without Docker, `verify --runtime local` still works.
+
+### Windows: `make` is not recognized
+`make` is not installed on Windows. Use the `sdlc` commands, and `docker compose up -d --build` / `docker compose down` instead of `make up` / `make down`.
+
+### Windows: `deploying from Windows needs bash`
+`sdlc deploy` runs the generated bash deploy scripts. Install Git for Windows (it includes bash) or run the command from WSL. The generated `cd.yml` workflow deploys from a Linux runner and needs neither.
+
+### Windows: a server keeps running after a failed run, or a folder cannot be deleted
+`sdlc` stops the whole process tree of the servers it starts. If a run was killed from outside (closing the terminal, Task Manager) a server can remain and keep its port: end the `python.exe` / `node.exe` process that listens on it (`netstat -ano | findstr :8000`, then `taskkill /PID <pid> /T /F`). Antivirus scanning can also lock `node_modules`; excluding the project folder helps.
 
 ## Running the stack
 
