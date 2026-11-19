@@ -10,10 +10,11 @@
  * Needs: python3 >= the scenario's backend version on PATH, node >= 22, network (pip/npm).
  */
 import { spawn, spawnSync, type SpawnSyncOptions, type SpawnSyncOptionsWithStringEncoding } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
+import { strToU8, zipSync } from "fflate";
 import { deepMerge, defaultConfig } from "../src/engine/config";
 import { generateProject } from "../src/engine/generate";
 import { OPENAPI_SNAPSHOT, relativeFrom } from "../src/engine/gates";
@@ -221,6 +222,7 @@ function scenario(name: string, patch: Json): void {
 
     // --- sdlc implement: spec in, verified code out, with a scripted agent standing in for the AI ---
     implementFromSpec(dir, cfg, git, name);
+    specFromDocument(dir, cfg, git, name);
   } finally {
     if (values.keep) log(`  kept: ${dir}`);
     else rmSync(dir, { recursive: true, force: true });
@@ -401,6 +403,199 @@ function implementFromSpec(dir: string, cfg: Json, git: (...a: string[]) => unkn
   if (headCount() === commitsBefore) ok("nothing was committed: the human reviews the diff");
   else bad("implement made commits");
   expectExit("sync after implement has nothing left to do", dir, ["sync"], 0);
+}
+
+// ---------------------------------------------------------------------------------------------
+// `sdlc spec`: a requirements document (PDF / DOCX) in, a validated DRAFT spec out. A scripted
+// agent stands in for the AI, so everything around it is exercised: text extraction, the prompt,
+// the guard against stray edits, questions, validation with a fix-and-retry, and the overwrite guard.
+// ---------------------------------------------------------------------------------------------
+
+const DOC_LINES = [
+  "Product Requirements: URL Slug Service",
+  "1. Overview",
+  "The service turns free text into a URL-friendly slug so that marketing can publish readable links.",
+  "2. Functional requirements",
+  'FR-1 GET /api/v1/slug?text=Hello World returns status 200 and the body {"slug": "hello-world"}.',
+  "FR-2 The text Creme Brulee, written with accents, becomes creme-brulee.",
+  "FR-3 A request without the text parameter returns status 422.",
+  "FR-4 The text parameter is at most 200 characters long.",
+  "3. Out of scope",
+  "Custom separators, uniqueness checks and persistence of slugs.",
+];
+
+/** A minimal valid one-page PDF (uncompressed text) with a correct cross-reference table. */
+function makePdf(lines: string[]): Buffer {
+  const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+  const content = ["BT", "/F1 10 Tf", "14 TL", "40 800 Td", ...lines.flatMap((l) => [`(${esc(l)}) Tj`, "T*"]), "ET"].join("\n");
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    `<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  objects.forEach((o, i) => {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("")}`;
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(pdf, "latin1");
+}
+
+/** A minimal valid .docx (a zip with the three required parts). */
+function makeDocx(lines: string[]): Uint8Array {
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const body = lines.map((l) => `<w:p><w:r><w:t xml:space="preserve">${esc(l)}</w:t></w:r></w:p>`).join("");
+  const xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  return zipSync({
+    "[Content_Types].xml": strToU8(
+      `${xml}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`,
+    ),
+    "_rels/.rels": strToU8(
+      `${xml}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`,
+    ),
+    "word/document.xml": strToU8(`${xml}<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}</w:body></w:document>`),
+  });
+}
+
+/** A scripted "spec writer": reads the prompt on stdin and drafts the two spec files. */
+const SPEC_AGENT = `import os, pathlib, re, sys
+
+prompt = sys.stdin.read()
+mode = os.environ.get("AGENT_MODE", "ok")
+fix = pathlib.Path(os.environ["SPEC_FIXTURES"])
+root = pathlib.Path.cwd()
+is_fix_round = "fix the draft specification" in prompt
+
+if not is_fix_round:  # the whole point of \`spec\`: the document must have reached the agent
+    for needle in ("FR-1", "hello-world", "(Source:", "\`backend\`"):
+        if needle not in prompt:
+            print("the prompt is missing: " + needle)
+            sys.exit(3)
+
+found = re.search(r"\`([^\`]*specs/(FEAT-\\d+)-[^\`/]+)/", prompt)
+spec_dir, feature = root / found.group(1), found.group(2)
+calls = fix / "calls.txt"
+calls.write_text(calls.read_text() + "x" if calls.exists() else "x")
+
+if mode == "stray":  # writes outside the spec folder: must be stopped
+    (root / os.environ["BACKEND_DIR"] / "app" / "stray.py").write_text("print('out of scope')\\n")
+    sys.exit(0)
+if mode == "ask":  # nothing usable in the document: ask instead of inventing
+    questions = re.search(r"\`([^\`]*QUESTIONS\\.md)\`", prompt)
+    pathlib.Path(questions.group(1)).write_text("The document defines no password rules. Which hashing scheme should be used?\\n")
+    sys.exit(0)
+
+bad_first = mode == "invalid-then-fix" and not is_fix_round
+(spec_dir / "prd.md").write_text((fix / "prd.md").read_text().replace("FEAT-001", feature))
+(spec_dir / "acceptance.json").write_text((fix / ("bad-acceptance.json" if bad_first else "acceptance.json")).read_text().replace("FEAT-001", feature))
+print("drafted " + feature)
+`;
+
+function specFromDocument(dir: string, cfg: Json, git: (...a: string[]) => unknown, name: string): void {
+  log("  -- sdlc spec --");
+  const work = join(dir, "..", `spec-${name}`);
+  mkdirSync(work, { recursive: true });
+  const pdf = join(work, "requirements.pdf");
+  const docx = join(work, "requirements.docx");
+  writeFileSync(pdf, makePdf(DOC_LINES));
+  writeFileSync(docx, makeDocx(DOC_LINES));
+  writeFileSync(join(work, "notes.xyz"), "not a document");
+
+  // what the scripted agent will "write": a valid draft, and an invalid first attempt (AC-002 uncovered, a target that does not exist)
+  const prdDraft = `${SLUG_PRD}\n## 8. Assumptions & open questions\nASSUMPTION: slugs are lower-case.\n`;
+  const badChecks = [slugChecks[0], { ...slugChecks[2], target: "nowhere" }];
+  writeFileSync(join(work, "prd.md"), prdDraft);
+  writeFileSync(join(work, "acceptance.json"), SLUG_ACCEPTANCE);
+  writeFileSync(join(work, "bad-acceptance.json"), JSON.stringify({ feature: "FEAT-001", checks: badChecks }, null, 2));
+  const agentFile = join(work, "spec-agent.py");
+  writeFileSync(agentFile, SPEC_AGENT);
+  const agent = `python3 ${agentFile}`;
+  const env = { BACKEND_DIR: cfg.layout.backendDir, SPEC_FIXTURES: work };
+  const specFolders = () => readdirSync(join(dir, ".ai/specs")).filter((d) => d.startsWith("FEAT-")).sort();
+  const calls = () => (existsSync(join(work, "calls.txt")) ? readFileSync(join(work, "calls.txt"), "utf8").length : 0);
+
+  git("add", "-A");
+  git("commit", "-qm", "chore: clean tree before spec");
+  const foldersBefore = specFolders();
+
+  // inputs the tool must refuse before any agent runs
+  expectExit("spec refuses a missing file", dir, ["spec", join(work, "nope.pdf"), "--agent", agent], 2, env);
+  const odd = expectExit("spec refuses an unsupported file type", dir, ["spec", join(work, "notes.xyz"), "--agent", agent], 2, env);
+  if (odd.includes("Unsupported")) ok("it lists the supported types");
+  else bad("unsupported type was not explained");
+  expectExit("spec reports an agent that is not installed", dir, ["spec", pdf, "--agent", "definitely-not-installed-agent-xyz"], 2, env);
+
+  // dry runs: the document text must reach the prompt, and nothing is created
+  for (const [label, file, extractor] of [["PDF", pdf, ""], ["DOCX", docx, "docx"]] as const) {
+    const dry = expectExit(`spec --dry-run reads the ${label}`, dir, ["spec", file, "--agent", agent, "--dry-run", "--focus", "the slug endpoint only"], 0, env);
+    const promptFile = (dry.match(/prompt\s+:\s+(\S+)/) ?? [])[1];
+    const text = promptFile ? readFileSync(join(dir, promptFile), "utf8") : "";
+    const ready = text.includes("FR-1") && text.includes("hello-world") && text.includes("Custom separators") && text.includes("the slug endpoint only") && !text.includes("{{");
+    if (ready && (!extractor || text.includes(extractor))) ok(`the ${label} text, the focus and the rules are in the prompt, fully filled in`);
+    else bad(`the ${label} prompt is missing the document text, the focus or has unfilled placeholders`);
+  }
+  // the same PDF with every real PDF tool hidden from PATH: the built-in extractor must still deliver the text
+  const noPoppler = (process.env.PATH ?? "").split(":").filter((p) => !existsSync(join(p, "pdftotext")) && !existsSync(join(p, "mutool"))).join(":");
+  const bare = expectExit("spec --dry-run reads the PDF with only the built-in extractor", dir, ["spec", pdf, "--agent", agent, "--dry-run"], 0, { ...env, PATH: noPoppler });
+  const bareFile = (bare.match(/prompt\s+:\s+(\S+)/) ?? [])[1];
+  const bareText = bareFile ? readFileSync(join(dir, bareFile), "utf8") : "";
+  if (bareText.includes("FR-1") && bareText.includes("hello-world") && bareText.includes("built-in")) ok("the built-in extractor delivered the PDF text and says so");
+  else bad("the built-in extractor did not deliver the PDF text");
+  if (JSON.stringify(specFolders()) === JSON.stringify(foldersBefore)) ok("a dry run creates nothing");
+  else bad("a dry run created a spec folder");
+
+  // a dirty tree is refused so the agent's work stays reviewable
+  writeFileSync(join(dir, "stray.txt"), "uncommitted\n");
+  expectExit("spec refuses a dirty tree", dir, ["spec", pdf, "--agent", agent], 2, env);
+  rmSync(join(dir, "stray.txt"));
+
+  // the agent may write only the two spec files
+  const strayRun = expectExit("spec stops when the agent writes outside the spec folder", dir, ["spec", pdf, "--name", "requirements", "--agent", agent, "--max-attempts", "1"], 4, { ...env, AGENT_MODE: "stray" });
+  if (strayRun.includes("INTEGRITY VIOLATION")) ok("it reports the stray file");
+  else bad("a stray file was not reported");
+  rmSync(join(dir, cfg.layout.backendDir, "app", "stray.py"), { force: true });
+
+  // nothing usable in the document: the agent asks instead of inventing
+  const asked = expectExit("spec stops and shows the agent's question", dir, ["spec", pdf, "--name", "requirements", "--agent", agent], 2, { ...env, AGENT_MODE: "ask" });
+  if (asked.includes("hashing scheme")) ok("the question reaches the user");
+  else bad("the question was not shown");
+
+  // an invalid first draft: the tool validates, names the problems, the agent fixes them on attempt 2
+  const callsBefore = calls();
+  const draft = expectExit("spec validates the draft and gets it fixed", dir, ["spec", pdf, "--name", "requirements", "--agent", agent], 0, { ...env, AGENT_MODE: "invalid-then-fix" });
+  if (draft.includes("AC-002 has no check") && draft.includes("'nowhere'") && draft.includes("attempt 2/3")) ok("the problems were named and a second attempt ran");
+  else bad("the invalid draft was not reported and retried");
+  if (calls() - callsBefore === 2) ok("the agent was called exactly twice");
+  else bad(`expected 2 agent calls, saw ${calls() - callsBefore}`);
+  if (draft.includes("3 acceptance criteria") && draft.includes("1 assumption") && draft.includes("DRAFT")) ok("the summary counts criteria and assumptions and says it is a draft to review");
+  else bad("the summary is missing the criteria count, the assumption count or the review reminder");
+
+  const created = specFolders().filter((f) => !foldersBefore.includes(f));
+  const draftDir = created[0] ? join(dir, ".ai/specs", created[0]) : "";
+  if (created.length === 1 && existsSync(join(draftDir, "source", "requirements.pdf"))) ok(`the spec folder ${created[0]} holds the source document`);
+  else bad(`expected one new spec folder with source/requirements.pdf, got ${JSON.stringify(created)}`);
+  const facts = expectExit("the drafted spec passes traceability", dir, ["facts", "--runtime", "none", "--feature", created[0]?.split("-").slice(0, 2).join("-") ?? "?"], 0);
+  if (facts.includes("traceability") && !facts.includes("FAIL")) ok("every drafted criterion has a check");
+  else bad("the drafted spec failed validation");
+
+  // never overwrite a finished spec
+  const again = expectExit("spec will not overwrite a finished PRD", dir, ["spec", pdf, "--name", "requirements", "--agent", agent], 2, env);
+  if (again.includes("already has a finished PRD")) ok("it says why and how to proceed");
+  else bad("overwrite refusal was not explained");
+
+  // the chain: the draft is a normal spec that `implement` accepts (dry run: nothing is rebuilt)
+  const feature = created[0]?.split("-").slice(0, 2).join("-") ?? "?";
+  git("add", "-A");
+  git("commit", "-qm", "chore: reviewed draft spec");
+  const impl = expectExit("implement accepts the drafted spec", dir, ["implement", feature, "--agent", agent, "--dry-run"], 0, env);
+  if (impl.includes("spec ok: 3 acceptance criteria")) ok("document to spec to implement works as one chain");
+  else bad("implement did not accept the drafted spec");
 }
 
 const selected = values.scenario === "all" ? Object.keys(SCENARIOS) : [values.scenario as string];

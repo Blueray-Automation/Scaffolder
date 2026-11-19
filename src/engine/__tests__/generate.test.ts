@@ -322,6 +322,51 @@ describe("agent and `implement`", () => {
   });
 });
 
+describe("`spec`: a requirements document to a draft spec", () => {
+  const { files } = generate({});
+  const text = (path: string) => files.find((f) => f.path === path)!.content;
+  const placeholders = (s: string) => [...new Set([...s.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]!))].sort();
+
+  it("registers the spec prompts in sdlc.json", () => {
+    const sdlc = JSON.parse(text(".ai/sdlc.json")) as Json;
+    expect(sdlc.agent.prompts).toMatchObject({ spec: ".ai/prompts/spec.md", specFix: ".ai/prompts/spec-fix.md" });
+    expect(files.some((f) => f.path === ".ai/prompts/spec.md")).toBe(true);
+    expect(files.some((f) => f.path === ".ai/prompts/spec-fix.md")).toBe(true);
+  });
+
+  it("the spec prompts only use placeholders the tool fills in", () => {
+    const tool = text("scripts/sdlc.py");
+    const specValues = tool.slice(tool.indexOf("values = {"), tool.indexOf('prompt = render_prompt(cfg["agent"]["prompts"]["spec"]'));
+    for (const key of placeholders(text(".ai/prompts/spec.md"))) {
+      expect(specValues, `{{${key}}} in spec.md is never filled`).toContain(`"${key}":`);
+    }
+    const fixValues = tool.slice(tool.indexOf('cfg["agent"]["prompts"]["specFix"]'), tool.indexOf('cfg["agent"]["prompts"]["specFix"]') + 400);
+    for (const key of placeholders(text(".ai/prompts/spec-fix.md"))) {
+      expect(fixValues, `{{${key}}} in spec-fix.md is never filled`).toContain(`"${key}":`);
+    }
+  });
+
+  it("tells the agent to cite sources, never invent requirements, and write only the two spec files", () => {
+    const prompt = text(".ai/prompts/spec.md");
+    expect(prompt).toContain("(Source:");
+    expect(prompt).toContain("Never invent requirements");
+    expect(prompt).toContain("ASSUMPTION:");
+    expect(prompt).toContain("exactly two files");
+    expect(prompt).toContain("{{questionsFile}}");
+  });
+
+  it("documents spec and the review step where people look", () => {
+    for (const path of ["AGENTS.md", "README.md"]) expect(text(path), path).toContain("./scripts/sdlc spec");
+    expect(text("Makefile")).toMatch(/^spec:/m);
+    expect(text(".ai/skills/review-spec/SKILL.md")).toContain("Nothing invented");
+    expect(text(".ai/skills/write-prd/SKILL.md")).toContain("./scripts/sdlc spec");
+  });
+
+  it("validates that http checks point at targets that exist (a typo used to be skipped silently)", () => {
+    expect(text("scripts/sdlc.py")).toContain("which does not exist (available:");
+  });
+});
+
 describe("validation", () => {
   const check = (patch: Json) => validateConfig(resolveConfig(patch));
   const errorPaths = (patch: Json) => check(patch).filter((i) => i.level === "error").map((i) => i.path);

@@ -66,6 +66,8 @@ export function buildSdlcConfig(cfg: ScaffolderConfig): Record<string, unknown> 
       timeoutSeconds: cfg.sdlc.agent.timeoutSeconds,
       prompts: {
         prd: ".ai/prompts/prd.md",
+        spec: ".ai/prompts/spec.md",
+        specFix: ".ai/prompts/spec-fix.md",
         implement: ".ai/prompts/implement.md",
         heal: ".ai/prompts/heal.md",
       },

@@ -55,6 +55,18 @@ Details: [`AGENTS.md`](AGENTS.md) and [`.ai/README.md`](.ai/README.md).
 
 ## Add a feature
 
+**From a requirements document** (PDF, DOCX, Markdown or text):
+
+```bash
+./scripts/sdlc spec requirements.pdf   # an agent drafts .ai/specs/FEAT-001-requirements/{prd.md,acceptance.json}; the tool validates them
+# you REVIEW the draft (skill: .ai/skills/review-spec): it is the contract, and the agent only drafted it
+./scripts/sdlc implement FEAT-001      # then the agent writes tests, code, dependencies and config; the loop proves it
+```
+
+Large document with several features? Run `spec` once per feature with `--focus "the login flow (section 3)"` and `--name login`.
+
+**Or write the spec yourself:**
+
 ```bash
 ./scripts/sdlc new user-login          # creates .ai/specs/FEAT-001-user-login/{prd.md,acceptance.json}
 # you write the PRD and the checks (skills: .ai/skills/write-prd, write-fact-checks); that is the only manual part. Then:

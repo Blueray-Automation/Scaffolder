@@ -1,0 +1,31 @@
+---
+name: review-spec
+description: Review a specification that an agent drafted from a requirements document (PDF, DOCX, Markdown) before anyone implements it. Use after `./scripts/sdlc spec` and before `./scripts/sdlc implement`.
+---
+
+# Review a generated spec
+
+The spec is the contract: whatever it says is what gets built and what "done" means. An agent drafted it from a document, and the tool only checks its *form*
+(every criterion has a check, targets exist). **You** check its *meaning*. Ten minutes here saves an implementation round.
+
+Open `.ai/specs/FEAT-xxx-<slug>/prd.md` and `acceptance.json` next to the original document (a copy is in `source/`).
+
+## Checklist
+
+1. **Nothing invented.** Every `AC-xxx` has a `(Source: ...)` that you can find in the document and that says what the criterion says. Delete or fix any that don't.
+2. **Nothing dropped.** Read the document's requirements for this scope and tick each one off against an AC, or against the "Out of scope / not machine-verifiable" list with a reason.
+3. **Exact numbers and words.** Limits, status codes, error messages, field names and formats match the document character for character.
+4. **Unhappy paths.** Validation errors, not found, unauthorized, boundaries (0, 1, max, max+1), empty states. If the document is silent, decide on purpose and say so in the PRD.
+5. **Assumptions.** Read the last section ("Assumptions & open questions"). Accept each `ASSUMPTION:` or change it, and answer every question. Then delete the lines you resolved.
+6. **Checks can fail.** For each check ask: if the behaviour were wrong, would this check go red? Is the `expect` neither stricter nor looser than the criterion?
+7. **Out of scope.** Things you do *not* want built must be listed, or the implementer may build them.
+8. **Header.** Change `Status: Draft (generated from ...)` to `Status: Accepted` when you are satisfied.
+
+## Then
+
+```bash
+./scripts/sdlc facts --runtime none     # the spec must still be well-formed after your edits
+./scripts/sdlc implement FEAT-xxx       # hand it to the agent
+```
+
+If a requirement is wrong or missing in the *document* itself, fix it at the source and run `./scripts/sdlc spec` again with a new `--name`.
