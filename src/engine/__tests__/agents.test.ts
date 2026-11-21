@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { AGENT_PRESETS } from "../capabilities";
+import { AGENT_PRESETS, DESKTOP_APPS, HANDOFF_PREFIX } from "../capabilities";
 import { agentCommand, defaultConfig, deepMerge, validateConfig } from "../config";
 import { generateProject } from "../generate";
 
@@ -12,17 +12,30 @@ type Json = Record<string, any>;
 describe("agent presets: several agents to choose from, installed or not", () => {
   const withCommand = AGENT_PRESETS.filter((p) => p.command);
 
-  it("offers Claude Code, Codex, Gemini, Copilot and Cursor, plus a custom command and none", () => {
-    expect(AGENT_PRESETS.map((p) => p.id)).toEqual(["claude", "codex", "gemini", "copilot", "cursor", "custom", "none"]);
+  it("offers five CLIs, the Claude desktop app's engine, three desktop apps you drive, a custom command and none", () => {
+    expect(AGENT_PRESETS.map((p) => p.id)).toEqual([
+      "claude", "codex", "gemini", "copilot", "cursor", "claude-desktop", "handoff-claude", "handoff-cursor", "handoff-vscode", "custom", "none",
+    ]);
   });
 
-  it("every real agent says which program it needs, how to install it and where its docs are", () => {
-    for (const p of withCommand) {
+  it("every program-backed agent says which program it needs, how to install it and where its docs are", () => {
+    for (const p of withCommand.filter((x) => !x.command.startsWith(HANDOFF_PREFIX))) {
       expect(p.command.split(/\s+/)[0], p.id).toBe(p.program);
+      expect(p.mode, p.id).toBe("headless");
       expect(p.install, `${p.id} has no install hint`).not.toBe("");
       expect(p.docs, p.id).toMatch(/^https:\/\//);
     }
     for (const p of AGENT_PRESETS.filter((x) => !x.command)) expect([p.program, p.install, p.docs], p.id).toEqual(["", "", ""]);
+  });
+
+  it("every desktop-app preset names an app that is defined, and says how to install it", () => {
+    const apps = withCommand.filter((p) => p.command.startsWith(HANDOFF_PREFIX));
+    expect(apps.map((p) => p.command.slice(HANDOFF_PREFIX.length))).toEqual(DESKTOP_APPS.map((a) => a.id));
+    for (const p of apps) {
+      expect([p.mode, p.program], p.id).toEqual(["handoff", ""]);
+      expect(p.install, p.id).not.toBe("");
+      expect(p.docs, p.id).toMatch(/^https:\/\//);
+    }
   });
 
   it("an agent that takes the prompt as an argument is pointed at the prompt file, one that reads stdin is not", () => {
@@ -142,7 +155,7 @@ describe.skipIf(process.platform === "win32")("sdlc agent: list, choose, and use
   it("an unknown name is refused and lists the valid ones; an agent that is not installed can still be chosen", () => {
     const unknown = sh(["agent", "nope"]);
     expect(unknown.status).not.toBe(0);
-    expect(out(unknown)).toContain("claude, codex, gemini, copilot, cursor, custom, none");
+    expect(out(unknown)).toContain("claude, codex, gemini, copilot, cursor, claude-desktop, handoff-claude, handoff-cursor, handoff-vscode, custom, none");
     expect(existsSync(local())).toBe(false);
     const copilot = sh(["agent", "copilot"]);
     expect(copilot.status).toBe(0);
@@ -268,7 +281,7 @@ def saved():
     return json.load(open(m.AGENT_LOCAL)) if os.path.exists(m.AGENT_LOCAL) else None
 results = {}
 results["enter"] = [ask(""), saved()]
-results["bad number"] = [ask("9"), saved()]
+results["bad number"] = [ask("99"), saved()]
 results["number 2"] = [ask("2"), saved()]
 results["by name"] = [ask("gemini"), saved()]
 results["custom"] = [ask("c", "my-agent --x"), saved()]

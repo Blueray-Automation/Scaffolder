@@ -21,7 +21,7 @@ Both are tiny launchers for the same program (`scripts/sdlc.py`), so every comma
 | Python | the backend (and the `sdlc` tool itself) | **3.12 or newer** for the backend (the version in your config). The tool alone runs on 3.9+; `setup` finds a suitable Python for the backend and offers to install one |
 | Node.js + npm | the web app (if you included it) | **22.12 or newer** |
 | Docker | the full stack and the facts stage | optional: without it use `verify --runtime local`. Needs Compose v2 (`docker compose`) |
-| An AI agent CLI | `spec` and `implement` | optional: `claude`, `codex`, `gemini`, `copilot` or `cursor`, installed as its own documentation says; `./scripts/sdlc agent` shows which you have and how to install the others |
+| An AI agent | `spec` and `implement` | optional: a CLI (`claude`, `codex`, `gemini`, `copilot` or `cursor`, installed as its own documentation says), or a desktop app: the Claude desktop app's own Claude Code (`claude-desktop`), or the Claude desktop app, Cursor or VS Code driven by you ([Using a Desktop App](Desktop-Apps)). `./scripts/sdlc agent` shows which you have and how to install the others |
 
 `doctor` checks all of it and tells you what is missing and how to install it:
 

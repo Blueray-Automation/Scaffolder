@@ -12,7 +12,7 @@ Standard library only (Python 3.9+). Configured by .ai/sdlc.json; see .ai/README
   loop      verify -> heal -> verify ... until green, stuck, or out of budget
   spec      draft prd.md + acceptance.json from a requirements document (PDF, DOCX, Markdown, text) with your agent
   implement turn a finished spec (prd.md + acceptance.json) into verified code with your agent
-  agent     see which AI agents are installed and choose one (claude, codex, gemini, copilot, cursor, or your own)
+  agent     see which AI agents are installed and choose one (command-line agents, the Claude desktop app, a desktop app you drive, or your own)
   feature   drive one feature through PRD -> Code -> Test (-> Deploy)
   sync      install dependencies, only if the manifests changed since the last install
   new       create a feature spec from the template
@@ -38,8 +38,10 @@ import shutil
 import signal
 import subprocess
 import sys
+import textwrap
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -47,6 +49,8 @@ ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / ".ai" / "sdlc.json"
 EVIDENCE = ROOT / ".ai" / "evidence"
 AGENT_LOCAL = ROOT / ".ai" / "agent.local.json"  # this person's own choice of agent; not in git
+HANDOFF = "handoff:"  # an agent "command" such as handoff:cursor: a desktop app the person drives, not a program this tool runs
+CLAUDE_DESKTOP = "{claude_desktop}"  # stands for the Claude Code that the Claude desktop app keeps for its Code tab
 
 EXIT_OK, EXIT_FAIL, EXIT_HUMAN, EXIT_STUCK, EXIT_INTEGRITY, EXIT_USAGE = 0, 1, 2, 3, 4, 64
 
@@ -944,10 +948,13 @@ def render_prompt(path: str, values: dict) -> str:
 def run_agent(cfg: dict, command: str, prompt: str, tag: str, run_dir: Path) -> int:
     prompt_file = run_dir / f"{tag}.prompt.md"
     prompt_file.write_text(prompt, encoding="utf-8")
+    if command.startswith(HANDOFF):
+        return run_handoff(cfg, command[len(HANDOFF):], prompt_file, tag, run_dir)
     log = run_dir / f"{tag}.agent.log"
     env = os.environ.copy()
     env.update({"SDLC_PROMPT_FILE": str(prompt_file), "SDLC_PHASE": tag})
     command = command.replace("{prompt_file}", rel(prompt_file))  # for agents that take the prompt as an argument, not on stdin
+    command = expand_command(command)
     say(dim(f"  running agent: {command}"))
     code = run_shell(command, ROOT, log, env=env, timeout=cfg["agent"]["timeoutSeconds"], stdin_text=prompt)
     say(dim(f"  agent finished (exit {code}); output: {rel(log)}"))
@@ -988,7 +995,7 @@ def agent_blocker(run_dir: Path, tag: str, code: int) -> str:
 
 def agent_install(program: str) -> str:
     """Where `program` is on PATH and its version, e.g. "/usr/local/bin/claude (1.0.51 (Claude Code))"; "" if unknown."""
-    exe = shutil.which(program)
+    exe = find_program(program)
     if not exe:
         return ""
     try:
@@ -1011,15 +1018,22 @@ def explain_blocker(agent: str, kind: str) -> None:
         found = agent_install(program) if program != "the agent" else ""
         if found:
             say(f"The one that ran: {found}")
-        if program == "claude":
+        if program == CLAUDE_DESKTOP:
+            say("Update the Claude desktop app: Claude > Check for Updates... (macOS) or Help > Check for Updates... (Windows). It keeps its own Claude Code up to date.")
+        elif program == "claude":
             say("Update it: npm install -g @anthropic-ai/claude-code@latest   (or: claude update)")
             say("Several installs can exist side by side and the first on PATH wins: `which -a claude` (Windows: `where claude`) lists them.")
+            if find_claude_desktop():
+                say("Or skip the CLI: the Claude desktop app keeps its own, current Claude Code. Use it with  ./scripts/sdlc agent claude-desktop")
         else:
             say(f"Update `{program}`, or name a model it still serves in its command: ./scripts/sdlc agent")
         say("Or use another agent: ./scripts/sdlc agent")
         return
     say(bad("\nThe agent is not signed in, so it did nothing: no file was drafted or changed."))
-    say(f"Run `{program}` once in a terminal and sign in" + (" (type /login)" if program == "claude" else " (or set its API key)") + ", then run this again.")
+    if program == CLAUDE_DESKTOP:
+        say("Open the Claude desktop app and sign in there, then run this again.")
+    else:
+        say(f"Run `{program}` once in a terminal and sign in" + (" (type /login)" if program == "claude" else " (or set its API key)") + ", then run this again.")
     say("Or use another agent: ./scripts/sdlc agent")
 
 
@@ -1113,6 +1127,176 @@ def ensure_installed(cfg: dict, run: Run) -> bool:
     return all(run_setup_step(step, run) for step in stale)
 
 
+# --------------------------------------------------------------------------- desktop applications
+#
+# Two ways to use a desktop app instead of a command-line program:
+#   {claude_desktop}  the Claude Code that the Claude desktop app downloads and updates for its Code tab: run unattended, like `claude -p`
+#   handoff:<app>     an app you drive (Claude desktop's Code tab, Cursor, VS Code): the tool opens it, puts the instruction on the
+#                     clipboard and waits for you; everything after that (checks, verify, heal) is the same as for any agent
+
+
+def os_name() -> str:
+    return "windows" if IS_WINDOWS else ("macos" if sys.platform == "darwin" else "linux")
+
+
+def claude_desktop_bases() -> list:
+    """Folders where the Claude desktop app keeps the Claude Code it downloads for its Code tab (one folder per version).
+    macOS is checked on a real machine. Windows and Linux (the app's beta) follow the same per-user data convention
+    (%APPDATA%\\Claude, ~/.config/Claude) but have not been checked; SDLC_CLAUDE_DESKTOP names the program directly when it is elsewhere."""
+    if sys.platform == "darwin":
+        return [Path.home() / "Library" / "Application Support" / "Claude" / "claude-code"]
+    if IS_WINDOWS:
+        return [Path(os.environ[name]) / "Claude" / "claude-code" for name in ("APPDATA", "LOCALAPPDATA") if os.environ.get(name)]
+    return [Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "Claude" / "claude-code"]
+
+
+CLAUDE_LAYOUTS = ("claude.exe", "claude", "*/claude.exe", "*/claude", "*/claude.app/Contents/MacOS/claude", "claude.app/Contents/MacOS/claude")
+
+
+def find_claude_in(base: Path) -> Path | None:
+    """The newest Claude Code program under `base`: <version>/<id>/claude.app/Contents/MacOS/claude on macOS, <version>/claude.exe on Windows."""
+    def version(folder: Path) -> tuple:
+        return tuple(int(n) for n in re.findall(r"\d+", folder.name))
+
+    try:
+        folders = sorted((d for d in base.iterdir() if d.is_dir()), key=version, reverse=True)
+    except OSError:
+        return None
+    for folder in folders:
+        for pattern in CLAUDE_LAYOUTS:
+            for found in sorted(folder.glob(pattern)):
+                if found.is_file() and os.access(found, os.X_OK):
+                    return found
+    return None
+
+
+def find_claude_desktop() -> str | None:
+    """Where the Claude desktop app keeps its own Claude Code (it downloads and updates it separately from any `claude` on PATH),
+    or None. SDLC_CLAUDE_DESKTOP names the program directly when it is somewhere else."""
+    override = os.environ.get("SDLC_CLAUDE_DESKTOP", "").strip()
+    if override:
+        path = Path(override).expanduser()
+        return str(path) if path.is_file() else None
+    for base in claude_desktop_bases():
+        found = find_claude_in(base)
+        if found:
+            return str(found)
+    return None
+
+
+def find_program(program: str) -> str | None:
+    """Where an agent's program is: on PATH, or, for {claude_desktop}, where the Claude desktop app keeps it."""
+    return find_claude_desktop() if program == CLAUDE_DESKTOP else shutil.which(program)
+
+
+def expand_command(command: str) -> str:
+    """The command with {claude_desktop} replaced by the program's real location (quoted for the shell)."""
+    found = find_claude_desktop() if CLAUDE_DESKTOP in command else None
+    return command.replace(CLAUDE_DESKTOP, quote_arg(found)) if found else command
+
+
+def desktop_apps(cfg: dict) -> list:
+    return list(cfg["agent"].get("desktopApps", []))
+
+
+def desktop_app(cfg: dict, app_id: str) -> dict | None:
+    return next((a for a in desktop_apps(cfg) if a["id"] == app_id), None)
+
+
+def desktop_app_path(app: dict) -> str | None:
+    """Where the app was found on this machine (best effort: it may be installed somewhere unusual), or None."""
+    detect = app.get("detect", {})
+    for raw in detect.get(os_name(), []):
+        path = Path(os.path.expandvars(os.path.expanduser(raw)))
+        if path.exists():
+            return str(path)
+    for program in detect.get("which", []):
+        found = shutil.which(program)
+        if found:
+            return found
+    return None
+
+
+def open_desktop_app(app: dict, instruction: str) -> str | None:
+    """Open the app on this project. Returns the command that worked, or None: the person then opens it themselves."""
+    values = {"{dir}": str(ROOT), "{query}": urllib.parse.quote(instruction, safe="")}
+    for argv in app.get("open", {}).get(os_name(), []):
+        args = []
+        for part in argv:
+            for key, value in values.items():
+                part = part.replace(key, value)
+            args.append(part)
+        exe = shutil.which(args[0])
+        if not exe:
+            continue
+        try:  # no pipes: a launcher that leaves the app running would keep them open
+            done = subprocess.run([exe, *args[1:]], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if done.returncode == 0:
+            return " ".join(args)
+    return None
+
+
+def copy_to_clipboard(text: str) -> str | None:
+    """Put `text` on the clipboard. Returns the program that did it, or None when there is none (the text is printed anyway)."""
+    by_os = {
+        "macos": [["pbcopy"]],
+        "windows": [["clip"]],
+        "linux": [["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]],
+    }
+    for argv in by_os[os_name()]:
+        exe = shutil.which(argv[0])
+        if not exe:
+            continue
+        try:
+            done = subprocess.run([exe, *argv[1:]], input=text.encode("utf-8"), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if done.returncode == 0:
+            return argv[0]
+    return None
+
+
+def handoff_note(cfg: dict, agent: str) -> None:
+    """For a dry run: what a desktop-app agent would do (nothing is opened)."""
+    app = desktop_app(cfg, agent[len(HANDOFF):]) if agent.startswith(HANDOFF) else None
+    if app:
+        say(f"  hand-off      : would open {app['label']} on {ROOT}, copy the instruction, and wait for you to press Enter")
+
+
+def run_handoff(cfg: dict, app_id: str, prompt_file: Path, tag: str, run_dir: Path) -> int:
+    """The agent is a desktop app that a person drives: open it, put the instruction on the clipboard, wait for Enter.
+    Returns 0 when the person says the agent is done; Ctrl-C (or no terminal) stops the whole run."""
+    app = desktop_app(cfg, app_id)
+    if app is None:
+        say(bad(f"'{app_id}' is not a desktop app this project knows (known: {', '.join(a['id'] for a in desktop_apps(cfg))})."))
+        sys.exit(EXIT_USAGE)
+    if not interactive_terminal():
+        say(bad(f"{app['label']} is a desktop app you drive, so this needs a terminal to wait in. Nothing was opened."))
+        say("Run it in a terminal, or choose an agent that runs by itself: ./scripts/sdlc agent")
+        sys.exit(EXIT_HUMAN)
+    instruction = f"Read {rel(prompt_file)} and do exactly what it says."
+    say(c(f"\n== hand-off to {app['label']} ==", "1"))
+    opened = open_desktop_app(app, instruction)
+    copied = copy_to_clipboard(instruction)
+    lines = [f"hand-off to {app['label']}", f"opened: {opened or 'no (open it yourself)'}", f"clipboard: {copied or 'no clipboard program found'}", f"instruction: {instruction}"]
+    (run_dir / f"{tag}.agent.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    say(ok(f"  opened {app['label']}") if opened else warn(f"  could not open {app['label']} for you: open it yourself, on this folder: {ROOT}"))
+    say(ok("  the instruction is on your clipboard") if copied else warn("  no clipboard program found: copy the instruction below yourself"))
+    say(f"\n  Instruction for the agent:  {instruction}\n")
+    if app.get("steps"):
+        say(textwrap.fill(app["steps"], width=96, initial_indent="  ", subsequent_indent="  "))
+    say(dim("  The agent may edit code, tests and dependencies. It may not edit the spec or the gate files: this tool checks that afterwards."))
+    try:
+        input(c("\nPress Enter when the agent has finished (Ctrl-C to stop): ", "1"))
+    except (EOFError, KeyboardInterrupt):
+        say("")
+        say(warn("Stopped. Nothing was verified; run the same command again when the agent is done."))
+        sys.exit(EXIT_HUMAN)
+    return 0
+
+
 def agent_presets(cfg: dict) -> list:
     return list(cfg["agent"].get("presets", []))
 
@@ -1161,20 +1345,35 @@ def resolve_agent(cfg: dict, args: argparse.Namespace) -> str:
     return current_agent(cfg, args)[0]
 
 
-def agent_problem(command: str) -> str | None:
+def agent_problem(command: str, cfg: dict | None = None) -> str | None:
     """Why this agent command cannot run (its program is not installed), or None."""
+    if command.startswith(HANDOFF):  # a desktop app: not finding it is only a note, the person can open it themselves
+        cfg = cfg or load_config()
+        if desktop_app(cfg, command[len(HANDOFF):]) is None:
+            return f"`{command[len(HANDOFF):]}` is not a desktop app this project knows (known: {', '.join(a['id'] for a in desktop_apps(cfg))})"
+        return None
     try:
         program = command_program(command)
     except (ValueError, IndexError):
         return "the agent command is empty or malformed"
-    if shutil.which(program) is None:
+    if find_program(program) is None:
+        if program == CLAUDE_DESKTOP:
+            return "the Claude desktop app's Claude Code was not found (install the Claude desktop app and open it once)"
         return f"`{program}` is not installed or not on PATH"
     return None
 
 
 def agent_table(cfg: dict) -> list:
-    """Every agent this project knows, with where its program was found (None = not installed on this machine)."""
-    return [{**preset, "path": shutil.which(preset["program"]) if preset.get("program") else None} for preset in agent_presets(cfg)]
+    """Every agent this project knows, with where its program (or its desktop app) was found (None = not found on this machine)."""
+    rows = []
+    for preset in agent_presets(cfg):
+        if preset["command"].startswith(HANDOFF):
+            app = desktop_app(cfg, preset["command"][len(HANDOFF):])
+            path = desktop_app_path(app) if app else None
+        else:
+            path = find_program(preset["program"]) if preset.get("program") else None
+        rows.append({**preset, "path": path})
+    return rows
 
 
 def agent_name(cfg: dict, command: str) -> str:
@@ -1190,12 +1389,20 @@ def agent_name(cfg: dict, command: str) -> str:
 def print_agent_options(cfg: dict, command: str, source: str = "") -> None:
     """Show every agent whether or not it is installed: what to pick now, and how to get the others."""
     say(c("\nAI agents (what drafts specs and writes code for you):", "1"))
+    apps_header = False
     for number, row in enumerate(agent_table(cfg), 1):
+        is_app = row["command"].startswith(HANDOFF)
+        if is_app and not apps_header:
+            say(dim("\n  Desktop apps you drive (the tool opens the app and copies the instruction; you press Enter when the agent is done):"))
+            apps_header = True
         mark = "*" if command and row["command"] == command else " "
-        state = (ok("installed    ") + dim(f" {row['path']}")) if row["path"] else warn("not installed")
-        say(f"  {mark}{number}  {row['id']:8} {row['label']:34} {state}")
+        if is_app:
+            state = (ok("found        ") + dim(f" {row['path']}")) if row["path"] else warn("not found here")
+        else:
+            state = (ok("installed    ") + dim(f" {row['path']}")) if row["path"] else warn("not installed")
+        say(f"  {mark}{number:<2} {row['id']:15} {row['label']:34} {state}")
         if not row["path"] and row.get("install"):
-            say(dim(f"              install: {row['install']}"))
+            say(dim(f"                  install: {row['install']}"))
     say("   c  custom   any command that reads the prompt on stdin (or names the prompt file with {prompt_file})")
     say("   n  none     a human does the coding; the tool prints the prompt and waits")
     say(f"\nUsing now: {agent_name(cfg, command)}   ({source})")
@@ -1219,7 +1426,12 @@ def save_agent_choice(cfg: dict, name: str, custom: str = "") -> str | None:
     AGENT_LOCAL.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     say(ok(f"Saved: this project will use {name} on this machine ({rel(AGENT_LOCAL)}; not committed)."))
     if command:
-        problem = agent_problem(command)
+        problem = agent_problem(command, cfg)
+        if command.startswith(HANDOFF):
+            app = desktop_app(cfg, command[len(HANDOFF):])
+            say(dim("  The tool will open the app and wait: you press Enter when its agent is done (this needs a terminal)."))
+            if app and not desktop_app_path(app):
+                problem = f"{app['label']} was not found on this machine"
         if problem:
             install = next((p["install"] for p in agent_presets(cfg) if p["id"] == name and p.get("install")), "")
             say(warn(f"  {problem}.") + (f" Install it with: {install}" if install else ""))
@@ -1255,7 +1467,9 @@ def require_agent(cfg: dict, args: argparse.Namespace, task: str) -> tuple:
     """(command, problem) of the agent that will do `task`. When there is none, or it is not installed, show the options
     (and ask, in a terminal) instead of only failing. (None, None) means nothing can run: the options were shown."""
     agent, source = current_agent(cfg, args)
-    problem = agent_problem(agent) if agent else None
+    problem = agent_problem(agent, cfg) if agent else None
+    if agent and not problem and agent.startswith(HANDOFF) and not args.dry_run and not interactive_terminal():
+        problem = "a desktop app you drive needs a terminal to wait in, and this is not one"
     if agent and not problem:
         return agent, None
     if args.dry_run and agent:
@@ -1264,7 +1478,7 @@ def require_agent(cfg: dict, args: argparse.Namespace, task: str) -> tuple:
     print_agent_options(cfg, agent, source)
     if interactive_terminal() and not args.dry_run:
         chosen = choose_agent_interactive(cfg)
-        if chosen and not agent_problem(chosen):
+        if chosen and not agent_problem(chosen, cfg):
             return chosen, None
         if chosen is not None:  # a pick that cannot run yet: the choice was saved and how to fix it was already said
             say("\nWith no usable agent nothing can " + task + ". Install it (or pick another with ./scripts/sdlc agent), then run this again."
@@ -1667,6 +1881,7 @@ def cmd_spec(cfg: dict, args: argparse.Namespace) -> int:
         prompt_file.write_text(prompt, encoding="utf-8")
         say(ok("\nDry run: nothing was executed or created."))
         say(f"  agent command : {agent}" + (f"   (WARNING: {problem})" if problem else ""))
+        handoff_note(cfg, agent)
         say(f"  would create  : {rel(planned)}/  (prd.md, acceptance.json, and a copy of the source in source/)")
         say(f"  prompt        : {rel(prompt_file)}  ({len(prompt.splitlines())} lines, includes the document text)")
         return EXIT_OK
@@ -1823,6 +2038,7 @@ def cmd_implement(cfg: dict, args: argparse.Namespace) -> int:
         prompt_file.write_text(prompt, encoding="utf-8")
         say(ok("\nDry run: nothing was executed."))
         say(f"  agent command : {agent}" + (f"   (WARNING: {problem})" if problem else ""))
+        handoff_note(cfg, agent)
         say(f"  prompt        : {rel(prompt_file)}  ({len(prompt.splitlines())} lines, includes prd.md and acceptance.json)")
         return EXIT_OK
 
@@ -1979,14 +2195,18 @@ def cmd_doctor(cfg: dict, args: argparse.Namespace) -> int:
     if not agent:
         say(f"  {warn('note')}  {'agent':12} none configured: `spec` and `implement` will ask you to choose one (./scripts/sdlc agent)")
     else:
-        problem = agent_problem(agent)
+        problem = agent_problem(agent, cfg)
         say(f"  {warn('note') if problem else ok('ok  ')}  {'agent':12} {agent_name(cfg, agent)}" + (f"   ({problem})" if problem else f"   ({source})"))
-    here = [row["id"] for row in agent_table(cfg) if row["path"]]
+    rows = agent_table(cfg)
+    here = [row["id"] for row in rows if row["path"] and not row["command"].startswith(HANDOFF)]
+    apps = [row["id"] for row in rows if row["path"] and row["command"].startswith(HANDOFF)]
     if here:
         say(f"  {ok('ok  ')}  {'agents':12} installed here: {', '.join(here)}   (choose with ./scripts/sdlc agent)")
     else:
-        names = ", ".join(p["id"] for p in agent_presets(cfg))
+        names = ", ".join(row["id"] for row in rows if not row["command"].startswith(HANDOFF))
         say(f"  {warn('note')}  {'agents':12} none of {names} is installed: ./scripts/sdlc agent shows how to install one")
+    if apps:
+        say(f"  {ok('ok  ')}  {'desktop apps':12} you can drive: {', '.join(apps)}   (the tool opens one and waits for you; see ./scripts/sdlc agent)")
     say(f"  {ok('ok  ')}  {'pdf reader':12} {pdf_reader_name()}   (for `spec`; .docx, .md and .txt need nothing)")
     say("")
     say(ok("toolchain ready") if not bad_count else bad(f"{bad_count} required tool(s) missing"))

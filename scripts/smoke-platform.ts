@@ -92,6 +92,9 @@ async function main() {
     const listed = ["claude", "codex", "gemini", "copilot", "cursor"].filter((id) => new RegExp(`\\b${id}\\b`).test(agents));
     if (listed.length === 5 && /Using now: claude/.test(agents)) pass("agent --list shows all five agents and the current one");
     else fail(`agent --list did not show every agent (saw: ${listed.join(", ") || "none"})`);
+    if (/claude-desktop\b/.test(agents) && /Desktop apps you drive/.test(agents) && /handoff-cursor\b/.test(agents)) pass("agent --list also offers the Claude desktop app's engine and the desktop apps you drive");
+    else fail("agent --list does not show the desktop options");
+    expectExit(dir, "agent handoff-cursor (a desktop app you drive can be chosen, nothing is opened)", ["agent", "handoff-cursor"]);
     expectExit(dir, "agent gemini (remember a choice)", ["agent", "gemini"]);
     const chosen = join(dir, ".ai", "agent.local.json");
     if (existsSync(chosen) && /gemini/.test(readFileSync(chosen, "utf8"))) pass("the choice is remembered in .ai/agent.local.json");
