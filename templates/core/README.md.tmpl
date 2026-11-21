@@ -65,7 +65,7 @@ Details: [`AGENTS.md`](AGENTS.md) and [`.ai/README.md`](.ai/README.md).
 **From a requirements document** (PDF, DOCX, Markdown or text):
 
 ```bash
-./scripts/sdlc spec requirements.pdf   # an agent drafts .ai/specs/FEAT-001-requirements/{prd.md,acceptance.json}; the tool validates them
+./scripts/sdlc spec requirements.pdf   # an agent drafts .ai/specs/FEAT-001-<feature>/{prd.md,acceptance.json}, named after the feature, not the file; the tool validates them
 # you REVIEW the draft (skill: .ai/skills/review-spec): it is the contract, and the agent only drafted it
 ./scripts/sdlc implement FEAT-001      # then the agent writes tests, code, dependencies and config; the loop proves it
 ```

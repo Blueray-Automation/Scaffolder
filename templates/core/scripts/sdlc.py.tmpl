@@ -1836,6 +1836,61 @@ def create_spec_dir(cfg: dict, slug: str, title: str) -> Path:
     return dest
 
 
+# Words that describe the document, not the feature: "Customer Login Requirements" is the feature "customer-login".
+# Only stripped at the end of a title ("Document Upload" keeps its first word) or after a leading "Requirements for".
+DOCUMENT_WORDS = {"requirement", "requirements", "specification", "specifications", "spec", "specs", "prd", "document", "doc", "brief", "draft"}
+MAX_NAME_WORDS = 5
+
+
+def feature_slug_from_prd(prd_text: str) -> str | None:
+    """The folder name a PRD's own title asks for: `# FEAT-001: Customer Login` -> `customer-login`; None if the title says nothing."""
+    first = next((ln for ln in prd_text.splitlines() if ln.strip()), "")
+    m = re.match(r"#\s*FEAT-\d+\s*[:\-\u2013\u2014]\s*(.+)$", first.strip())
+    if not m or "TODO(prd)" in m.group(1):
+        return None
+    words = [w for w in slugify(m.group(1)).split("-") if w]
+    if len(words) > 2 and words[0] in DOCUMENT_WORDS and words[1] in ("for", "of"):
+        words = words[2:]
+    while words and words[-1] in DOCUMENT_WORDS:
+        words.pop()
+    return "-".join(words[:MAX_NAME_WORDS]) or None
+
+
+def spec_dirs_made_from(specs_dir: Path, src: Path) -> list[Path]:
+    """Specs already drafted from this very document (its copy is in source/), whatever their folder is called now."""
+    found = []
+    for p in sorted(specs_dir.glob("FEAT-*")):
+        copy = p / "source" / src.name
+        try:
+            if copy.is_file() and copy.read_bytes() == src.read_bytes():
+                found.append(p)
+        except OSError:
+            continue
+    return found
+
+
+def name_spec_after_feature(specs_dir: Path, spec_dir: Path) -> Path:
+    """Rename `FEAT-001-requirements` (the file's name) to `FEAT-001-customer-login` (the feature's name) once the PRD has a real title."""
+    parts = spec_dir.name.split("-", 2)
+    slug = feature_slug_from_prd((spec_dir / "prd.md").read_text(encoding="utf-8"))
+    if len(parts) < 3 or not slug or slug == parts[2]:
+        return spec_dir
+    target = specs_dir / f"{parts[0]}-{parts[1]}-{slug}"
+    if any(p.name.split("-", 2)[2:] == [slug] for p in specs_dir.glob("FEAT-*") if p != spec_dir):
+        say(warn(f"  kept the folder name {spec_dir.name}: another spec is already called '{slug}' (rename the folder yourself if you want another name)"))
+        return spec_dir
+    old_rel = rel(spec_dir)
+    spec_dir.rename(target)
+    for name in ("prd.md", "acceptance.json"):  # the draft may cite its own folder, for example the copy of the source
+        f = target / name
+        if f.exists():
+            text = f.read_text(encoding="utf-8")
+            if old_rel in text:
+                f.write_text(text.replace(old_rel, rel(target)), encoding="utf-8")
+    say(f"  named the spec after the feature: {rel(target)}/  (was {spec_dir.name}; pass --name to choose another)")
+    return target
+
+
 def cmd_spec(cfg: dict, args: argparse.Namespace) -> int:
     """Requirements document in, reviewed-by-you spec out: the agent drafts, the tool validates and sends errors back."""
     src = Path(args.source).expanduser().resolve()
@@ -1854,6 +1909,8 @@ def cmd_spec(cfg: dict, args: argparse.Namespace) -> int:
     specs_dir = ROOT / cfg["facts"]["specsDir"]
     slug = slugify(args.name or src.stem)
     existing = [p for p in sorted(specs_dir.glob("FEAT-*")) if p.name.split("-", 2)[2] == slug]
+    if not existing and not args.name:
+        existing = spec_dirs_made_from(specs_dir, src)  # a spec named after its feature is still found by its source document
     spec_dir = existing[0] if existing else None
     if spec_dir is not None:
         prd = spec_dir / "prd.md"
@@ -1898,7 +1955,11 @@ def cmd_spec(cfg: dict, args: argparse.Namespace) -> int:
         say(ok("\nDry run: nothing was executed or created."))
         say(f"  agent command : {agent}" + (f"   (WARNING: {problem})" if problem else ""))
         handoff_note(cfg, agent)
-        say(f"  would create  : {rel(planned)}/  (prd.md, acceptance.json, and a copy of the source in source/)")
+        named_later = spec_dir is None and not args.name
+        folder = f"{rel(specs_dir)}/{values['feature']}-<feature name>" if named_later else rel(planned)
+        say(f"  would create  : {folder}/  (prd.md, acceptance.json, and a copy of the source in source/)")
+        if named_later:
+            say(f"                  the folder is named after the feature in the PRD's title once the draft is valid; pass --name <slug> to choose it now")
         say(f"  prompt        : {rel(prompt_file)}  ({len(prompt.splitlines())} lines, includes the document text)")
         return EXIT_OK
 
@@ -1951,6 +2012,8 @@ def cmd_spec(cfg: dict, args: argparse.Namespace) -> int:
             "attempt": attempt + 1, "maxAttempts": args.max_attempts, "errors": "\n".join(f"- {e}" for e in errors),
         })
 
+    if not args.name:
+        spec_dir = name_spec_after_feature(specs_dir, spec_dir)
     prd_text = (spec_dir / "prd.md").read_text(encoding="utf-8")
     assumptions = len(re.findall(r"ASSUMPTION", prd_text))
     say(ok(f"\nDraft ready: {rel(spec_dir)}/"))
@@ -2524,7 +2587,7 @@ def build_parser() -> argparse.ArgumentParser:
     common(im)
     sp = sub.add_parser("spec")
     sp.add_argument("source", help="requirements document: .pdf, .docx, .md or .txt")
-    sp.add_argument("--name", help="feature slug (default: the file name)")
+    sp.add_argument("--name", help="feature slug for the spec folder, such as user-login (default: the feature named in the PRD's title, not the file name)")
     sp.add_argument("--focus", help="cover only this part of the document, e.g. 'the login flow (section 3)'")
     sp.add_argument("--agent", help="agent command (reads the prompt on stdin) or an agent's name (see `sdlc agent`); overrides your choice")
     sp.add_argument("--allow-dirty", action="store_true", help="proceed with uncommitted changes")

@@ -18,6 +18,7 @@ You are preparing a specification. A human reviews it first; a developer agent t
 Follow `.ai/rules/prd.md` and the playbook `.ai/skills/write-prd/SKILL.md`. `.ai/specs/FEAT-000-hello-world/` is a worked example of the exact format.
 
 - First lines: `# {{feature}}: <short title>`, then `Status: Draft (generated from {{sourceName}}; a human must review it before implementation)`.
+  The title names the **feature**, in two to four words (`Customer Login`, `Password Reset`), not the document (`Requirements`): the spec folder is named after it.
 - **Objective**, then **User stories & acceptance criteria**, then Permissions & roles, Data & validation, Contract impact, Out of scope, Verification map.
 - Every acceptance criterion is one line: `- **AC-001** Given ..., when ..., then ... (Source: <page or section of the document>)`.
   - One observable behaviour per criterion. Observable from outside: HTTP status and body, page content, a command's result, a file.

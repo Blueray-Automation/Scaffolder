@@ -111,7 +111,8 @@ You have a requirements document: a PDF, a Word file, Markdown or plain text.
 ```text
 Dry run: nothing was executed or created.
   agent command : claude -p --permission-mode acceptEdits --allowedTools "Read" ...
-  would create  : .ai/specs/FEAT-001-requirements/  (prd.md, acceptance.json, and a copy of the source in source/)
+  would create  : .ai/specs/FEAT-001-<feature name>/  (prd.md, acceptance.json, and a copy of the source in source/)
+                  the folder is named after the feature in the PRD's title once the draft is valid; pass --name <slug> to choose it now
   prompt        : .ai/evidence/<run>/spec.prompt.md  (… lines, includes the document text)
 ```
 
@@ -129,10 +130,15 @@ What happens:
 3. **Drafting.** The agent writes `prd.md` and `acceptance.json`, nothing else. If it writes any other file, the run stops (exit 4). If the document gives it nothing to work with, it writes questions instead of inventing a spec (exit 2).
 4. **Validation.** The tool checks the draft is well-formed: every criterion has a check, every check cites a real criterion, check types are valid, `http` targets exist, no placeholders are left.
    Problems are sent back to the agent to fix, up to 3 attempts.
-5. **A copy of your document** is saved in `.ai/specs/FEAT-001-requirements/source/`, so the spec stays traceable to the version it came from.
+5. **Naming.** The folder is named after the *feature* the agent wrote in the PRD's title (`.ai/specs/FEAT-001-customer-login/`), not after the file (`requirements`).
+   Pass `--name login` to choose the name yourself.
+6. **A copy of your document** is saved in `.ai/specs/FEAT-001-customer-login/source/`, so the spec stays traceable to the version it came from.
+   Running `spec` again on the same document finds this spec, and never overwrites it once the PRD is finished.
 
 ```text
-Draft ready: .ai/specs/FEAT-001-requirements/
+  named the spec after the feature: .ai/specs/FEAT-001-customer-login/  (was FEAT-001-requirements; pass --name to choose another)
+
+Draft ready: .ai/specs/FEAT-001-customer-login/
   6 acceptance criteria, 8 checks, 2 assumption(s) for you to confirm
 This is a DRAFT written by an AI. Read it before anyone implements it (skill: .ai/skills/review-spec):
 ```
