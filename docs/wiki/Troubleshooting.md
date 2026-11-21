@@ -161,6 +161,10 @@ The agent's program isn't installed. The tool then lists every agent it knows (c
 Pick one that is installed with `./scripts/sdlc agent` (or `./scripts/sdlc agent codex`), or install the missing one (links in the [tutorial](Tutorial-Add-a-Login-API#before-you-start-once)).
 For one run add `--agent <name>`. `./scripts/sdlc doctor` shows which agent is used and which are installed.
 
+### `agent said: API Error: 404 ... not_found_error ... model: claude-...` / `The agent could not use its AI model`
+The agent asked for an AI model that no longer exists, so it did nothing and the tool stopped. This almost always means the agent's CLI is **out of date**: an old install keeps asking for the model that was its default back then. The message prints which program ran and its version.
+Update it (`npm install -g @anthropic-ai/claude-code@latest`, or `claude update`). If you have several installs, the first on `PATH` is the one that runs: `which -a claude` (Windows: `where claude`) lists them, so remove or update the stale one. Then run the same command again.
+
 ### `No agent is configured, so nothing can write the code`
 You (or the project) chose `none`, or the command is empty. Run `./scripts/sdlc agent` to see the options and choose one, or add `--agent <name>` for one run.
 

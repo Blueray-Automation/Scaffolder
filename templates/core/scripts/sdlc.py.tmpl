@@ -968,16 +968,56 @@ def agent_output_tail(log: Path, lines: int = 4) -> list:
     return [ln if len(ln) <= 200 else ln[:197] + "..." for ln in kept[-lines:]]
 
 
-def agent_signed_out(run_dir: Path, tag: str, code: int) -> bool:
-    """The agent failed because it is not signed in (so it did nothing, and trying again or validating is pointless)."""
-    return code != 0 and bool(SIGNED_OUT.search("\n".join(agent_output_tail(run_dir / f"{tag}.agent.log", 8))))
+# The API answers 404 not_found_error when the model an agent asks for no longer exists. Agent CLIs pick their own
+# default model, so an old install keeps asking for a retired one.
+MODEL_UNAVAILABLE = re.compile(
+    r"not_found_error|invalid model|unknown model"
+    r"|model\b[^\n]{0,80}\b(not found|does not exist|not available|not supported|retired|deprecated|no longer)", re.I)
 
 
-def explain_signed_out(agent: str) -> None:
+def agent_blocker(run_dir: Path, tag: str, code: int) -> str:
+    """Why an agent that failed cannot have done any work, so trying again or validating is pointless:
+    "signed_out", "model" (the model it asked for is gone), or "" for any other failure."""
+    if code == 0:
+        return ""
+    said = "\n".join(agent_output_tail(run_dir / f"{tag}.agent.log", 8))
+    if SIGNED_OUT.search(said):
+        return "signed_out"
+    return "model" if MODEL_UNAVAILABLE.search(said) else ""
+
+
+def agent_install(program: str) -> str:
+    """Where `program` is on PATH and its version, e.g. "/usr/local/bin/claude (1.0.51 (Claude Code))"; "" if unknown."""
+    exe = shutil.which(program)
+    if not exe:
+        return ""
+    try:
+        done = subprocess.run([exe, "--version"], capture_output=True, encoding="utf-8", errors="replace", timeout=10)
+        version = next(iter((done.stdout or done.stderr).strip().splitlines()), "")
+    except (OSError, subprocess.SubprocessError):
+        version = ""
+    return f"{exe} ({version})" if version else exe
+
+
+def explain_blocker(agent: str, kind: str) -> None:
     try:
         program = command_program(agent)
     except (ValueError, IndexError):
         program = "the agent"
+    if kind == "model":
+        say(bad("\nThe agent could not use its AI model, so it did nothing: no file was drafted or changed."))
+        say("The model it asked for is not available (see 'agent said' above). That almost always means the agent is out of date:")
+        say("an old version keeps asking for a model that has since been retired.")
+        found = agent_install(program) if program != "the agent" else ""
+        if found:
+            say(f"The one that ran: {found}")
+        if program == "claude":
+            say("Update it: npm install -g @anthropic-ai/claude-code@latest   (or: claude update)")
+            say("Several installs can exist side by side and the first on PATH wins: `which -a claude` (Windows: `where claude`) lists them.")
+        else:
+            say(f"Update `{program}`, or name a model it still serves in its command: ./scripts/sdlc agent")
+        say("Or use another agent: ./scripts/sdlc agent")
+        return
     say(bad("\nThe agent is not signed in, so it did nothing: no file was drafted or changed."))
     say(f"Run `{program}` once in a terminal and sign in" + (" (type /login)" if program == "claude" else " (or set its API key)") + ", then run this again.")
     say("Or use another agent: ./scripts/sdlc agent")
@@ -1646,8 +1686,9 @@ def cmd_spec(cfg: dict, args: argparse.Namespace) -> int:
     for attempt in range(1, args.max_attempts + 1):
         say(c(f"\n== agent: drafting the spec (attempt {attempt}/{args.max_attempts}) ==", "1"))
         code = run_agent(cfg, agent, prompt, f"spec-{attempt}", run.dir)
-        if agent_signed_out(run.dir, f"spec-{attempt}", code):
-            explain_signed_out(agent)
+        blocker = agent_blocker(run.dir, f"spec-{attempt}", code)
+        if blocker:
+            explain_blocker(agent, blocker)
             return EXIT_HUMAN
         if code != 0:
             say(warn(f"  the agent exited with {code}; validation below decides whether the draft is usable"))
@@ -1790,8 +1831,9 @@ def cmd_implement(cfg: dict, args: argparse.Namespace) -> int:
     before = snapshot(integ["protected"] + integ["protectedWhileHealing"])
     head = git("rev-parse", "HEAD")
     code = run_agent(cfg, agent, prompt, f"implement-{fid}", run.dir)
-    if agent_signed_out(run.dir, f"implement-{fid}", code):
-        explain_signed_out(agent)
+    blocker = agent_blocker(run.dir, f"implement-{fid}", code)
+    if blocker:
+        explain_blocker(agent, blocker)
         return EXIT_HUMAN
     if code != 0:
         say(warn(f"  the agent exited with {code}; verification below decides whether the work is complete"))
@@ -1871,8 +1913,9 @@ def cmd_loop(cfg: dict, args: argparse.Namespace) -> int:
                 return EXIT_HUMAN
         else:
             code = run_agent(cfg, agent, prompt, f"heal-{i}", run.dir)
-            if agent_signed_out(run.dir, f"heal-{i}", code):
-                explain_signed_out(agent)
+            blocker = agent_blocker(run.dir, f"heal-{i}", code)
+            if blocker:
+                explain_blocker(agent, blocker)
                 return EXIT_HUMAN
             ensure_installed(cfg, run)  # dependencies the agent added while healing
         now = snapshot(integ["protected"] + integ["protectedWhileHealing"])
