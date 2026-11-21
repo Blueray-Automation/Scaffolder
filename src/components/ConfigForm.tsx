@@ -109,7 +109,6 @@ export function ConfigForm({ config, onChange, issues }: Props) {
 
         <div className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
           <Toggle checked={config.web.enabled} onChange={(v) => set(["web", "enabled"], v)} label="Web app" />
-          {err("web.enabled") && <p className="text-xs text-red-400">{err("web.enabled")}</p>}
           {config.web.enabled && (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <Field label="Framework" error={err("web.framework")}>
@@ -127,7 +126,7 @@ export function ConfigForm({ config, onChange, issues }: Props) {
 
         <div className="flex items-center justify-between rounded-lg border border-dashed border-zinc-800 p-3">
           <span className="flex items-center gap-2 text-sm text-zinc-400">
-            <Smartphone className="h-4 w-4" aria-hidden /> Mobile (Flutter, React Native)
+            <Smartphone className="h-4 w-4" aria-hidden /> Mobile ({CAPABILITIES.mobile.frameworks.map((f) => f.label).join(", ")})
           </span>
           <Badge tone="info">coming soon</Badge>
         </div>

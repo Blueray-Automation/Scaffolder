@@ -4,14 +4,26 @@
 ```
 src/app/            routes (server components by default), layout, globals.css
 src/components/     presentational components: props in, JSX out, no data fetching
+<%#hasBackend%>
 src/lib/            typed API client (mirrors .ai/contract/openapi.json), helpers
+<%/hasBackend%>
+<%^hasBackend%>
+src/lib/            data access and helpers: plain functions a server component calls
+<%/hasBackend%>
 src/__tests__/      Vitest + Testing Library specs
 ```
 
 ## Conventions
 - TypeScript `strict` (+ `noUncheckedIndexedAccess`). No `any`; narrow `unknown` with type guards at the boundary.
+<%#hasBackend%>
 - All backend access goes through `src/lib/api.ts`. Never call `fetch` from a component. Responses are validated against the contract shape before use.
 - `API_URL` is a RUNTIME variable (server-side). Never bake environment-specific URLs into the build: one image runs in every environment.
+<%/hasBackend%>
+<%^hasBackend%>
+- This app has no separate backend. Server-side work lives in server components and route handlers (`src/app/api/<name>/route.ts`), and calls plain functions from `src/lib/`. Never call `fetch` from a component.
+- Treat everything that comes in (query strings, request bodies, cookies) as `unknown` and validate it at the boundary before use.
+- Configuration is read from environment variables at request time, never baked into the build: one image runs in every environment.
+<%/hasBackend%>
 - Every data-driven view models all its states explicitly: loading, empty, error, success. Errors are shown with `role="alert"`, never swallowed.
 - Prefer server components for data; add `"use client"` only for interactivity, and keep it as low in the tree as possible.
 - Accessibility: semantic elements, labelled controls, visible focus, sufficient contrast. Don't convey state by colour alone.
@@ -19,8 +31,14 @@ src/__tests__/      Vitest + Testing Library specs
 
 ## Tests (Vitest, coverage floor <%coverageWeb%>%)
 - Test behaviour through the rendered output (`getByRole`, `getByText`), not implementation details.
+<%#hasBackend%>
 - Server components are async functions: `render(await Page())`, with `fetchHello` mocked at the module boundary.
 - Cover each state of each component and each error path of `src/lib/api.ts`.
 
 ## Contract
 When the backend contract changes, update `src/lib/api.ts` types and tests in the same PR.
+<%/hasBackend%>
+<%^hasBackend%>
+- Server components are async functions: `render(await HomePage({ searchParams: Promise.resolve({}) }))`.
+- Test pure logic in `src/lib/` directly, without rendering. Cover each state of each component and each rejected input.
+<%/hasBackend%>

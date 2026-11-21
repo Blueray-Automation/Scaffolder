@@ -70,12 +70,11 @@ export function buildCompose(cfg: ScaffolderConfig): string {
     services.web = {
       image: "${WEB_IMAGE:-" + v.slug + "-web:local}",
       build: { context: `./${v.webDir}` },
-      environment: {
-        // Resolved at request time (not build time): one image runs in every environment.
-        API_URL: "${API_URL:-http://backend:8000}",
-      },
+      // Only a web app that talks to a backend has anything to configure.
+      // API_URL is resolved at request time (not build time): one image runs in every environment.
+      ...(cfg.backend.enabled ? { environment: { API_URL: "${API_URL:-http://backend:8000}" } } : {}),
       ports: ["${WEB_PORT:-" + v.webPort + "}:3000"],
-      depends_on: { backend: { condition: "service_healthy" } },
+      ...(cfg.backend.enabled ? { depends_on: { backend: { condition: "service_healthy" } } } : {}),
       healthcheck: {
         test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"],
         interval: "5s",
@@ -103,7 +102,8 @@ export function buildEnvExample(cfg: ScaffolderConfig): string {
     lines.push(`BACKEND_PORT=${v.backendPort}`, `CORS_ORIGINS=http://localhost:${v.webPort}`);
   }
   if (cfg.web.enabled) {
-    lines.push(`WEB_PORT=${v.webPort}`, `API_URL=http://backend:8000`);
+    lines.push(`WEB_PORT=${v.webPort}`);
+    if (cfg.backend.enabled) lines.push(`API_URL=http://backend:8000`);
   }
   if (v.hasDb) {
     lines.push(

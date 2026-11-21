@@ -7,7 +7,9 @@
   skills/          step-by-step playbooks an agent loads when it does that kind of work
   prompts/         templates the loop fills in and sends to the agent (prd, implement, heal)
   specs/           one folder per feature: prd.md + acceptance.json   (_template/ and FEAT-000 as examples)
+<%#hasBackend%>
   contract/        committed API contract snapshot (openapi.json)
+<%/hasBackend%>
   evidence/        run output: logs, results.json, report.md  (gitignored; CI uploads it)
 ```
 
@@ -35,7 +37,7 @@ verify -> green? -> done (exit 0)
          verify again
 ```
 
-Integrity (`sdlc.json` -> `integrity`): `protected` files can never change during the loop, `protectedWhileHealing` (the specs) cannot change while healing, `guarded` files (the contract) may change but the change is reported for review.
+Integrity (`sdlc.json` -> `integrity`): `protected` files can never change during the loop, `protectedWhileHealing` (the specs) cannot change while healing<%#hasBackend%>, `guarded` files (the contract) may change but the change is reported for review<%/hasBackend%>.
 
 ## Configure
 

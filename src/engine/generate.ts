@@ -37,12 +37,25 @@ interface Pack {
 
 const root = () => "";
 
+/** Files that only make sense next to a backend API (paths inside the pack, without .tmpl). */
+const CONTRACT_FILES = [".ai/rules/contract.md", ".ai/skills/define-contract/SKILL.md"];
+const API_CLIENT_FILES = ["src/lib/api.ts", "src/__tests__/api.test.ts"];
+/** The web app's own greeting logic, used instead of the API client when there is no backend. */
+const STANDALONE_WEB_FILES = ["src/lib/greeting.ts", "src/__tests__/greeting.test.ts"];
+
 /**
  * Stack packs. A new language/framework is a new entry here plus a template
  * folder; validation (capabilities.ts) decides when it becomes selectable.
  */
 const PACKS: Pack[] = [
-  { id: "core", dir: "core", enabled: () => true, mounts: [{ from: "", to: root }] },
+  {
+    id: "core",
+    dir: "core",
+    enabled: () => true,
+    mounts: [{ from: "", to: root }],
+    // Without a backend there is no API, so no contract to define or guard.
+    include: (rel, c) => c.backend.enabled || !CONTRACT_FILES.includes(rel),
+  },
   {
     id: "backend-python-fastapi",
     dir: "backend-python-fastapi",
@@ -69,7 +82,11 @@ const PACKS: Pack[] = [
     ],
     include: (rel, c) => {
       const base = rel.split("/").pop() ?? rel;
-      return !(!c.docker.enabled && (base === "Dockerfile" || base === ".dockerignore"));
+      if (!c.docker.enabled && (base === "Dockerfile" || base === ".dockerignore")) return false;
+      // With a backend the page shows what the API says (a typed client); on its own it has nothing to call.
+      if (c.backend.enabled && STANDALONE_WEB_FILES.includes(rel)) return false;
+      if (!c.backend.enabled && API_CLIENT_FILES.includes(rel)) return false;
+      return true;
     },
   },
   {

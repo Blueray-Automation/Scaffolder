@@ -9,6 +9,7 @@ A *fact check* turns one acceptance criterion into something the loop executes. 
 
 ## Check anatomy
 ```json
+<%#hasBackend%>
 {
   "id": "CHK-010",
   "name": "Unknown id returns 404 with a stable error body",
@@ -19,11 +20,30 @@ A *fact check* turns one acceptance criterion into something the loop executes. 
   "path": "/api/v1/items/does-not-exist",
   "expect": { "status": 404, "json": { "detail": "$type:string" } }
 }
+<%/hasBackend%>
+<%^hasBackend%>
+{
+  "id": "CHK-010",
+  "name": "The pricing page lists the Pro plan",
+  "covers": ["AC-012"],
+  "type": "http",
+  "target": "web",
+  "method": "GET",
+  "path": "/pricing",
+  "expect": { "status": 200, "bodyContains": ["Pro plan"] }
+}
+<%/hasBackend%>
 ```
 
 ## Types
+<%#hasBackend%>
 - **http**: `target` (`backend` | `web`), `method`, `path`, optional `headers`, `body` (JSON), `expect`: `status` (int or list), `json` (subset match), `bodyContains` (string or list), `headers`, `maxMs`.
 - **cmd**: `run`, `cwd`, `expectExit` (default 0), `stdoutContains`, optional `pathPrepend`. Use to tie a criterion to one specific test: `pytest -q tests/test_x.py::test_name`.
+<%/hasBackend%>
+<%^hasBackend%>
+- **http**: `target` (`web`), `method`, `path` (the query string is part of it: `/?name=Ada`), optional `headers`, `body` (JSON), `expect`: `status` (int or list), `json` (subset match), `bodyContains` (string or list), `headers`, `maxMs`.
+- **cmd**: `run`, `cwd`, `expectExit` (default 0), `stdoutContains`, optional `pathPrepend`. Use to tie a criterion to one specific test file: `npx vitest run src/__tests__/pricing.test.tsx` with `cwd` set to `<%webDir%>`.
+<%/hasBackend%>
 - **file**: `path`, `exists`, `contains` (list), `regex`.
 
 ## JSON matchers

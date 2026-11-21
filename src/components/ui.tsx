@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useId } from "react";
+import React, { useId, useRef, useState } from "react";
 import type { Option } from "@/engine";
 import { cx } from "@/lib/utils";
 
@@ -156,6 +156,108 @@ export function Toggle({
         {label}
         {hint && <span className="block text-[11px] text-zinc-500">{hint}</span>}
       </label>
+    </div>
+  );
+}
+
+export interface TabItem {
+  id: string;
+  label: string;
+  /** Shown as a tooltip. */
+  title?: string;
+  /** Not usable yet: it is still reachable with the arrow keys (so it can be read out) but cannot be chosen. */
+  unavailable?: boolean;
+}
+
+export const tabDomId = (prefix: string, id: string) => `${prefix}-tab-${id}`;
+
+/**
+ * A tab selector (WAI-ARIA tabs pattern): one tab stop, arrow keys / Home / End move between tabs,
+ * and Enter or Space chooses. Choosing is deliberately manual: the arrows only move focus, because
+ * choosing a tab here rewrites the form below and must not happen on a stray key press.
+ * `value` is the selected tab (or undefined when none applies). Render the matching `role="tabpanel"`
+ * with `id={panelId}` yourself.
+ */
+export function Tabs({
+  items,
+  value,
+  onSelect,
+  idPrefix,
+  panelId,
+  labelledBy,
+}: {
+  items: readonly TabItem[];
+  value: string | undefined;
+  onSelect: (id: string) => void;
+  idPrefix: string;
+  panelId: string;
+  labelledBy: string;
+}) {
+  const [focused, setFocused] = useState<string | null>(null);
+  const refs = useRef<Array<HTMLButtonElement | null>>([]);
+  const ids = items.map((i) => i.id);
+  const firstUsable = items.find((i) => !i.unavailable)?.id ?? items[0]?.id;
+  // The one tab in the Tab order: where focus is, else the selected tab, else the first usable one.
+  const tabStop = focused && ids.includes(focused) ? focused : value && ids.includes(value) ? value : firstUsable;
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const last = items.length - 1;
+    const next =
+      e.key === "ArrowRight" ? (index === last ? 0 : index + 1)
+      : e.key === "ArrowLeft" ? (index === 0 ? last : index - 1)
+      : e.key === "Home" ? 0
+      : e.key === "End" ? last
+      : -1;
+    if (next < 0) return;
+    e.preventDefault();
+    refs.current[next]?.focus();
+  };
+
+  return (
+    <div
+      role="tablist"
+      aria-labelledby={labelledBy}
+      className="flex flex-wrap gap-1.5"
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) setFocused(null);
+      }}
+    >
+      {items.map((item, index) => {
+        const selected = item.id === value;
+        return (
+          <button
+            key={item.id}
+            ref={(el) => {
+              refs.current[index] = el;
+            }}
+            role="tab"
+            type="button"
+            id={tabDomId(idPrefix, item.id)}
+            aria-selected={selected}
+            aria-controls={panelId}
+            aria-disabled={item.unavailable || undefined}
+            tabIndex={item.id === tabStop ? 0 : -1}
+            title={item.title}
+            onFocus={() => setFocused(item.id)}
+            onKeyDown={(e) => onKeyDown(e, index)}
+            onClick={() => {
+              if (!item.unavailable) onSelect(item.id);
+            }}
+            className={cx(
+              "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60",
+              selected
+                ? "border-indigo-500/60 bg-indigo-600/20 text-zinc-100"
+                : item.unavailable
+                  ? "cursor-not-allowed border-dashed border-zinc-800 text-zinc-500"
+                  : "border-zinc-800 bg-zinc-950/60 text-zinc-300 hover:border-zinc-600 hover:text-zinc-100",
+            )}
+          >
+            {item.label}
+            {item.unavailable && <span className="rounded-full bg-zinc-800 px-1.5 py-px text-[10px] font-normal text-zinc-400">soon</span>}
+          </button>
+        );
+      })}
     </div>
   );
 }

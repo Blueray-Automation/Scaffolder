@@ -11,7 +11,9 @@ The report is `.ai/evidence/latest/report.md`. If you cannot run something, say 
 | Phase | What you do | Where the procedure lives |
 |---|---|---|
 | PRD | Write acceptance criteria (`AC-xxx`) and the checks that prove them | `.ai/skills/write-prd/`, `.ai/rules/prd.md` |
+<%#hasBackend%>
 | Contract | Define the API before code | `.ai/skills/define-contract/`, `.ai/rules/contract.md` |
+<%/hasBackend%>
 | Code | Small vertical slices, test first | `.ai/skills/implement-feature/`, `.ai/rules/*` |
 | Test | Run the loop until green | `.ai/skills/verify-loop/`, `.ai/skills/fix-failing-gate/` |
 | Deploy | Tag, let CD promote, verify the live URL | `.ai/skills/release-and-deploy/` |
@@ -25,7 +27,7 @@ Worked example: `.ai/specs/FEAT-000-hello-world/`.
 ```bash
 ./scripts/sdlc setup      # install dependencies
 ./scripts/sdlc doctor     # check the toolchain
-./scripts/sdlc gates      # lint, types, unit tests, build, contract, security
+./scripts/sdlc gates      # lint, types, unit tests, build,<%#hasBackend%> contract,<%/hasBackend%> security
 ./scripts/sdlc facts      # PRD acceptance criteria vs the RUNNING system (<%runtimeMode%> runtime)
 ./scripts/sdlc verify     # gates + facts: exactly what CI runs
 ./scripts/sdlc loop       # verify -> heal -> verify (max <%maxIterations%> iterations)
@@ -45,7 +47,12 @@ On Windows (PowerShell or cmd) the launcher is `.\scripts\sdlc.cmd`; every comma
 
 ## Layout
 ```
+<%#hasBackend%>
 .ai/            rules/ skills/ prompts/ specs/ contract/   <- the AI operating system of this repo
+<%/hasBackend%>
+<%^hasBackend%>
+.ai/            rules/ skills/ prompts/ specs/             <- the AI operating system of this repo
+<%/hasBackend%>
 scripts/        sdlc, sdlc.py                              <- the verification loop (stdlib-only Python)
 <%#hasBackend%>
 <%backendDir%>/        FastAPI service (Python <%pythonVersion%>)
@@ -64,10 +71,17 @@ docker-compose.yml   full stack, also used by the facts stage
 ## Hard constraints
 1. Never edit the machinery that defines "correct": `.ai/sdlc.json`, `scripts/sdlc*`, `.github/workflows/`. While healing, also never edit `.ai/specs/`. The loop detects this and stops (exit 4).
 2. Never delete, skip or weaken a test or a threshold to get green. Fix the code.
+<%#hasBackend%>
 3. Never change `.ai/contract/openapi.json` to hide drift. It changes only when the PRD changes the API.
 4. No secrets in the repo (`./scripts/sdlc secrets` enforces it). Config comes from environment variables; see `.env.example`.
 5. One feature per branch/PR; reference the `FEAT-xxx` id. Conventional Commits (`feat:`, `fix:`, `chore:`).
 6. If the spec is ambiguous or seems wrong, stop and ask. Do not guess requirements.
+<%/hasBackend%>
+<%^hasBackend%>
+3. No secrets in the repo (`./scripts/sdlc secrets` enforces it). Config comes from environment variables; see `.env.example`.
+4. One feature per branch/PR; reference the `FEAT-xxx` id. Conventional Commits (`feat:`, `fix:`, `chore:`).
+5. If the spec is ambiguous or seems wrong, stop and ask. Do not guess requirements.
+<%/hasBackend%>
 
 ## When verification fails
 Read `.ai/skills/fix-failing-gate/SKILL.md`. In short: reproduce, find the root cause, smallest fix in code, re-run the gate, then the full `verify`.

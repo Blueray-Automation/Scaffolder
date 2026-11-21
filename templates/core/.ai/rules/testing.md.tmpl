@@ -6,7 +6,9 @@ Tests are evidence. A test that cannot fail proves nothing.
 | Layer | Proves | Where | Runs in |
 |---|---|---|---|
 | Unit | one behaviour, fast, no network/disk | `<%#hasBackend%><%backendDir%>/tests/<%/hasBackend%>`<%#hasWeb%>, `<%webDir%>/src/__tests__/`<%/hasWeb%> | `gates` |
+<%#hasBackend%>
 | Contract | the API shape did not drift | `backend.contract` gate | `gates` |
+<%/hasBackend%>
 | Facts | each PRD acceptance criterion holds on the RUNNING system | `.ai/specs/*/acceptance.json` | `facts` |
 
 ## Standards

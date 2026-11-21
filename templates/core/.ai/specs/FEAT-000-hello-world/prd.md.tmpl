@@ -2,6 +2,7 @@
 
 Status: Accepted. This is the worked example every new PRD follows. Copy its shape, not its content.
 
+<%#hasBackend%>
 ## 1. Objective
 Prove the whole pipeline end to end (code, tests, contract, running system, deploy) with the smallest possible feature: a service that greets, reports its own health, <%#hasDb%>checks its database, <%/hasDb%><%#hasWeb%>and a web page that displays the greeting from the API.<%/hasWeb%><%^hasWeb%>and a documented API.<%/hasWeb%>
 
@@ -33,3 +34,29 @@ Authentication, persistence of greetings, localization.
 
 ## 7. Verification map
 See `acceptance.json`. AC-001 to AC-004 are proven against the running service; AC-006 by a file check plus the contract gate<%#hasWeb%>; AC-007 by an HTTP check on the web app (which proves the web-to-backend wiring)<%/hasWeb%>.
+<%/hasBackend%>
+<%^hasBackend%>
+## 1. Objective
+Prove the whole pipeline end to end (code, tests, running system, deploy) with the smallest possible feature: a web page that greets the visitor, by name when the address gives one.
+
+## 2. User stories & acceptance criteria
+- **AC-001** Given the web app is running, when a user opens the web root `/`, then the page shows the greeting `Hello, World!`.
+- **AC-002** Given the web app is running, when a user opens `/?name=Ada`, then the page shows the greeting `Hello, Ada!`.
+- **AC-003** Given the web app is running, when a user opens `/` with a `name` longer than 50 characters, then the name is ignored and the page shows `Hello, World!`.
+
+## 3. Permissions & roles
+None: the page is public and read-only.
+
+## 4. Data & validation
+- `name`: optional query parameter. Surrounding spaces are removed; it is used only when it is then 1 to 50 characters long. Anything else (missing, blank, longer than 50) is ignored and the greeting is for `World`.
+- The greeting is always `Hello, <name>!`.
+
+## 5. Contract impact
+None. This project has no separate API: the Next.js app renders the page itself.
+
+## 6. Out of scope
+Authentication, persistence, localization, and any API or database.
+
+## 7. Verification map
+See `acceptance.json`. All three criteria are proven by HTTP checks against the running web app.
+<%/hasBackend%>

@@ -4,8 +4,10 @@
 - **Input**: validate at the boundary with typed schemas (length, range, format). Reject, don't sanitise and continue. Never build SQL/shell/HTML from input by string concatenation.
 - **Errors**: return stable error payloads; never leak stack traces, SQL, file paths or internal ids.
 - **AuthN/Z**: deny by default. Check permission on the server for every request; the client UI is not a control.
-- **Dependencies**: add only what you need, pinned by range in the manifest. `backend.audit` and `web.audit` report known vulnerabilities (warnings; treat high/critical as blockers).
+- **Dependencies**: add only what you need, pinned by range in the manifest. <%#hasBackend%>`backend.audit` and `web.audit` report<%/hasBackend%><%^hasBackend%>`web.audit` reports<%/hasBackend%> known vulnerabilities (warnings; treat high/critical as blockers).
 - **Containers**: run as a non-root user, minimal base images, no build tools in the final stage, health checks defined.
+<%#hasBackend%>
 - **CORS**: allow only configured origins (`CORS_ORIGINS`), never `*` with credentials.
+<%/hasBackend%>
 - **Logging**: structured, no personal data or tokens.
 - **Pipelines**: workflows use least-privilege `permissions`, pinned major versions of actions, and GitHub Environment secrets for deploys. Agents may not edit workflows.

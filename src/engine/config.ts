@@ -4,7 +4,7 @@ export const CONFIG_VERSION = 1;
 
 export type BackendLanguage = "python" | "node" | "java" | "go";
 export type WebFramework = "nextjs" | "react" | "vue" | "nuxt";
-export type MobileFramework = "flutter" | "react-native";
+export type MobileFramework = "flutter" | "react-native" | "android" | "ios";
 export type DatabaseType = "none" | "postgres" | "mysql" | "mongodb";
 export type CacheType = "none" | "redis";
 export type AuthType = "none" | "jwt" | "session" | "keycloak";
@@ -239,10 +239,6 @@ export function validateConfig(cfg: ScaffolderConfig): Issue[] {
   if (cfg.mobile.enabled) {
     err("mobile.enabled", "Mobile packs are not available yet. Disable mobile to generate.");
   }
-  if (cfg.web.enabled && !cfg.backend.enabled) {
-    err("web.enabled", "A web-only project is not supported yet: the web app needs the backend API.");
-  }
-
   if (cfg.backend.enabled) {
     const lang = findOption(CAPABILITIES.backend.languages, cfg.backend.language);
     if (!lang) {

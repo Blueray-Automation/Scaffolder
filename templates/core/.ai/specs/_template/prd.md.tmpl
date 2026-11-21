@@ -19,7 +19,12 @@ TODO(prd): who may do this? Who must be refused, and with which status code?
 TODO(prd): fields, types, lengths, nullability, units.
 
 ## 5. Contract impact
+<%#hasBackend%>
 TODO(prd): new/changed endpoints, status codes, error payloads, migrations.
+<%/hasBackend%>
+<%^hasBackend%>
+TODO(prd): new or changed routes, query parameters and response shapes. There is no separate API, so say "None" if nothing changes.
+<%/hasBackend%>
 
 ## 6. Out of scope
 TODO(prd): what this feature deliberately does not do.

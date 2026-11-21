@@ -1,3 +1,4 @@
+<%#hasBackend%>
 export type HelloCardProps =
   | { state: "success"; message: string }
   | { state: "error"; detail: string };
@@ -22,3 +23,20 @@ export function HelloCard(props: HelloCardProps) {
     </section>
   );
 }
+<%/hasBackend%>
+<%^hasBackend%>
+export interface HelloCardProps {
+  message: string;
+}
+
+/** Presentational: the text in, the markup out. */
+export function HelloCard({ message }: HelloCardProps) {
+  return (
+    <section className="card">
+      <p className="eyebrow"><%title%></p>
+      <h1>{message}</h1>
+      <p className="muted">Rendered by Next.js. Add ?name=Ada to the address to be greeted by name.</p>
+    </section>
+  );
+}
+<%/hasBackend%>

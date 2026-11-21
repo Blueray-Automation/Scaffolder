@@ -64,6 +64,8 @@ export const CAPABILITIES = {
     frameworks: [
       { id: "flutter", label: "Flutter", available: false },
       { id: "react-native", label: "React Native", available: false },
+      { id: "android", label: "Android (native)", available: false },
+      { id: "ios", label: "iOS (native)", available: false },
     ] as Option[],
   },
   database: [

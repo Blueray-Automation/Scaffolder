@@ -8,8 +8,13 @@ From a downloaded zip to a verified, running hello world, on macOS, Ubuntu or Wi
 ## 1. Get a project
 
 **Web UI:** run `npm install && npm run dev` in the Scaffolder repo, open <http://localhost:3000>, pick a starting point
-(Full-stack, API + database, API only), adjust anything in the form, and press **Download `<name>.zip`**.
+under **Start from**, adjust anything in the form, and press **Download `<name>.zip`**.
 The **Config** button saves `scaffolder.config.yaml` so you can regenerate the same project later.
+
+The starting points are tabs (arrow keys move between them, Enter chooses). Switching tabs changes only the stack and keeps
+your other settings. Available today: **Full-stack**, **API + database**, **API only** and **Next.js** (a web app on its own,
+with no separate API). **Nuxt**, **Flutter**, **Android** and **iOS** are marked *soon*: they have no pack yet, so they
+cannot be chosen rather than being generated as broken stubs.
 
 **CLI:**
 
