@@ -390,6 +390,123 @@ describe("agent and `implement`", () => {
     });
   });
 
+  describe("Claude Code commands (.claude/skills/sdlc-*): the app is the agent, the tool is the judge", () => {
+    const FAMILY = ["sdlc-doctor", "sdlc-setup", "sdlc-gates", "sdlc-verify", "sdlc-new", "sdlc-spec", "sdlc-implement"];
+    const CONFIGS = [{}, { backend: { enabled: false }, database: { type: "none" } }, { web: { enabled: false } }];
+    // the tool command each read-only skill may pre-approve, and nothing else
+    const READ_ONLY: Record<string, string> = { "sdlc-doctor": "doctor", "sdlc-gates": "gates", "sdlc-verify": "verify" };
+
+    const skillsOf = (cfg: Json) => {
+      const { sdlc, files, agents } = sdlcOf(cfg);
+      const text = (path: string) => files.find((f) => f.path === path)!.content;
+      return { sdlc, agents, text, skill: (name: string) => text(`.claude/skills/${name}/SKILL.md`), files };
+    };
+
+    it("ships exactly the family, each in Claude Code's project-skill format", () => {
+      for (const cfg of CONFIGS) {
+        const { skill, files } = skillsOf(cfg);
+        expect(files.filter((f) => f.path.startsWith(".claude/")).map((f) => f.path).sort()).toEqual(FAMILY.map((n) => `.claude/skills/${n}/SKILL.md`).sort());
+        for (const name of FAMILY) {
+          const md = skill(name);
+          // the folder name makes the command; only the person can start it; nothing is left unrendered
+          expect(md.startsWith(`---\nname: ${name}\ndescription: `), name).toBe(true);
+          expect(/^description: (.+)$/m.exec(md)![1]!.length, `${name}: description`).toBeLessThan(260);
+          expect(md, name).toContain("\ndisable-model-invocation: true\n");
+          expect(md, name).not.toMatch(/<%|%>/);
+          // the typed argument must never be spliced into a shell command by the app (the !`cmd` form)
+          expect(md, name).not.toMatch(/!`/);
+          // $ARGUMENTS is used exactly by the commands that take one
+          expect(md.includes("$ARGUMENTS"), `${name}: $ARGUMENTS`).toBe(md.includes("\nargument-hint: "));
+          // Windows PowerShell and cmd get the .cmd launcher
+          expect(md, name).toContain(".\\scripts\\sdlc.cmd");
+        }
+      }
+    });
+
+    it("never takes a name Claude Code already uses: a project command with the same name replaces the built-in", () => {
+      for (const name of FAMILY) expect(name.startsWith("sdlc-"), name).toBe(true);
+    });
+
+    it("pre-approves the least it needs: no history-writing git, no blanket tool, no deploy, and read-only ones only their own command", () => {
+      const { skill } = skillsOf({});
+      for (const name of FAMILY) {
+        const allowed = /^allowed-tools: (.*)$/m.exec(skill(name))![1]!;
+        expect(allowed, name).not.toMatch(/commit|push|reset|stash|deploy|Bash\(\*\)|Bash\(\.\/scripts\/sdlc \*\)/);
+        const only = READ_ONLY[name];
+        if (only) {
+          const grants = allowed.match(/Bash\([^)]*\)/g) ?? [];
+          expect(grants.length, `${name}: grants`).toBeGreaterThan(0);
+          for (const grant of grants) expect(grant, `${name} grants ${grant}`).toMatch(new RegExp(`^Bash\\(\\./scripts/sdlc ${only}( \\*)?\\)$`));
+        }
+      }
+      // the builders may only dry-run `implement` and `spec`: a real run would start another agent
+      expect(/^allowed-tools: (.*)$/m.exec(skill("sdlc-implement"))![1]!).toContain("Bash(./scripts/sdlc implement * --dry-run *)");
+      expect(/^allowed-tools: (.*)$/m.exec(skill("sdlc-spec"))![1]!).toContain("Bash(./scripts/sdlc spec * --dry-run *)");
+    });
+
+    it("only names tool commands that exist, and `implement` and `spec` only as a dry run", () => {
+      for (const cfg of CONFIGS) {
+        const { skill, text } = skillsOf(cfg);
+        const real = new Set([...text("scripts/sdlc.py").matchAll(/add_parser\("([a-z]+)"\)/g)].map((m) => m[1]!));
+        for (const name of FAMILY) {
+          const md = skill(name);
+          for (const m of md.matchAll(/\.\/scripts\/sdlc\s+([a-z]+)/g)) expect(real.has(m[1]!), `${name}: ./scripts/sdlc ${m[1]} is not a command`).toBe(true);
+          for (const m of md.matchAll(/\.\/scripts\/sdlc (?:implement|spec) [^`\n]*/g)) expect(m[0], `${name}: "${m[0]}" would start another agent`).toContain("--dry-run");
+        }
+        expect(skill("sdlc-implement")).toContain("Run `./scripts/sdlc implement` without `--dry-run`");
+      }
+    });
+
+    it("/sdlc-implement does what the CLI does around an agent, in order, with the project's own limits", () => {
+      for (const cfg of CONFIGS) {
+        const { sdlc, skill } = skillsOf(cfg);
+        const md = skill("sdlc-implement");
+        const order = ["## 0.", "## 1.", "sync", "`./scripts/sdlc gates` must be green", "--dry-run --agent claude", "## 4.", "`./scripts/sdlc verify`", "## 6."];
+        let at = -1;
+        for (const marker of order) {
+          const next = md.indexOf(marker, at + 1);
+          expect(next, `"${marker}" is missing or out of order`).toBeGreaterThan(at);
+          at = next;
+        }
+        // the worked example is refused, like `sdlc implement FEAT-000` does
+        expect(md).toMatch(/`FEAT-000` is the worked example[\s\S]*nothing to implement/);
+        // the integrity check names only paths the tool really protects
+        const protectedPaths = new Set(sdlc.integrity.protected as string[]);
+        for (const path of [".ai/sdlc.json", "scripts/sdlc.py", ".github/workflows/"]) expect(protectedPaths.has(path), path).toBe(true);
+        expect(md).toContain("git status --short -- .ai/sdlc.json scripts .github/workflows");
+        expect(md).toContain("git hash-object");
+        // the heal budget is the project's own
+        expect(md).toContain(`${sdlc.loop.maxIterations} times`);
+        expect(md).toContain(`${sdlc.loop.noProgressLimit} times in a row`);
+      }
+    });
+
+    it("the read-only commands change nothing, and the spec writers write only the spec", () => {
+      const { skill } = skillsOf({});
+      expect(skill("sdlc-doctor")).toContain("changes nothing");
+      expect(skill("sdlc-gates")).toContain("only reports");
+      expect(skill("sdlc-verify")).toContain("only reports");
+      // a stack that cannot start is the person's to fix, not a heal round for the agent
+      for (const name of ["sdlc-verify", "sdlc-implement"]) expect(skill(name), name).toContain("Docker is not running");
+      for (const name of ["sdlc-new", "sdlc-spec"]) {
+        expect(skill(name), name).toMatch(/no code/i);
+        expect(skill(name), name).toContain("Status: Accepted");
+        expect(skill(name), name).toContain("/sdlc-implement FEAT-00N");
+      }
+    });
+
+    it("the places people look list every command, and the AGENTS.md rule has the dry-run exception the skills rely on", () => {
+      const { agents, text } = skillsOf({});
+      for (const name of FAMILY) {
+        expect(text("README.md"), `README: /${name}`).toContain(`\`/${name}`);
+        expect(agents, `AGENTS.md: /${name}`).toContain(`/${name}`);
+      }
+      expect(agents).toContain("--dry-run` is fine");
+      expect(agents).toContain("Do not run `./scripts/sdlc implement`, `spec`, `feature` or `loop` yourself");
+      expect(text(".ai/README.md")).toContain("`/sdlc-implement FEAT-001`");
+    });
+  });
+
   it("README explains how to drive the project from a desktop app, with the commands that make it match the CLI", () => {
     for (const cfg of [{}, { backend: { enabled: false }, database: { type: "none" } }]) {
       const { files } = sdlcOf(cfg);

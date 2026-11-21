@@ -47,7 +47,7 @@ Integrity (`sdlc.json` -> `integrity`): `protected` files can never change durin
 | Add a gate | append to `gates` in `.ai/sdlc.json` (`id`, `stage`, `cwd`, `cmd`, `required`, `timeoutSeconds`) **and** to `.github/workflows/ci.yml` |
 | Add a feature | `./scripts/sdlc new <slug>` |
 | Use a different AI tool | `./scripts/sdlc agent` lists them (installed or not) and saves your choice; or set `agent.command` (reads the prompt on stdin); `--agent <name>` or `SDLC_AGENT_CMD` for one run |
-| Use a desktop app instead of a CLI | `./scripts/sdlc agent claude-desktop` runs the Claude desktop app's own Claude Code unattended; `handoff-claude`, `handoff-cursor`, `handoff-vscode` open that app, copy the instruction and wait for you. To drive the work yourself from inside a desktop app (Claude Code, Codex) with `./scripts/sdlc` as the judge, see the README, "Use it from an AI desktop app" |
+| Use a desktop app instead of a CLI | `./scripts/sdlc agent claude-desktop` runs the Claude desktop app's own Claude Code unattended; `handoff-claude`, `handoff-cursor`, `handoff-vscode` open that app, copy the instruction and wait for you. To drive the work yourself from inside a desktop app with `./scripts/sdlc` as the judge: in Claude Code type `/sdlc` and pick a command (`/sdlc-implement FEAT-001`, `/sdlc-verify`, ...); for other apps see the README, "Use it from an AI desktop app" |
 | Make skips fatal | `facts.strictSkips: true` |
 
 Editing `.ai/sdlc.json` or the workflows is a human decision: agents are blocked from it by design.

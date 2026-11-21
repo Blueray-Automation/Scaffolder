@@ -95,7 +95,22 @@ In a desktop app the agent is interactive and nothing enforces any of that. So k
 
 **Identical to the CLI, nothing to set up:** open the folder in the app, open the terminal built into the app, and run the commands above there (`./scripts/sdlc implement FEAT-001`). The tool starts the agent itself, so the behaviour is the CLI's by construction. It needs that agent's CLI installed and signed in (`./scripts/sdlc agent` shows which are).
 
-**To have the app's own agent do the work** (you watch it and can steer it), follow these steps. Each one stands in for something `implement` does for you.
+**Claude Code (the Claude desktop app's Code tab, or the CLI): slash commands.** Open this folder and type `/sdlc` in the chat to pick one. The project ships one command per step (`.claude/skills/`): Claude does the work as the agent, and `./scripts/sdlc` stays the judge. Only you can start them (Claude never runs one on its own), and nothing is ever committed.
+
+| Type | What it does |
+|---|---|
+| `/sdlc-doctor` | checks that the tools this project needs are installed |
+| `/sdlc-setup` | installs the dependencies |
+| `/sdlc-gates` | the fast checks: lint, types, unit tests, build, contract, security |
+| `/sdlc-verify` | every gate, then each acceptance criterion against the running system; it only reports |
+| `/sdlc-new user-login` | creates a feature's spec and writes the PRD and checks with you in chat |
+| `/sdlc-spec requirements.pdf` | drafts a spec from a requirements document |
+| `/sdlc-implement FEAT-001` | builds the feature and proves it, healing until green |
+
+The names start with `sdlc-` on purpose: Claude Code has built-in commands such as `/doctor`, and a project command with the same name would replace them.
+Step 1 below is not needed for these commands. The steps 1 to 5 are what `/sdlc-implement` does for you: follow them by hand in other apps.
+
+**For other apps, or to see what `/sdlc-implement` does,** follow these steps. Each one stands in for something `implement` does for you.
 
 1. **Let the app read this project's rules (once).** Codex reads `AGENTS.md` by itself. Claude Code reads `CLAUDE.md`, so make that file import `AGENTS.md`, and commit it (`implement` wants a clean tree):
    ```bash
