@@ -83,6 +83,7 @@ Large document with several features? Run `spec` once per feature with `--focus 
 `implement` checks the spec is complete, installs the toolchain if needed, runs a baseline, gives the agent your PRD and checks as its prompt,
 installs any dependency the agent adds, then verifies and heals until green. It never commits or pushes: you review `git diff`.
 The agent is `<%agentPreset%>`<%#agentConfigured%> (`<%agentCommand%>`)<%/agentConfigured%>; that is the project's default. See which AI agents are installed on your machine (and how to install the others) and pick one with `./scripts/sdlc agent`; for one run add `--agent <name>`.
+Prefer a desktop app to a command-line tool? `./scripts/sdlc agent claude-desktop` runs the Claude desktop app's own Claude Code unattended, and `handoff-claude`, `handoff-cursor` or `handoff-vscode` open that app on this project, copy the instruction and wait for you (press Enter when its agent is done: the checks and the verify loop then run as usual).
 FEAT-000 (hello world) is the worked example and is already built, so `implement` has nothing to write for it; `./scripts/sdlc verify` proves it, and `implement` is for your own features (FEAT-001 onward).
 Add `--dry-run` to see the exact prompt and command without running anything. `./scripts/sdlc feature FEAT-001` does the same and also ships (`--deploy <env>`).
 

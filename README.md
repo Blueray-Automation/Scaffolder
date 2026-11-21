@@ -58,6 +58,10 @@ dependency the agent adds, then verifies against the running system and heals un
 (`claude`, `codex`, `gemini`, `copilot`, `cursor` or any command that reads a prompt on stdin) is set in the UI or `sdlc.agent.preset`; whoever runs the project
 sees which agents are installed on their machine, with install lines for the rest, and picks one with `./scripts/sdlc agent`.
 
+**Desktop apps, not just CLIs.** The agent can also be a desktop app. `./scripts/sdlc agent claude-desktop` runs the Claude Code that the **Claude desktop app** keeps for its Code tab, unattended, with no `claude` on `PATH` (and no stale one in the way).
+`handoff-claude`, `handoff-cursor` and `handoff-vscode` open the Claude desktop app's Code tab, Cursor or VS Code on the project, put the instruction on your clipboard and wait for you to press Enter; the same checks, verification and healing then run.
+See [Using a Desktop App](docs/wiki/Desktop-Apps.md).
+
 Opening the generated folder in a desktop app (Claude Code, Codex) instead? Its README has a guide, "Use it from an AI desktop app": run the same commands in the app's terminal for identical behaviour, or let the app's own agent do the work while `./scripts/sdlc` stays the judge (same prompt via `--dry-run`, same permissions, same loop via `loop --agent ""`).
 
 ## Platforms
@@ -149,6 +153,7 @@ npm run e2e       # slow, needs network, python3 >= 3.12 and node >= 22 on PATH
 - `spec` drafts are only as good as the document and the AI that reads it: the tool validates their form, a human must review their meaning. Scanned PDFs have no text to read.
 - Agent presets: the whole pipeline around the agent (document reading included) is tested with a scripted agent. The `claude`, `codex`, `gemini`, `copilot` and `cursor` presets follow each tool's documented
   non-interactive mode but have **not been run against the real CLIs** (use `implement --dry-run` to inspect the command and prompt first).
+  The desktop options are tested end to end with fakes (the hand-off in a real pseudo-terminal), and `claude-desktop` was also run once for real on macOS; nobody drove the Claude, Cursor or VS Code windows through a full `implement`, and the Windows and Linux locations are unverified.
 - Deploy targets: `none` (placeholder, prints the plan) and `ssh-compose`. The tests exercise the image builds and the full
   compose stack (including PostgreSQL), and check the deploy scripts' syntax. They do **not** run the generated GitHub workflows,
   push to GHCR, or deploy to a real host; those are only checked structurally.

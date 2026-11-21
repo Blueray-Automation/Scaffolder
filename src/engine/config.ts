@@ -13,7 +13,18 @@ export type RegistryType = "ghcr" | "dockerhub" | "none";
 export type DeployTarget = "none" | "ssh-compose" | "kubernetes";
 export type RuntimeMode = "docker" | "local" | "none";
 export type DeployTrigger = "push-default-branch" | "tag" | "manual";
-export type AgentPreset = "claude" | "codex" | "gemini" | "copilot" | "cursor" | "custom" | "none";
+export type AgentPreset =
+  | "claude"
+  | "codex"
+  | "gemini"
+  | "copilot"
+  | "cursor"
+  | "claude-desktop"
+  | "handoff-claude"
+  | "handoff-cursor"
+  | "handoff-vscode"
+  | "custom"
+  | "none";
 
 export interface Environment {
   /** GitHub Environment name, e.g. "staging". */
@@ -80,7 +91,7 @@ export interface ScaffolderConfig {
     failFast: boolean;
     runtime: RuntimeMode;
     agent: {
-      /** Which agent CLI runs `sdlc build` and the healing loop. */
+      /** Which agent (a CLI, the Claude desktop app's engine, or a desktop app you drive) runs `sdlc implement` and the healing loop. */
       preset: AgentPreset;
       /** Shell command that reads the prompt on stdin. Overrides the preset when set. */
       command: string;

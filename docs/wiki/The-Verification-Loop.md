@@ -102,8 +102,9 @@ An agent that is told to "make the tests pass" can cheat by changing the tests. 
 
 ### Using an AI agent
 
-The agent is any command that reads the prompt on standard input (or names the prompt file with `{prompt_file}`). The project's default is a preset (`claude`, `codex`,
-`gemini`, `copilot`, `cursor`, `custom`, `none`) set with `sdlc.agent.preset` in `scaffolder.config.yaml` or in the web UI; an explicit `sdlc.agent.command` overrides the preset.
+The agent is any command that reads the prompt on standard input (or names the prompt file with `{prompt_file}`), or a **desktop app** (see [Using a Desktop App](Desktop-Apps): `claude-desktop` runs the Claude desktop app's own Claude Code unattended,
+`handoff-claude`, `handoff-cursor` and `handoff-vscode` open an app and wait for you). The project's default is a preset (`claude`, `codex`,
+`gemini`, `copilot`, `cursor`, `claude-desktop`, `handoff-claude`, `handoff-cursor`, `handoff-vscode`, `custom`, `none`) set with `sdlc.agent.preset` in `scaffolder.config.yaml` or in the web UI; an explicit `sdlc.agent.command` overrides the preset.
 After generating, the resolved command lives in `.ai/sdlc.json` -> `agent.command`, next to the list of every preset (`agent.presets`).
 
 Each person chooses for their own machine, installed or not:
@@ -117,7 +118,7 @@ Each person chooses for their own machine, installed or not:
 For one run: `./scripts/sdlc implement FEAT-001 --agent gemini`, or `SDLC_AGENT_CMD='your-agent-cli' ./scripts/sdlc implement FEAT-001`. Precedence: `--agent`, `SDLC_AGENT_CMD`,
 your saved choice, the project default. The choice can only select among the commands in `.ai/sdlc.json` (which the agent may not edit) or a command you typed yourself.
 
-With no agent, the tool prints the prompt file for you (or your own AI tool) and waits.
+With no agent, the tool prints the prompt file for you (or your own AI tool) and waits. A `handoff-*` agent is the same wait with the app opened for you and the instruction on your clipboard; the integrity guard and the verification after it are identical.
 
 `implement` and the healing loop use the same agent. **`implement`** gives it your whole spec once (the prompt `.ai/prompts/implement.md`, with your `prd.md` and
 `acceptance.json` embedded); **heal** prompts (`.ai/prompts/heal.md`) then send it only the failures. Both tell it the hard rules: never edit the spec, never weaken a test,

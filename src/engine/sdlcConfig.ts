@@ -1,4 +1,4 @@
-import { AGENT_PRESETS } from "./capabilities";
+import { AGENT_PRESETS, DESKTOP_APPS } from "./capabilities";
 import { agentCommand, type ScaffolderConfig } from "./config";
 import { buildGates, NPM_CI, NPM_INSTALL, setupSteps, STAGE_ORDER, venvDirs } from "./gates";
 
@@ -69,10 +69,21 @@ export function buildSdlcConfig(cfg: ScaffolderConfig): Record<string, unknown> 
       presets: AGENT_PRESETS.filter((p) => p.command).map((p) => ({
         id: p.id,
         label: p.label,
+        mode: p.mode,
         command: p.command,
         program: p.program,
         install: p.install,
         docs: p.docs,
+      })),
+      // Desktop apps a person can hand the work to (`handoff:<id>` in a preset's command): how to open and find them.
+      desktopApps: DESKTOP_APPS.map((a) => ({
+        id: a.id,
+        label: a.label,
+        open: a.open,
+        detect: a.detect,
+        steps: a.steps,
+        install: a.install,
+        docs: a.docs,
       })),
       timeoutSeconds: cfg.sdlc.agent.timeoutSeconds,
       prompts: {

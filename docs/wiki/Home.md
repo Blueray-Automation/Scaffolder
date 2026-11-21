@@ -21,6 +21,7 @@ then lets an AI agent (or you) heal failures until everything is green.
 4. **[The Verification Loop](The-Verification-Loop)**: how gates, facts, evidence and agent healing work.
 5. **[Troubleshooting](Troubleshooting)**: common problems and fixes.
 6. **[Reference: the login implementation](Reference-Login-Implementation)**: the complete, verified code for the tutorial.
+7. **[Using a Desktop App](Desktop-Apps)**: let the Claude desktop app, Cursor or VS Code be the AI agent instead of a command-line tool.
 
 ## What you get
 
