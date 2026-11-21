@@ -390,6 +390,26 @@ describe("agent and `implement`", () => {
     });
   });
 
+  it("README explains how to drive the project from a desktop app, with the commands that make it match the CLI", () => {
+    for (const cfg of [{}, { backend: { enabled: false }, database: { type: "none" } }]) {
+      const { files } = sdlcOf(cfg);
+      const text = (path: string) => files.find((f) => f.path === path)!.content;
+      const readme = text("README.md");
+      expect(readme).toContain("## Use it from an AI desktop app");
+      // Claude Code reads CLAUDE.md, Codex reads AGENTS.md; skills are linked per skill folder
+      expect(readme).toContain("@AGENTS.md");
+      expect(readme).toContain(".agents/skills");
+      expect(readme).toContain(".claude/skills");
+      // the exact prompt, the same loop with the app as the agent, and the integrity check the CLI does
+      expect(readme).toContain("implement FEAT-001 --dry-run --agent claude");
+      expect(readme).toContain('./scripts/sdlc loop --agent ""');
+      expect(readme).toContain("git status --short -- .ai/specs .ai/sdlc.json scripts .github/workflows");
+      expect(readme).not.toMatch(/<%|%>/);
+      // an agent started from an app must not start another agent
+      expect(text("AGENTS.md")).toContain("Do not run `./scripts/sdlc implement`, `spec`, `feature` or `loop` yourself");
+    }
+  });
+
   it("documents implement and sync where people look (AGENTS.md, README, Makefile, skills)", () => {
     const { files } = sdlcOf({});
     const text = (path: string) => files.find((f) => f.path === path)!.content;
@@ -397,6 +417,17 @@ describe("agent and `implement`", () => {
     expect(text("AGENTS.md")).toContain("./scripts/sdlc sync");
     expect(text("Makefile")).toMatch(/^implement:/m);
     expect(text(".ai/skills/write-prd/SKILL.md")).toContain("./scripts/sdlc implement");
+  });
+
+  it("refuses to implement the already-built worked example, and says when a run changed no file", () => {
+    const { files } = sdlcOf({});
+    const tool = files.find((f) => f.path === "scripts/sdlc.py")!.content;
+    expect(tool).toContain('EXAMPLE_FEATURE = "FEAT-000"');
+    expect(tool).toMatch(/if fid == EXAMPLE_FEATURE:[\s\S]*is the worked example[\s\S]*return EXIT_HUMAN/);
+    expect(tool).toContain("changed no file");
+    // the stopped run points at the commands that do build something
+    const refusal = tool.slice(tool.indexOf("if fid == EXAMPLE_FEATURE:"), tool.indexOf("# 1. the spec is the contract"));
+    for (const cmd of ["./scripts/sdlc verify", "./scripts/sdlc new", "./scripts/sdlc spec", "./scripts/sdlc implement FEAT-001"]) expect(refusal).toContain(cmd);
   });
 
   it("the implement prompt only uses placeholders the tool fills in, and embeds the spec", () => {

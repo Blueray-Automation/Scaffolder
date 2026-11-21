@@ -62,6 +62,8 @@ sees which agents are installed on their machine, with install lines for the res
 `handoff-claude`, `handoff-cursor` and `handoff-vscode` open the Claude desktop app's Code tab, Cursor or VS Code on the project, put the instruction on your clipboard and wait for you to press Enter; the same checks, verification and healing then run.
 See [Using a Desktop App](docs/wiki/Desktop-Apps.md).
 
+Opening the generated folder in a desktop app (Claude Code, Codex) instead? Its README has a guide, "Use it from an AI desktop app": run the same commands in the app's terminal for identical behaviour, or let the app's own agent do the work while `./scripts/sdlc` stays the judge (same prompt via `--dry-run`, same permissions, same loop via `loop --agent ""`).
+
 ## Platforms
 
 Generated projects run on **macOS**, **Ubuntu / other Linux** and **Windows** (natively with `scripts\sdlc.cmd`, or in WSL2). [Setup by Operating System](docs/wiki/Setup-by-Operating-System.md) lists what to install on each and how to run the tool there.
