@@ -58,6 +58,8 @@ dependency the agent adds, then verifies against the running system and heals un
 (`claude`, `codex`, `gemini`, `copilot`, `cursor` or any command that reads a prompt on stdin) is set in the UI or `sdlc.agent.preset`; whoever runs the project
 sees which agents are installed on their machine, with install lines for the rest, and picks one with `./scripts/sdlc agent`.
 
+Opening the generated folder in a desktop app (Claude Code, Codex) instead? Its README has a guide, "Use it from an AI desktop app": run the same commands in the app's terminal for identical behaviour, or let the app's own agent do the work while `./scripts/sdlc` stays the judge (same prompt via `--dry-run`, same permissions, same loop via `loop --agent ""`).
+
 ## Platforms
 
 Generated projects run on **macOS**, **Ubuntu / other Linux** and **Windows** (natively with `scripts\sdlc.cmd`, or in WSL2). [Setup by Operating System](docs/wiki/Setup-by-Operating-System.md) lists what to install on each and how to run the tool there.

@@ -46,7 +46,7 @@ Integrity (`sdlc.json` -> `integrity`): `protected` files can never change durin
 | Which gates run, coverage floors, runtime mode, loop budget, agent command | `scaffolder.config.yaml` -> regenerate, or edit `.ai/sdlc.json` directly |
 | Add a gate | append to `gates` in `.ai/sdlc.json` (`id`, `stage`, `cwd`, `cmd`, `required`, `timeoutSeconds`) **and** to `.github/workflows/ci.yml` |
 | Add a feature | `./scripts/sdlc new <slug>` |
-| Use a different AI tool | `./scripts/sdlc agent` lists them (installed or not) and saves your choice; or set `agent.command` (reads the prompt on stdin); `--agent <name>` or `SDLC_AGENT_CMD` for one run |
+| Use a different AI tool | `./scripts/sdlc agent` lists them (installed or not) and saves your choice; or set `agent.command` (reads the prompt on stdin); `--agent <name>` or `SDLC_AGENT_CMD` for one run. A desktop app (Claude Code, Codex): see the README, "Use it from an AI desktop app" |
 | Make skips fatal | `facts.strictSkips: true` |
 
 Editing `.ai/sdlc.json` or the workflows is a human decision: agents are blocked from it by design.

@@ -390,6 +390,26 @@ describe("agent and `implement`", () => {
     });
   });
 
+  it("README explains how to drive the project from a desktop app, with the commands that make it match the CLI", () => {
+    for (const cfg of [{}, { backend: { enabled: false }, database: { type: "none" } }]) {
+      const { files } = sdlcOf(cfg);
+      const text = (path: string) => files.find((f) => f.path === path)!.content;
+      const readme = text("README.md");
+      expect(readme).toContain("## Use it from an AI desktop app");
+      // Claude Code reads CLAUDE.md, Codex reads AGENTS.md; skills are linked per skill folder
+      expect(readme).toContain("@AGENTS.md");
+      expect(readme).toContain(".agents/skills");
+      expect(readme).toContain(".claude/skills");
+      // the exact prompt, the same loop with the app as the agent, and the integrity check the CLI does
+      expect(readme).toContain("implement FEAT-001 --dry-run --agent claude");
+      expect(readme).toContain('./scripts/sdlc loop --agent ""');
+      expect(readme).toContain("git status --short -- .ai/specs .ai/sdlc.json scripts .github/workflows");
+      expect(readme).not.toMatch(/<%|%>/);
+      // an agent started from an app must not start another agent
+      expect(text("AGENTS.md")).toContain("Do not run `./scripts/sdlc implement`, `spec`, `feature` or `loop` yourself");
+    }
+  });
+
   it("documents implement and sync where people look (AGENTS.md, README, Makefile, skills)", () => {
     const { files } = sdlcOf({});
     const text = (path: string) => files.find((f) => f.path === path)!.content;

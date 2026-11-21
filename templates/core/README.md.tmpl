@@ -86,6 +86,65 @@ The agent is `<%agentPreset%>`<%#agentConfigured%> (`<%agentCommand%>`)<%/agentC
 FEAT-000 (hello world) is the worked example and is already built, so `implement` has nothing to write for it; `./scripts/sdlc verify` proves it, and `implement` is for your own features (FEAT-001 onward).
 Add `--dry-run` to see the exact prompt and command without running anything. `./scripts/sdlc feature FEAT-001` does the same and also ships (`--deploy <env>`).
 
+## Use it from an AI desktop app (Claude Code, Codex, ...)
+
+You can open this folder in a desktop coding app instead of letting `./scripts/sdlc` start an agent CLI. What changes is **who is in charge**.
+`implement` is in charge of its agent: it refuses a dirty tree, installs the toolchain, runs a baseline, gives the agent a fixed prompt with fixed permissions, stops if the agent touches the spec or the gate config, then verifies and heals within a budget.
+In a desktop app the agent is interactive and nothing enforces any of that. So keep the tool as the **judge** and use the app as the **agent**.
+
+**Identical to the CLI, nothing to set up:** open the folder in the app, open the terminal built into the app, and run the commands above there (`./scripts/sdlc implement FEAT-001`). The tool starts the agent itself, so the behaviour is the CLI's by construction. It needs that agent's CLI installed and signed in (`./scripts/sdlc agent` shows which are).
+
+**To have the app's own agent do the work** (you watch it and can steer it), follow these steps. Each one stands in for something `implement` does for you.
+
+1. **Let the app read this project's rules (once).** Codex reads `AGENTS.md` by itself. Claude Code reads `CLAUDE.md`, so make that file import `AGENTS.md`, and commit it (`implement` wants a clean tree):
+   ```bash
+   echo '@AGENTS.md' > CLAUDE.md && git add CLAUDE.md && git commit -m "chore: let Claude Code read AGENTS.md"
+   ```
+   Optional, macOS / Linux / WSL: list the playbooks in `.ai/skills/` as skills of each tool. The prompt and `AGENTS.md` already name every rule and playbook by path, so an agent reads them either way. Keep these links local (second line), because a clean tree is required:
+   ```bash
+   for dir in .claude/skills .agents/skills; do mkdir -p "$dir"; for s in .ai/skills/*/; do ln -s "../../.ai/skills/$(basename "$s")" "$dir/$(basename "$s")"; done; done
+   printf '.claude/\n.agents/\n' >> .git/info/exclude
+   ```
+   Check that the app really loaded the rules: start a chat and ask it *"which instructions from this repository did you load?"*. It should name `AGENTS.md` and its rules.
+
+2. **Give it the permissions the CLI gives its agent: edit this project and run its commands, nothing more.**
+   - *Claude Code:* mode **Accept edits** (called *Auto accept edits* in older versions), and let it run the tool without asking, by answering "always allow" the first time or by putting this in `.claude/settings.local.json`:
+     ```json
+     { "permissions": { "allow": ["Bash(./scripts/sdlc *)"] } }
+     ```
+   - *Codex:* **Ask for approval** or **Approve for me**. Both use the `workspace-write` sandbox, which is what `codex exec --sandbox workspace-write` gives the CLI agent.
+   - Do not pick **Bypass permissions** or **Full access**: the CLI's agent never has them, and the integrity guard below is manual.
+   - Installing dependencies needs the network: run `./scripts/sdlc setup` and `./scripts/sdlc sync` yourself in the app's terminal rather than widening what the agent may do.
+   - Work in the project folder itself, not in a git worktree. A worktree is a fresh checkout: no `node_modules` or `.venv`, no `.ai/evidence`, and no uncommitted spec. If you use one, commit the spec first and run `./scripts/sdlc setup` inside it.
+
+3. **Start from the same state the CLI requires:** a clean tree, the toolchain installed, and a green baseline.
+   ```bash
+   git add .ai/specs && git commit -m "spec: FEAT-001"   # from here the spec is frozen: any later change shows in git
+   ./scripts/sdlc setup
+   ./scripts/sdlc gates                                   # green BEFORE the agent starts, so its failures are its own
+   ```
+
+4. **Hand the agent the exact prompt the CLI would send.**
+   ```bash
+   ./scripts/sdlc implement FEAT-001 --dry-run --agent claude   # nothing runs; the name only has to be a preset, installed or not
+   ```
+   It prints `prompt: .ai/evidence/<run>/implement.prompt.md`: your PRD and checks inside the same instructions `implement` uses. In the app, open a chat on this folder and send:
+   `Read .ai/evidence/<run>/implement.prompt.md and do exactly what it says.` (the Copilot and Cursor presets use this very sentence). If the agent stops with questions, they are in `QUESTIONS.md` next to that prompt: answer them in `prd.md`, commit, and start again.
+
+5. **Let the tool judge, and heal from the app.** First the check the CLI does when the agent finishes, then the loop with *you and the app* as the agent for this one run (`--agent ""`; nothing is saved):
+   ```bash
+   git status --short -- .ai/specs .ai/sdlc.json scripts .github/workflows   # must print nothing: the spec and the gates are not the agent's to change
+   git log --oneline -3                                                       # the agent must not have committed; you review and commit
+   ./scripts/sdlc sync                                                        # installs any dependency the agent added
+   ./scripts/sdlc loop --agent ""
+   ```
+   `loop` runs the gates and the facts. When something fails it writes `.ai/evidence/<run>/heal-1.prompt.md`, prints the path and waits. Send the app `Read .ai/evidence/<run>/heal-1.prompt.md and do exactly what it says.`, and when it is done press **Enter** in the terminal to verify again. Run it in the terminal yourself: a shell started by an agent cannot wait for Enter.
+   It stops exactly as the CLI does: green (exit 0), <%maxIterations%> rounds, <%noProgressLimit%> identical failures in a row, or the spec or gate files changed while healing (exit 4). **"Done" is that exit code and `.ai/evidence/latest/report.md`, never the agent's own message.**
+
+**Drafting a spec from a document works the same way:** `./scripts/sdlc spec requirements.pdf --dry-run --agent claude` writes the prompt (it contains the document's text); send it to the app; then `./scripts/sdlc facts --feature FEAT-001 --runtime none` (use the id the dry run prints after "would create") has the tool check that every criterion has a check. Review the draft before you implement it (`.ai/skills/review-spec`).
+
+**What stays different.** The agent's permissions, model and effort are the app's settings, not the CLI preset's. The prompt is the same, but the agent is not headless: it may ask you things mid-run. And only step 5's two `git` lines stand in for the CLI's integrity guard and commit check, so run them every time.
+
 
 <%#hasCd%>
 ## CI/CD
