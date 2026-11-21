@@ -1,0 +1,22 @@
+---
+name: sdlc-verify
+description: Run every gate, then check each acceptance criterion of every feature against the running system. Type /sdlc-verify.
+disable-model-invocation: true
+allowed-tools: Bash(./scripts/sdlc verify) Bash(./scripts/sdlc verify *)
+---
+
+# /sdlc-verify
+
+Run `./scripts/sdlc verify` (on Windows PowerShell or cmd: `.\scripts\sdlc.cmd verify`). It is exactly what CI runs: all gates, then the checks in each feature's
+`acceptance.json` against the **running** system. That starts the whole stack and can take minutes: give the command up to 10 minutes (or run it in the background and wait for it).
+
+Then read `.ai/evidence/latest/report.md` and tell the person:
+
+- the verdict (PASSED or FAILED) and the run id;
+- the gates that failed, if any;
+- for each feature, a table of its acceptance criteria (AC-001, ...) with PASS, FAIL or SKIP, and the check ids behind each.
+
+If it could not start the system at all (for example Docker is not running), say exactly that, tell the person to start Docker (or to change `runtime.mode` in `.ai/sdlc.json`), and stop.
+Green: say so and stop. Red: for each failure say what the check expected, what it got, and where the log is, and your best explanation of the cause.
+**This command only reports.** Do not change any file, the spec or the code: if the person wants a failure fixed they will say so (and for a whole feature,
+`/sdlc-implement FEAT-001` builds and heals it). A check shown as SKIP was not run: say why it says it was skipped, and never count it as a pass.

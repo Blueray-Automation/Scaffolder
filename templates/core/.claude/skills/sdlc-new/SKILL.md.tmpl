@@ -1,0 +1,25 @@
+---
+name: sdlc-new
+description: Start a feature: create its spec folder, then write the PRD and the checks together with the person in chat. Type /sdlc-new user-login.
+argument-hint: user-login
+disable-model-invocation: true
+allowed-tools: Bash(./scripts/sdlc new *) Bash(./scripts/sdlc implement * --dry-run *)
+---
+
+# /sdlc-new $ARGUMENTS
+
+Create the spec of a new feature and draft it together with the person. You write **no code and no tests**: only the two spec files.
+On Windows PowerShell or cmd, write `.\scripts\sdlc.cmd` wherever this says `./scripts/sdlc`.
+
+1. No name given: ask for a short one (lowercase words and hyphens, like `user-login`) and wait for the answer.
+2. `./scripts/sdlc new $ARGUMENTS` creates `.ai/specs/FEAT-00N-<name>/` with a stub `prd.md` and `acceptance.json` and prints the folder. Note the feature id, `FEAT-00N`.
+3. Ask the person what the feature must do, in their own words: who uses it, what they do, what they get, and what must be refused. Ask only for what you
+   cannot work out yourself, and never invent a requirement.
+4. Write both files. Follow `.ai/rules/prd.md`, the playbooks `.ai/skills/write-prd/SKILL.md` and `.ai/skills/write-fact-checks/SKILL.md`, and the worked example
+   `.ai/specs/FEAT-000-hello-world/` (copy its shape, not its content):
+   - numbered acceptance criteria (AC-001, ...), each one something a check can prove against the running system;
+   - every criterion covered by at least one check in `acceptance.json`, and every check lists the criteria it covers in `covers`;
+   - remove every `TODO(prd)` marker, and write the word ASSUMPTION next to anything you had to assume, so the person can confirm it.
+5. Validate: `./scripts/sdlc implement FEAT-00N --dry-run --agent claude` runs nothing and must report `spec ok`. If it lists problems, fix them and run it again.
+6. Tell the person: this is a **draft**. They read both files, confirm every ASSUMPTION, change `Status: Draft` to `Status: Accepted` when it is right, and then run
+   `/sdlc-implement FEAT-00N`. Do not implement anything yourself.
