@@ -290,6 +290,9 @@ if mode == "tamper":  # tries to rewrite the requirements: must be stopped
     prd.write_text(prd.read_text() + "\\n- **AC-999** Everything passes.\\n")
     sys.exit(0)
 
+if mode == "noop":  # the code already satisfies the spec: nothing to write
+    sys.exit(0)
+
 if mode == "ask":  # the spec is unclear: ask instead of guessing
     match = re.search(r"\`([^\`]*QUESTIONS\\.md)\`", prompt)
     pathlib.Path(match.group(1)).write_text("Should slugs keep underscores? I would otherwise assume they become hyphens.\\n")
@@ -358,6 +361,11 @@ function implementFromSpec(dir: string, cfg: Json, git: (...a: string[]) => unkn
 
   // guardrails before any agent runs
   expectExit("implement refuses an unknown feature", dir, ["implement", "FEAT-009", "--agent", agent], 2, env);
+  const example = expectExit("implement refuses the worked example FEAT-000", dir, ["implement", "FEAT-000", "--agent", agent], 2, env);
+  if (example.includes("worked example") && example.includes("already built") && example.includes("./scripts/sdlc verify")) ok("it says FEAT-000 is already built and what to do instead");
+  else bad("the worked example was refused without an explanation");
+  if (run("git", ["status", "--porcelain"], dir).stdout.trim() === "") ok("and it changed nothing");
+  else bad("refusing the worked example left changes behind");
   expectExit("new feature spec", dir, ["new", "slug-endpoint"], 0);
   const stub = expectExit("implement refuses an unfinished spec", dir, ["implement", "FEAT-001", "--agent", agent], 2, env);
   if (stub.includes("TODO(prd)")) ok("it says the PRD is still a stub");
@@ -403,6 +411,13 @@ function implementFromSpec(dir: string, cfg: Json, git: (...a: string[]) => unkn
   if (headCount() === commitsBefore) ok("nothing was committed: the human reviews the diff");
   else bad("implement made commits");
   expectExit("sync after implement has nothing left to do", dir, ["sync"], 0);
+
+  // already built: an agent that has nothing to write must not be reported as having implemented anything
+  git("add", "-A");
+  git("commit", "-qm", "feat: slug endpoint");
+  const noop = expectExit("implement a feature that is already built", dir, ["implement", "FEAT-001", "--agent", agent, "--skip-baseline", "--runtime", "local"], 0, { ...env, AGENT_MODE: "noop" });
+  if (noop.includes("changed no file") && !noop.includes("is implemented and verified")) ok("it says nothing changed instead of claiming an implementation");
+  else bad("a run that changed no file was reported as implemented");
 }
 
 // ---------------------------------------------------------------------------------------------

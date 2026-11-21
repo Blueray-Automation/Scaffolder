@@ -50,6 +50,8 @@ AGENT_LOCAL = ROOT / ".ai" / "agent.local.json"  # this person's own choice of a
 
 EXIT_OK, EXIT_FAIL, EXIT_HUMAN, EXIT_STUCK, EXIT_INTEGRITY, EXIT_USAGE = 0, 1, 2, 3, 4, 64
 
+EXAMPLE_FEATURE = "FEAT-000"  # the worked example: its code ships with the project, so there is nothing to implement
+
 IS_WINDOWS = os.name == "nt"
 
 
@@ -1298,6 +1300,20 @@ def cmd_agent(cfg: dict, args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def work_fingerprint() -> str | None:
+    """A hash of every uncommitted change (edits to tracked files and the content of untracked ones), so a run can tell whether it
+    changed anything. None when this is not a git repository."""
+    if not (ROOT / ".git").exists():
+        return None
+    h = hashlib.sha256(git("diff", "HEAD").encode("utf-8", "replace"))
+    for name in sorted(git("ls-files", "--others", "--exclude-standard").splitlines()):
+        path = ROOT / name
+        h.update(name.encode("utf-8", "replace"))
+        if path.is_file():
+            h.update(path.read_bytes())
+    return h.hexdigest()
+
+
 def dirty_files(exclude: Path) -> list:
     """Uncommitted changes other than the feature's own spec folder (empty when not a git repository)."""
     if not (ROOT / ".git").exists():
@@ -1750,13 +1766,24 @@ def cmd_implement(cfg: dict, args: argparse.Namespace) -> int:
     specs_dir = cfg["facts"]["specsDir"]
     spec_dir = find_spec(cfg, args.name)
     if spec_dir is None:
-        existing = sorted(p.name for p in (ROOT / specs_dir).glob("FEAT-*") if not p.name.startswith("FEAT-000"))
+        existing = sorted(p.name for p in (ROOT / specs_dir).glob("FEAT-*") if not p.name.startswith(EXAMPLE_FEATURE))
         say(bad(f"No feature '{args.name}' under {specs_dir}/."))
         say("Create one with ./scripts/sdlc new <slug>, write its prd.md and acceptance.json, then run this again."
             + (f"\nExisting features: {', '.join(existing)}" if existing else ""))
         return EXIT_HUMAN
     fid = spec_dir.name.split("-", 2)[0] + "-" + spec_dir.name.split("-", 2)[1]
     say(c(f"\n=== implement {fid} from {rel(spec_dir)}/ ===", "1;35"))
+
+    # 0. the worked example is already built: running an agent on it would change nothing, so say so instead
+    if fid == EXAMPLE_FEATURE:
+        say(warn(f"{fid} is the worked example, and it is already built: its code and tests ship with this project."))
+        say("There is nothing left for an agent to write, so `implement` would not change a single file.\n")
+        say("  See it proven against the running system:  ./scripts/sdlc verify")
+        say("  Have an agent build something new:")
+        say("    ./scripts/sdlc new <slug>                 then write its prd.md and acceptance.json")
+        say("    ./scripts/sdlc spec requirements.pdf      or let an agent draft them from a requirements document")
+        say("    ./scripts/sdlc implement FEAT-001         the agent writes the code and the loop proves it")
+        return EXIT_HUMAN
 
     # 1. the spec is the contract: it must be complete before an agent spends effort on it
     spec = next(sp for sp in load_specs(cfg) if sp["dir"] == spec_dir)
@@ -1830,6 +1857,7 @@ def cmd_implement(cfg: dict, args: argparse.Namespace) -> int:
     say(c("\n== agent: implementing ==", "1"))
     before = snapshot(integ["protected"] + integ["protectedWhileHealing"])
     head = git("rev-parse", "HEAD")
+    work_before = work_fingerprint()
     code = run_agent(cfg, agent, prompt, f"implement-{fid}", run.dir)
     blocker = agent_blocker(run.dir, f"implement-{fid}", code)
     if blocker:
@@ -1864,7 +1892,11 @@ def cmd_implement(cfg: dict, args: argparse.Namespace) -> int:
     say(c("\n== what changed (nothing is committed) ==", "1"))
     say(git("status", "--short") or "(no changes)")
     if result == EXIT_OK:
-        say(ok(f"\n{fid} is implemented and verified. Review with `git diff`, then commit and open a PR."))
+        if work_before is not None and work_fingerprint() == work_before and git("rev-parse", "HEAD") == head:
+            say(warn(f"\n{fid} passes, but this run changed no file: the code that was already here satisfies its spec, so there was nothing to write."))
+            say("If you expected new code, the spec may only describe behaviour that already exists: compare prd.md with the code and add what is missing.")
+        else:
+            say(ok(f"\n{fid} is implemented and verified. Review with `git diff`, then commit and open a PR."))
         say(f"Evidence: .ai/evidence/latest/report.md")
     return result
 

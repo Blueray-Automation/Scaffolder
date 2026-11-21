@@ -399,6 +399,17 @@ describe("agent and `implement`", () => {
     expect(text(".ai/skills/write-prd/SKILL.md")).toContain("./scripts/sdlc implement");
   });
 
+  it("refuses to implement the already-built worked example, and says when a run changed no file", () => {
+    const { files } = sdlcOf({});
+    const tool = files.find((f) => f.path === "scripts/sdlc.py")!.content;
+    expect(tool).toContain('EXAMPLE_FEATURE = "FEAT-000"');
+    expect(tool).toMatch(/if fid == EXAMPLE_FEATURE:[\s\S]*is the worked example[\s\S]*return EXIT_HUMAN/);
+    expect(tool).toContain("changed no file");
+    // the stopped run points at the commands that do build something
+    const refusal = tool.slice(tool.indexOf("if fid == EXAMPLE_FEATURE:"), tool.indexOf("# 1. the spec is the contract"));
+    for (const cmd of ["./scripts/sdlc verify", "./scripts/sdlc new", "./scripts/sdlc spec", "./scripts/sdlc implement FEAT-001"]) expect(refusal).toContain(cmd);
+  });
+
   it("the implement prompt only uses placeholders the tool fills in, and embeds the spec", () => {
     const { files } = sdlcOf({});
     const prompt = files.find((f) => f.path === ".ai/prompts/implement.md")!.content;
