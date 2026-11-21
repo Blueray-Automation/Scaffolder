@@ -138,6 +138,7 @@ while time.time() < deadline:
             target = next(specs.glob("FEAT-001-*"))
             for name in ("prd.md", "acceptance.json"):
                 text = (next(specs.glob("FEAT-000-*")) / name).read_text(encoding="utf-8")
+                text = text.replace("# FEAT-000: Hello World", "# FEAT-000: Customer Login")  # a feature of its own: the folder is named after it
                 (target / name).write_text(text.replace("FEAT-000", "FEAT-001"), encoding="utf-8")
         os.write(fd, b"\\x04" if mode == "eof" else b"\\n")
 _, status = os.waitpid(pid, 0)
@@ -154,7 +155,10 @@ print(json.dumps({"code": os.waitstatus_to_exitcode(status), "sent": sent, "outp
   const reset = () => {
     rmSync(opened(), { force: true });
     rmSync(clipboard(), { force: true });
-    rmSync(join(dir, ".ai", "specs", "FEAT-001-requirements"), { recursive: true, force: true });
+    // a failed draft keeps the file's name (FEAT-001-requirements); a valid one is renamed after its feature
+    for (const name of readdirSync(join(dir, ".ai", "specs")).filter((n) => n.startsWith("FEAT-001-"))) {
+      rmSync(join(dir, ".ai", "specs", name), { recursive: true, force: true });
+    }
   };
 
   beforeAll(() => {
@@ -361,7 +365,10 @@ except SystemExit as e:
       expect(r.output).toContain("== hand-off to Claude desktop app ==");
       expect(r.sent, r.output).toBe(true);
       expect(r.code, r.output).toBe(0);
-      expect(r.output).toContain("Draft ready: .ai/specs/FEAT-001-requirements/");
+      // the folder is named after the feature in the PRD's title ("Customer Login"), not after requirements.md
+      expect(r.output).toContain("Draft ready: .ai/specs/FEAT-001-customer-login/");
+      expect(existsSync(join(dir, ".ai", "specs", "FEAT-001-customer-login", "prd.md"))).toBe(true);
+      expect(existsSync(join(dir, ".ai", "specs", "FEAT-001-requirements"))).toBe(false);
       expect(r.output).toContain("opened Claude desktop app");
       expect(r.output).toContain("the instruction is on your clipboard");
 

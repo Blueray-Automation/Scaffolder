@@ -45,7 +45,7 @@ cd ../my-app
 **Build a feature from a requirements document (or from a spec you write):**
 
 ```bash
-./scripts/sdlc spec requirements.pdf    # an agent drafts .ai/specs/FEAT-001-requirements/{prd.md,acceptance.json} from the PDF; the tool validates the draft
+./scripts/sdlc spec requirements.pdf    # an agent drafts .ai/specs/FEAT-001-<feature>/{prd.md,acceptance.json} from the PDF; the tool validates the draft
 # YOU REVIEW the draft: it is the contract, and an AI only drafted it (skill: .ai/skills/review-spec)
 ./scripts/sdlc implement FEAT-001        # an AI agent writes tests, code, dependencies, config and the API contract; the loop proves it
 ```

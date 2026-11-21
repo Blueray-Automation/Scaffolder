@@ -14,12 +14,15 @@ You write only the spec: no code, no tests, and no other file. On Windows PowerS
 1. No document given: ask for its path and stop. It must exist and be a `.pdf`, `.docx`, `.md` or `.txt` file.
 2. `git status --short` must print nothing: the tool wants a clean tree so that your draft is the only change. Otherwise ask the person to commit or stash first, and stop.
 3. `./scripts/sdlc spec $ARGUMENTS --dry-run --agent claude` (quote the path if it has spaces) creates nothing and starts no agent. It reads the document, then prints
-   `would create: .ai/specs/FEAT-00N-<name>/` and `prompt: .ai/evidence/<run>/spec.prompt.md`. If the document describes several features, ask which one this is for, and add
-   `--focus "<that part>" --name <slug>` to the command.
-4. Create the folder it named and copy the source document into its `source/` subfolder (the CLI does that itself). Then **read the prompt file whole and do what it says**:
+   `would create: .ai/specs/FEAT-00N-<feature name>/` and `prompt: .ai/evidence/<run>/spec.prompt.md`. Read the prompt file to see what the document is about.
+   If it describes several features, ask which one this is for.
+4. Name the spec after the **feature**, never after the file: two to four lowercase words joined by hyphens, such as `customer-login` or `password-reset`, not `requirements`
+   or `requirements-pdf`. Run the same dry run again with `--name <that-slug>` (and `--focus "<that part>"` for one feature of several): it now prints the real folder,
+   `would create: .ai/specs/FEAT-00N-customer-login/`, and a prompt that points at it.
+5. Create the folder it named and copy the source document into its `source/` subfolder (the CLI does that itself). Then **read the prompt file whole and do what it says**:
    it names the two files to write, their format, and the rules (every criterion cites the part of the document it comes from; gaps are listed as ASSUMPTIONS).
    One thing changes because you can talk to the person: where it says to write questions to a file and stop, ask the person here and wait.
-5. Validate: `./scripts/sdlc implement FEAT-00N --dry-run --agent claude` runs nothing and must report `spec ok`. If it lists problems, fix the files and run it again,
+6. Validate: `./scripts/sdlc implement FEAT-00N --dry-run --agent claude` runs nothing and must report `spec ok`. If it lists problems, fix the files and run it again,
    up to three times; then stop and show what is still wrong.
-6. Report: how many acceptance criteria and checks you wrote, every ASSUMPTION, and every open question. Say clearly that this is a **draft written by an AI**: the person
+7. Report: how many acceptance criteria and checks you wrote, every ASSUMPTION, and every open question. Say clearly that this is a **draft written by an AI**: the person
    compares it with the document, confirms or changes each ASSUMPTION, sets `Status: Accepted`, and only then runs `/sdlc-implement FEAT-00N`. Do not implement anything.
