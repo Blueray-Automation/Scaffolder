@@ -43,7 +43,7 @@ export function buildSdlcConfig(cfg: ScaffolderConfig): Record<string, unknown> 
       name: "web",
       cwd: cfg.layout.webDir,
       cmd: `npm run start -- --port ${cfg.web.port} --hostname 127.0.0.1`,
-      env: { API_URL: backendUrl, NEXT_TELEMETRY_DISABLED: "1" },
+      env: { ...(cfg.backend.enabled ? { API_URL: backendUrl } : {}), NEXT_TELEMETRY_DISABLED: "1" },
       pathPrepend: [],
       healthUrl: `${webUrl}/`,
       startTimeoutSeconds: 90,
@@ -96,7 +96,7 @@ export function buildSdlcConfig(cfg: ScaffolderConfig): Record<string, unknown> 
       // Requirements and checks: frozen while healing (healing fixes code, not the goalposts).
       protectedWhileHealing: [".ai/specs/"],
       // Allowed to change, but every change is listed in the evidence report for review.
-      guarded: [".ai/contract/"],
+      guarded: cfg.backend.enabled ? [".ai/contract/"] : [],
     },
     // Setup commands here are OS-neutral (they must run in sh, cmd.exe and PowerShell alike); CI uses the bash forms.
     // Python steps carry the minimum version and placeholders that `sdlc setup` fills in: {python} is an interpreter it
@@ -123,7 +123,7 @@ export function buildSdlcConfig(cfg: ScaffolderConfig): Record<string, unknown> 
         provides: dockerProvides,
       },
       local: {
-        provides: cfg.backend.enabled ? ["backend", ...(cfg.web.enabled ? ["web"] : [])] : [],
+        provides: [...(cfg.backend.enabled ? ["backend"] : []), ...(cfg.web.enabled ? ["web"] : [])],
         services: localServices,
       },
     },

@@ -1,6 +1,6 @@
 ---
 name: implement-feature
-description: Implement a specified feature in small test-first vertical slices until the verification loop is green. Use after the PRD and contract exist.
+description: Implement a specified feature in small test-first vertical slices until the verification loop is green. Use after the PRD<%#hasBackend%> and contract exist<%/hasBackend%><%^hasBackend%> exists<%/hasBackend%>.
 ---
 
 # Implement a feature
@@ -17,8 +17,13 @@ description: Implement a specified feature in small test-first vertical slices u
 
 ## Then
 5. Add or refine the `acceptance.json` checks for the AC you just finished.
+<%#hasBackend%>
 6. Update the contract snapshot if the API changed (define-contract skill).
 7. `./scripts/sdlc verify`. Red? Follow the fix-failing-gate skill. Green? Open the PR with the report summary.
+<%/hasBackend%>
+<%^hasBackend%>
+6. `./scripts/sdlc verify`. Red? Follow the fix-failing-gate skill. Green? Open the PR with the report summary.
+<%/hasBackend%>
 
 ## Conventions
 <%#hasBackend%>

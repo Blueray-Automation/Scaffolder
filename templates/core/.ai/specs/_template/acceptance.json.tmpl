@@ -6,9 +6,16 @@
       "name": "TODO: what fact does this check prove?",
       "covers": ["AC-001"],
       "type": "http",
+<%#hasBackend%>
       "target": "backend",
       "method": "GET",
       "path": "/health",
+<%/hasBackend%>
+<%^hasBackend%>
+      "target": "web",
+      "method": "GET",
+      "path": "/",
+<%/hasBackend%>
       "expect": { "status": 200 }
     }
   ]

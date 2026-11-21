@@ -4,11 +4,14 @@ import React, { useDeferredValue, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, CircleAlert, Copy, Cpu, Download, FileCog, FolderTree, Terminal, Upload } from "lucide-react";
 import { parse } from "yaml";
 import {
+  PRESETS,
+  applyPreset,
   configToYaml,
-  deepMerge,
   defaultConfig,
+  detectPreset,
   generateProject,
   hasErrors,
+  presetProblems,
   resolveConfig,
   toZip,
   type GenerateResult,
@@ -17,15 +20,15 @@ import {
 import { cx, downloadBlob } from "@/lib/utils";
 import { ConfigForm } from "./ConfigForm";
 import { FileExplorer } from "./FileExplorer";
-import { Badge, Button } from "./ui";
+import { Badge, Button, Tabs, tabDomId, type TabItem } from "./ui";
 
 type Tab = "files" | "config" | "cli";
 
-const PRESETS: Array<{ id: string; label: string; hint: string; patch: Record<string, unknown> }> = [
-  { id: "fullstack", label: "Full-stack", hint: "FastAPI + Next.js + PostgreSQL", patch: {} },
-  { id: "api", label: "API + database", hint: "FastAPI + PostgreSQL", patch: { web: { enabled: false } } },
-  { id: "api-lite", label: "API only", hint: "FastAPI, no database", patch: { web: { enabled: false }, database: { type: "none" } } },
-];
+/** What each "Start from" tab shows. Availability comes from the validator, so a new pack lights its tab up on its own. */
+const PRESET_TABS: TabItem[] = PRESETS.map((p) => {
+  const problems = presetProblems(p);
+  return { id: p.id, label: p.label, unavailable: problems.length > 0, title: problems.length > 0 ? `Coming soon. ${problems.join(" ")}` : p.hint };
+});
 
 function safeGenerate(config: ScaffolderConfig): { result?: GenerateResult; crash?: string } {
   try {
@@ -46,6 +49,7 @@ export default function ScaffolderApp() {
   const { result, crash } = useMemo(() => safeGenerate(deferred), [deferred]);
   const resolved = useMemo(() => resolveConfig(deferred), [deferred]);
   const yaml = useMemo(() => configToYaml(resolved), [resolved]);
+  const activePreset = useMemo(() => detectPreset(config), [config]);
 
   const issues = result?.issues ?? [];
   const errors = issues.filter((i) => i.level === "error");
@@ -113,19 +117,32 @@ export default function ScaffolderApp() {
       <main className="mx-auto grid w-full max-w-7xl flex-1 grid-cols-1 gap-6 px-4 py-6 sm:px-6 lg:grid-cols-12">
         <div className="space-y-4 lg:col-span-5">
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-            <p className="mb-2 text-xs font-medium text-zinc-400">Start from</p>
-            <div className="grid grid-cols-3 gap-2">
-              {PRESETS.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setConfig(deepMerge(defaultConfig(), p.patch))}
-                  className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5 text-left transition-colors hover:border-indigo-500/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60"
-                >
-                  <span className="block text-xs font-semibold text-zinc-100">{p.label}</span>
-                  <span className="block text-[11px] text-zinc-500">{p.hint}</span>
-                </button>
-              ))}
+            <p id="preset-label" className="mb-2 text-xs font-medium text-zinc-400">Start from</p>
+            <Tabs
+              items={PRESET_TABS}
+              value={activePreset?.id}
+              onSelect={(id) => {
+                const preset = PRESETS.find((p) => p.id === id);
+                if (preset) setConfig((c) => applyPreset(c, preset));
+              }}
+              idPrefix="preset"
+              panelId="preset-panel"
+              labelledBy="preset-label"
+            />
+            <div
+              role="tabpanel"
+              id="preset-panel"
+              aria-labelledby={activePreset ? tabDomId("preset", activePreset.id) : undefined}
+              aria-label={activePreset ? undefined : "Custom stack"}
+              className="mt-2.5 text-[11px] text-zinc-500"
+            >
+              {activePreset ? (
+                <>
+                  <span className="font-medium text-zinc-300">{activePreset.label}</span>: {activePreset.hint}
+                </>
+              ) : (
+                "Custom stack: you changed the stack by hand. Pick a tab to switch to a preset (your other settings are kept)."
+              )}
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <Button onClick={() => fileInput.current?.click()}>

@@ -21,5 +21,5 @@ Every feature lives in `.ai/specs/FEAT-<nnn>-<slug>/` with `prd.md` and `accepta
 ## acceptance.json
 - Each check has `id`, `name`, `covers` (AC ids), `type` (`http` | `cmd` | `file`) and an `expect`/`run`.
 - Every AC is covered by at least one check; every check covers at least one AC. `./scripts/sdlc facts` fails otherwise.
-- Prefer `http` checks against the running system. Use `cmd` to tie an AC to one specific test (`pytest -q path::test_name`).
+- Prefer `http` checks against the running system. Use `cmd` to tie an AC to one specific test (<%#hasBackend%>`pytest -q path::test_name`<%/hasBackend%><%^hasBackend%>`npx vitest run path/to/file.test.tsx`<%/hasBackend%>).
 - A check you cannot run in some runtime declares `needs` (e.g. `["db"]`) instead of being weakened.

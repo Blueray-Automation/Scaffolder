@@ -1,0 +1,8 @@
+/** The longest name that is used; a longer one is ignored (FEAT-000, AC-003). */
+export const MAX_NAME_LENGTH = 50;
+
+/** The text the home page shows. Pure, so it is tested without rendering anything. */
+export function greeting(name?: string): string {
+  const who = name?.trim() ?? "";
+  return `Hello, ${who.length > 0 && who.length <= MAX_NAME_LENGTH ? who : "World"}!`;
+}

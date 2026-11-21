@@ -18,6 +18,14 @@ const MATRIX: Record<string, Json> = {
   "backend only": { web: { enabled: false } },
   "no database": { database: { type: "none" } },
   "backend only, no database": { web: { enabled: false }, database: { type: "none" } },
+  "web only (Next.js, no API)": { backend: { enabled: false }, database: { type: "none" } },
+  "web only, no docker, no cd, local runtime": {
+    backend: { enabled: false },
+    database: { type: "none" },
+    docker: { enabled: false },
+    cd: { enabled: false },
+    sdlc: { runtime: "local" },
+  },
   "custom directories": { layout: { backendDir: "services/api", webDir: "apps/web" } },
   "python 3.11, node 24, custom ports": {
     backend: { version: "3.11", port: 9100 },
@@ -149,6 +157,90 @@ describe.each(Object.entries(MATRIX))("generated project: %s", (_name, patch) =>
           .sort(),
       );
     }
+  });
+});
+
+describe("generated project: web only (Next.js, no API)", () => {
+  const WEB_ONLY = { backend: { enabled: false }, database: { type: "none" } };
+  const { files } = generate(WEB_ONLY);
+  const index = byPath(files);
+  const text = (path: string) => index.get(path)!.content;
+  const sdlc = () => JSON.parse(text(".ai/sdlc.json")) as Json;
+
+  it("has the web app and nothing of the backend, the contract or an API client", () => {
+    const paths = files.map((f) => f.path);
+    expect(paths).toContain("web/package.json");
+    expect(paths.filter((p) => p.startsWith("backend/"))).toEqual([]);
+    expect(paths.filter((p) => p.includes("contract") || p.includes("openapi"))).toEqual([]);
+    expect(paths).not.toContain("web/src/lib/api.ts");
+    expect(paths).not.toContain("web/src/__tests__/api.test.ts");
+    expect(paths).toContain("web/src/lib/greeting.ts");
+    expect(paths).toContain("web/src/__tests__/greeting.test.ts");
+  });
+
+  it("the page needs no API: it renders its own greeting", () => {
+    const page = text("web/src/app/page.tsx");
+    expect(page).toContain("greeting(");
+    expect(page).not.toMatch(/fetchHello|API_URL|@\/lib\/api/);
+    expect(text("web/Dockerfile")).not.toContain("API_URL");
+  });
+
+  it("runs one web service in compose, with no API_URL and nothing to wait for", () => {
+    const compose = parse(text("docker-compose.yml")) as Json;
+    expect(Object.keys(compose.services)).toEqual(["web"]);
+    expect(compose.services.web.depends_on).toBeUndefined();
+    expect(compose.services.web.environment).toBeUndefined();
+    expect(text(".env.example")).not.toMatch(/API_URL|BACKEND|CORS|POSTGRES/);
+  });
+
+  it("the loop runs the web app alone: one target, one service, no contract to guard", () => {
+    const cfg = sdlc();
+    expect(Object.keys(cfg.runtime.targets)).toEqual(["web"]);
+    expect(cfg.runtime.docker.provides).toEqual(["web"]);
+    expect(cfg.runtime.local.provides).toEqual(["web"]);
+    expect(cfg.runtime.local.services.map((s: Json) => s.name)).toEqual(["web"]);
+    expect(cfg.runtime.local.services[0].env.API_URL).toBeUndefined();
+    expect(cfg.integrity.guarded).toEqual([]);
+    expect((cfg.gates as Json[]).map((g) => g.id).filter((id) => id.startsWith("backend."))).toEqual([]);
+    expect((cfg.setup as Json[]).map((s) => s.id)).toEqual(["web.install"]);
+  });
+
+  it("the sample spec is about the page, and every check hits the web target", () => {
+    const acceptance = JSON.parse(text(".ai/specs/FEAT-000-hello-world/acceptance.json")) as Json;
+    expect((acceptance.checks as Json[]).map((c) => [c.type, c.target])).toEqual([["http", "web"], ["http", "web"], ["http", "web"]]);
+    expect(text(".ai/specs/FEAT-000-hello-world/prd.md")).not.toMatch(/backend|\/health|openapi/i);
+    const blank = JSON.parse(text(".ai/specs/_template/acceptance.json")) as Json;
+    expect(blank.checks[0].target).toBe("web");
+  });
+
+  it("the agent's rules and prompts never send it to a backend that does not exist", () => {
+    const paths = files.map((f) => f.path);
+    expect(paths).not.toContain(".ai/rules/contract.md");
+    expect(paths).not.toContain(".ai/skills/define-contract/SKILL.md");
+    for (const path of paths.filter((p) => /^(\.ai\/(rules|skills|prompts)\/|\.ai\/README\.md|AGENTS\.md|README\.md|\.github\/pull_request)/.test(p))) {
+      expect(text(path), path).not.toMatch(/backend\.contract|openapi|app\.export_openapi|\.ai\/contract|rules\/contract\.md|define-contract/);
+    }
+    expect(text(".ai/prompts/spec.md")).toContain('"target": "web"');
+    expect(text(".ai/prompts/spec.md")).not.toContain('"target": "backend"');
+    expect(text(".ai/rules/web-nextjs.md")).not.toContain("API_URL");
+  });
+
+  it("CI has a web job and no backend job", () => {
+    const ci = parse(text(".github/workflows/ci.yml")) as Json;
+    expect(Object.keys(ci.jobs)).toEqual(["web", "repo", "facts"]);
+  });
+
+  it("a project with a backend is unchanged: API client, contract and the wiring to the API", () => {
+    const full = byPath(generate({}).files);
+    expect(full.has("web/src/lib/api.ts")).toBe(true);
+    expect(full.has("web/src/lib/greeting.ts")).toBe(false);
+    expect(full.has(".ai/rules/contract.md")).toBe(true);
+    const compose = parse(full.get("docker-compose.yml")!.content) as Json;
+    expect(compose.services.web.depends_on).toEqual({ backend: { condition: "service_healthy" } });
+    expect(compose.services.web.environment.API_URL).toBeDefined();
+    const loop = JSON.parse(full.get(".ai/sdlc.json")!.content) as Json;
+    expect(loop.runtime.local.provides).toEqual(["backend", "web"]);
+    expect(loop.integrity.guarded).toEqual([".ai/contract/"]);
   });
 });
 
@@ -384,8 +476,12 @@ describe("validation", () => {
     expect(errorPaths({ cache: { type: "redis" } })).toContain("cache.type");
   });
 
+  it("accepts a web app on its own, but not with a database, which needs a backend", () => {
+    expect(hasErrors(check({ backend: { enabled: false }, database: { type: "none" } }))).toBe(false);
+    expect(errorPaths({ backend: { enabled: false } })).toEqual(["database.type"]);
+  });
+
   it("rejects incoherent combinations", () => {
-    expect(errorPaths({ backend: { enabled: false } })).toContain("web.enabled");
     expect(errorPaths({ web: { enabled: false }, backend: { enabled: false } })).toContain("backend.enabled");
     expect(errorPaths({ web: { port: 8000 } })).toContain("web.port");
     expect(errorPaths({ docker: { enabled: false } })).toContain("sdlc.runtime");

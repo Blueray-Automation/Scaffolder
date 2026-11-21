@@ -1,3 +1,4 @@
+<%#hasBackend%>
 import { HelloCard, type HelloCardProps } from "@/components/HelloCard";
 import { fetchHello } from "@/lib/api";
 
@@ -16,3 +17,20 @@ async function loadGreeting(): Promise<HelloCardProps> {
 export default async function HomePage() {
   return <HelloCard {...await loadGreeting()} />;
 }
+<%/hasBackend%>
+<%^hasBackend%>
+import { HelloCard } from "@/components/HelloCard";
+import { greeting } from "@/lib/greeting";
+
+// Rendered per request: the greeting depends on the ?name= in the address.
+export const dynamic = "force-dynamic";
+
+interface HomePageProps {
+  searchParams: Promise<{ name?: string | string[] }>;
+}
+
+export default async function HomePage({ searchParams }: HomePageProps) {
+  const { name } = await searchParams;
+  return <HelloCard message={greeting(Array.isArray(name) ? name[0] : name)} />;
+}
+<%/hasBackend%>

@@ -32,7 +32,9 @@ If a failure below is the same as one listed above, your previous fix did not wo
 ## Hard rules (the loop enforces some of these and stops with an integrity violation)
 - DO NOT edit `.ai/sdlc.json`, `scripts/sdlc*`, `.github/workflows/`, or anything under `.ai/specs/` (PRDs and acceptance checks). Healing fixes code, not the definition of correct.
 - DO NOT delete, skip (`xfail`, `.skip`, `-k` filters) or weaken tests, lower coverage thresholds, add `# noqa` / `eslint-disable` / `type: ignore` to silence a real problem, or mock the thing under test.
+<%#hasBackend%>
 - DO NOT regenerate `.ai/contract/openapi.json` just to make the contract gate pass. It changes only when the PRD intentionally changes the API.
+<%/hasBackend%>
 - If you believe the spec itself is wrong, STOP and say so in your final message instead of changing it.
 
 ## Final message

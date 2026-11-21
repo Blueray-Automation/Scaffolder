@@ -1,6 +1,7 @@
 {
   "feature": "FEAT-000",
   "checks": [
+<%#hasBackend%>
     {
       "id": "CHK-001",
       "name": "Liveness endpoint answers ok",
@@ -76,5 +77,35 @@
       "path": "/",
       "expect": { "status": 200, "bodyContains": ["Hello, World!"] }
     }<%/hasWeb%>
+<%/hasBackend%>
+<%^hasBackend%>
+    {
+      "id": "CHK-001",
+      "name": "Default greeting",
+      "covers": ["AC-001"],
+      "type": "http",
+      "target": "web",
+      "path": "/",
+      "expect": { "status": 200, "bodyContains": ["Hello, World!"] }
+    },
+    {
+      "id": "CHK-002",
+      "name": "Personalised greeting",
+      "covers": ["AC-002"],
+      "type": "http",
+      "target": "web",
+      "path": "/?name=Ada",
+      "expect": { "status": 200, "bodyContains": ["Hello, Ada!"] }
+    },
+    {
+      "id": "CHK-003",
+      "name": "Over-long name is ignored",
+      "covers": ["AC-003"],
+      "type": "http",
+      "target": "web",
+      "path": "/?name=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expect": { "status": 200, "bodyContains": ["Hello, World!"] }
+    }
+<%/hasBackend%>
   ]
 }

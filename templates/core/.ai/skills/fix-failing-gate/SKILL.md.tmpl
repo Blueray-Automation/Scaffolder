@@ -20,13 +20,15 @@ description: Diagnose and fix a failing verification gate or fact check at its r
 | unit test | real regression, or the test encoded old behaviour | code; edit the test ONLY if the PRD changed behaviour |
 | coverage | untested branch | add the test (write-tests skill) or delete dead code |
 | build | import/type/config error | code |
+<%#hasBackend%>
 | contract drift | API changed unintentionally | code; snapshot only if the PRD changed the API |
+<%/hasBackend%>
 | fact check | running system disagrees with the PRD | code; if the CHECK seems wrong, the spec is wrong: stop and report |
 | runtime failed to start | bad env var, port taken, image build error | read `logs/runtime-*.log` |
 | secrets | credential-like string committed | remove it, rotate if real |
 
 ## Never
-Skip/xfail/delete tests, lower thresholds, add blanket suppressions, regenerate the contract to hide drift, edit `.ai/sdlc.json`, `scripts/sdlc*`, `.github/workflows/` or (while healing) `.ai/specs/`. The loop will stop with exit code 4.
+Skip/xfail/delete tests, lower thresholds, add blanket suppressions,<%#hasBackend%> regenerate the contract to hide drift,<%/hasBackend%> edit `.ai/sdlc.json`, `scripts/sdlc*`, `.github/workflows/` or (while healing) `.ai/specs/`. The loop will stop with exit code 4.
 
 ## If stuck
 Same failure twice? Your hypothesis is wrong: re-read the raw output, add a failing test that isolates it, bisect with `git diff`. After that, report what you know and what blocks you.

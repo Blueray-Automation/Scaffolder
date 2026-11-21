@@ -26,12 +26,17 @@ Requirements: `python3` (3.9+ for the tooling<%#hasBackend%>, <%pythonVersion%> 
 - **`<%backendDir%>/`**: FastAPI service with `/health`, `/ready`<%#hasDb%> (checks PostgreSQL)<%/hasDb%>, `/api/v1/hello`, typed settings, structured errors, pytest + ruff + mypy preconfigured.
 <%/hasBackend%>
 <%#hasWeb%>
+<%#hasBackend%>
 - **`<%webDir%>/`**: Next.js (App Router, TypeScript) page that renders the greeting fetched from the API at request time; Vitest + ESLint + `tsc` preconfigured.
+<%/hasBackend%>
+<%^hasBackend%>
+- **`<%webDir%>/`**: Next.js (App Router, TypeScript) page that greets the visitor, by `?name=` when the address gives one. It has no separate API; Vitest + ESLint + `tsc` preconfigured.
+<%/hasBackend%>
 <%/hasWeb%>
 <%#hasDocker%>
 - **`docker-compose.yml`**: the whole stack with health checks<%#hasDb%> and PostgreSQL <%db.version%><%/hasDb%>; also what the facts stage runs against.
 <%/hasDocker%>
-- **`.ai/`**: rules, skills (agent-neutral playbooks), prompts, specs and the API contract snapshot.
+- **`.ai/`**: rules, skills (agent-neutral playbooks), prompts<%#hasBackend%>, specs and the API contract snapshot<%/hasBackend%><%^hasBackend%> and specs<%/hasBackend%>.
 - **`scripts/sdlc`**: the verification loop (see below).
 <%#hasCi%>
 - **`.github/workflows/`**: `ci.yml`<%#hasCd%> and `cd.yml` (build once, deploy through <%#environments%>`<%name%>` <%/environments%>)<%/hasCd%>.
@@ -48,7 +53,7 @@ PRD (AC-001...)  ->  acceptance.json (checks)  ->  code + tests
               stops: green | <%maxIterations%> iterations | <%noProgressLimit%> identical failures | spec/gate files tampered with
 ```
 
-- **Gates** (lint, types, unit tests with coverage floors, build, API-contract drift, security) run first.
+- **Gates** (lint, types, unit tests with coverage floors, build,<%#hasBackend%> API-contract drift,<%/hasBackend%> security) run first.
 - **Facts** then start the real system and check every acceptance criterion in the PRD against it. A criterion without a check fails verification: *an unverified requirement is not done*.
 - Every run writes evidence (logs, `results.json`, `report.md`) to `.ai/evidence/<run>/`; `latest/` is the newest. CI uploads it as an artifact and in the job summary.
 - Heal prompts go to the command in `.ai/sdlc.json` -> `agent.command` (any CLI that reads stdin), or to you if it is empty.
