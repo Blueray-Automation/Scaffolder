@@ -17,7 +17,7 @@ The rule it enforces: *done means `./scripts/sdlc verify` exits 0 and you can sh
 | `./scripts/sdlc implement <FEAT-id>` | **Spec in, verified code out.** Gives your `prd.md` + `acceptance.json` to the agent, installs what it adds, verifies, heals |
 | `./scripts/sdlc sync` | Installs dependencies only if a manifest (`pyproject.toml`, `package.json`) changed since the last install |
 | `./scripts/sdlc feature <name>` | `implement` plus PRD drafting from a `--brief`, and `--deploy <env>` |
-| `./scripts/sdlc new <slug>` | Creates a feature spec from the template |
+| `./scripts/sdlc new <slug>` | Creates an **empty** feature spec from the template, by name (`new user-login`). It does not read documents: for a `.pdf`, `.docx`, `.md` or `.txt` use `spec` |
 | `./scripts/sdlc deploy <env>` | Runs the deploy script, then checks the live URL |
 | `./scripts/sdlc secrets` | Scans for committed secrets |
 | `./scripts/sdlc report` | Prints the latest report |

@@ -198,6 +198,8 @@ Read `.ai/evidence/latest/report.md`, then the prompt the agent got (`implement.
 ### `verify` fails right after `./scripts/sdlc new`
 Expected. The new PRD still contains `TODO(prd)` placeholders. Finish the PRD and `acceptance.json`.
 
+If you have a requirements document, don't use `new`: it only copies the empty template and never reads a file (it now refuses a `.pdf`/`.docx`/`.md`/`.txt` argument). Delete the empty `.ai/specs/FEAT-00N-<name>/` folder and run `./scripts/sdlc spec requirements.pdf`, which drafts both files from the document.
+
 ### `AC-00x has no check: an unverified requirement is not done`
 Add a check to `acceptance.json` with `"covers": ["AC-00x"]`, or remove the criterion if it isn't a requirement.
 
