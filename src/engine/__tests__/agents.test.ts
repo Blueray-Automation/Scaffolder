@@ -175,7 +175,8 @@ describe.skipIf(process.platform === "win32")("sdlc agent: list, choose, and use
 
   const evidenceRuns = () => {
     const root = join(dir, ".ai", "evidence");
-    return readdirSync(root).filter((n) => n.endsWith("-spec-requirements")).sort();
+    // two runs in the same second get a "-2" suffix, so match that too
+    return readdirSync(root).filter((n) => /-spec-requirements(-\d+)?$/.test(n)).sort();
   };
 
   it("an agent that is not signed in is reported as that, once, instead of 'the draft has TODO placeholders' three times", () => {
@@ -194,6 +195,48 @@ describe.skipIf(process.platform === "win32")("sdlc agent: list, choose, and use
     const logs = readdirSync(join(dir, ".ai", "evidence", runs[runs.length - 1]!)).filter((n) => n.endsWith(".agent.log"));
     expect(logs).toEqual(["spec-1.agent.log"]);
     rmSync(join(bin, "claude"));
+  });
+
+  it("an agent whose model no longer exists (an out-of-date CLI) is named as that, with its version, and stops the run", () => {
+    fake(
+      "claude",
+      `if [ "$1" = "--version" ]; then echo '1.0.51 (Claude Code)'; exit 0; fi
+cat >/dev/null
+echo 'API Error: 404 {"type":"error","error":{"type":"not_found_error","message":"model: claude-sonnet-4-20250514"}}'
+exit 1
+`,
+    );
+    const run = sh(["spec", "requirements.md", "--allow-dirty"]);
+    expect(run.status).toBe(2);
+    const text = out(run);
+    expect(text).toContain("agent said: API Error: 404");
+    expect(text).toContain("The agent could not use its AI model, so it did nothing");
+    expect(text).toMatch(/The one that ran: .*claude \(1\.0\.51 \(Claude Code\)\)/);
+    expect(text).toContain("npm install -g @anthropic-ai/claude-code@latest");
+    expect(text).toContain("which -a claude");
+    expect(text).not.toContain("not signed in");
+    expect(text, "must not go on to validate and retry").not.toMatch(/draft is not valid|attempt 2/);
+    rmSync(join(bin, "claude"));
+  });
+
+  it("only a missing model counts: a rate limit is still just 'any other failure'", () => {
+    const PROBE = `
+import importlib.util, sys, tempfile
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("sdlc", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+def kind(text, code=1):
+    d = Path(tempfile.mkdtemp()); (d / "t.agent.log").write_text(text, encoding="utf-8")
+    return m.agent_blocker(d, "t", code)
+print(kind('API Error: 404 {"type":"error","error":{"type":"not_found_error","message":"model: claude-sonnet-4-20250514"}}'))
+print(kind("Error: model 'gpt-3' does not exist"))
+print(kind("Not logged in · Please run /login"))
+print(kind("rate limit reached, try again in a minute"))
+print(kind('API Error: 404 {"type":"error","error":{"type":"not_found_error"}}', code=0))
+`;
+    const r = spawnSync(python, ["-I", "-c", PROBE, join(dir, "scripts", "sdlc.py")], { cwd: dir, encoding: "utf8" });
+    expect(r.stderr).toBe("");
+    expect(r.stdout.split("\n").slice(0, 5)).toEqual(["model", "model", "signed_out", "", ""]);
   });
 
   it("any other agent failure shows what the agent said, and validation still decides about the draft", () => {
