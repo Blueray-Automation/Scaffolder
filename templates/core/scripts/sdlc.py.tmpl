@@ -15,7 +15,7 @@ Standard library only (Python 3.9+). Configured by .ai/sdlc.json; see .ai/README
   agent     see which AI agents are installed and choose one (command-line agents, the Claude desktop app, a desktop app you drive, or your own)
   feature   drive one feature through PRD -> Code -> Test (-> Deploy)
   sync      install dependencies, only if the manifests changed since the last install
-  new       create a feature spec from the template
+  new       create an empty feature spec from the template, by NAME (new user-login); for a document use `spec`
   deploy    deploy an image tag to an environment, then verify facts there
   secrets   scan the working tree for committed secrets
   up|down   start/stop the runtime used by facts
@@ -2272,7 +2272,25 @@ def slugify(s: str) -> str:
     return re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9]+", "-", s.lower())).strip("-") or "feature"
 
 
+def looks_like_document(arg: str) -> bool:
+    """True when `new` was given a requirements document (requirements.pdf) instead of a feature name (user-login)."""
+    if Path(arg).suffix.lower() in SPEC_SOURCES:
+        return True
+    try:
+        return Path(arg).expanduser().is_file()
+    except OSError:
+        return False
+
+
 def cmd_new(cfg: dict, args: argparse.Namespace) -> int:
+    if looks_like_document(args.slug):
+        # `new` only copies the empty template, so a document would be silently ignored and leave a PRD full of TODO(prd)
+        say(bad(f"`new` takes a feature name, not a document: '{args.slug}' would only create an empty spec and never be read."))
+        say("To draft the spec from the document with your agent:")
+        say(f"  ./scripts/sdlc spec {args.slug}")
+        say("To write the spec yourself, give `new` a short name:")
+        say("  ./scripts/sdlc new user-login")
+        return EXIT_USAGE
     base = ROOT / cfg["facts"]["specsDir"]
     slug, title = slugify(args.slug), args.title or args.slug.replace("-", " ").title()
     existing = [p for p in base.glob("FEAT-*") if p.name.split("-", 2)[2] == slug]
@@ -2519,7 +2537,7 @@ def build_parser() -> argparse.ArgumentParser:
     ag.add_argument("--reset", action="store_true", help="forget your choice and use the project default again")
     sub.add_parser("sync")
     nw = sub.add_parser("new")
-    nw.add_argument("slug")
+    nw.add_argument("slug", help="a short feature name such as user-login (not a document: use `spec` for requirements.pdf)")
     nw.add_argument("--title")
     dp = sub.add_parser("deploy")
     dp.add_argument("environment")
