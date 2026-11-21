@@ -24,12 +24,13 @@ Route A, from a document:          Route B, by hand:
 > **How much was tested.** Everything around the agent (reading the document, the prompt, validation and retries, the spec check, the baseline, dependency install,
 > the integrity guard, questions, verification) is tested end to end with a *scripted* agent that does what a good AI is told to do. The `claude`, `codex`, `gemini`, `copilot` and `cursor`
 > presets follow each tool's documented non-interactive mode but have **not been run against the real tools**, so how well a particular AI drafts specs and writes code is untested here.
+> The desktop options ([`claude-desktop` and the `handoff-*` agents](Desktop-Apps)) are covered the same way: tested end to end with fakes, and `claude-desktop` was also run once for real on macOS; the apps' own windows were not driven.
 > Use `--dry-run` first (below) and expect to tune your first prompt.
 
 ## Before you start (once)
 
 1. A project from [Getting Started](Getting-Started) that passes `./scripts/sdlc verify`.
-2. An **AI agent CLI**, installed and signed in. You do not have to decide this up front, and it does not have to be the project's default: see which are installed on
+2. An **AI agent**: a CLI, or a desktop app (the Claude desktop app, Cursor, VS Code: see [Using a Desktop App](Desktop-Apps)), installed and signed in. You do not have to decide this up front, and it does not have to be the project's default: see which are installed on
    your machine and pick one with `./scripts/sdlc agent` (below). The project's default comes from the web UI (**Verification loop -> AI agent**) or `sdlc.agent.preset`
    in `scaffolder.config.yaml`:
 
@@ -40,6 +41,8 @@ Route A, from a document:          Route B, by hand:
 | `gemini` | `gemini --approval-mode yolo -p ...` ([docs](https://geminicli.com/docs/cli/headless/)) | needs the Gemini CLI; `yolo` approves every action, which it needs to run the tests |
 | `copilot` | `copilot -p "Read <prompt file> ..." --allow-all-tools` ([docs](https://docs.github.com/en/copilot/how-tos/copilot-cli/automate-copilot-cli/run-cli-programmatically)) | needs the Copilot CLI and a Copilot subscription; it takes the prompt as an argument, so it is pointed at the prompt file |
 | `cursor` | `cursor-agent -p --force "Read <prompt file> ..."` ([docs](https://cursor.com/docs/cli/headless)) | needs the Cursor CLI; `--force` lets it edit files |
+| `claude-desktop` | the same flags as `claude`, run with the Claude Code that the **Claude desktop app** keeps for its Code tab ([details](Desktop-Apps#the-claude-desktop-apps-own-claude-code-claude-desktop)) | needs the Claude desktop app, opened once and signed in; no `claude` on `PATH` needed, and no stale one in the way |
+| `handoff-claude`, `handoff-cursor`, `handoff-vscode` | opens the **Claude desktop app's Code tab**, Cursor or VS Code and waits for you ([details](Desktop-Apps#drive-a-desktop-app-yourself-hand-off)) | you let the app's agent work and press Enter; the checks, verify and heal then run as usual. Needs a terminal |
 | `custom` | any command that reads the prompt on stdin | e.g. another agent CLI; write `{prompt_file}` in the command to pass the prompt file's path instead |
 | `none` | nothing | a human does the coding; the tool prints the prompt |
 
@@ -51,11 +54,16 @@ Route A, from a document:          Route B, by hand:
 
 ```text
 AI agents (what drafts specs and writes code for you):
-  *1  claude   Claude Code (claude -p)            not installed
-              install: npm install -g @anthropic-ai/claude-code
-   2  codex    OpenAI Codex (codex exec)          installed     /usr/local/bin/codex
-   3  gemini   Google Gemini CLI (gemini -p)      not installed
-              install: npm install -g @google/gemini-cli
+  *1  claude          Claude Code (claude -p)            not installed
+                  install: npm install -g @anthropic-ai/claude-code
+   2  codex           OpenAI Codex (codex exec)          installed     /usr/local/bin/codex
+   3  gemini          Google Gemini CLI (gemini -p)      not installed
+                  install: npm install -g @google/gemini-cli
+   ...
+   6  claude-desktop  Claude desktop engine (unattended) installed     /Users/you/Library/Application Support/Claude/claude-code/.../claude
+
+  Desktop apps you drive (the tool opens the app and copies the instruction; you press Enter when the agent is done):
+   7  handoff-claude  Claude desktop app (you drive it)  found         /Applications/Claude.app
    ...
    c  custom   any command that reads the prompt on stdin (or names the prompt file with {prompt_file})
    n  none     a human does the coding; the tool prints the prompt and waits

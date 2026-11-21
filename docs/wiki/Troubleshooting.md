@@ -157,13 +157,20 @@ That is why it is a draft. Fix it in `prd.md` / `acceptance.json` (the review ch
 The tool refuses to spend an agent's time on an unfinished spec. It lists what is missing: `TODO(prd)` placeholders still in `prd.md`, a criterion with no check, or a check that cites a criterion that doesn't exist. Fix `prd.md` / `acceptance.json` and run again.
 
 ### `The agent cannot run: ... is not installed or not on PATH`
-The agent's program isn't installed. The tool then lists every agent it knows (claude, codex, gemini, copilot, cursor), which of them are installed on this machine and the install line for the rest.
+The agent's program isn't installed. The tool then lists every agent it knows (claude, codex, gemini, copilot, cursor, the Claude desktop app's engine and the desktop apps you can drive), which of them are installed on this machine and the install line for the rest.
 Pick one that is installed with `./scripts/sdlc agent` (or `./scripts/sdlc agent codex`), or install the missing one (links in the [tutorial](Tutorial-Add-a-Login-API#before-you-start-once)).
 For one run add `--agent <name>`. `./scripts/sdlc doctor` shows which agent is used and which are installed.
 
 ### `agent said: API Error: 404 ... not_found_error ... model: claude-...` / `The agent could not use its AI model`
 The agent asked for an AI model that no longer exists, so it did nothing and the tool stopped. This almost always means the agent's CLI is **out of date**: an old install keeps asking for the model that was its default back then. The message prints which program ran and its version.
 Update it (`npm install -g @anthropic-ai/claude-code@latest`, or `claude update`). If you have several installs, the first on `PATH` is the one that runs: `which -a claude` (Windows: `where claude`) lists them, so remove or update the stale one. Then run the same command again.
+Or skip the CLI: the Claude desktop app keeps its own, current Claude Code, and `./scripts/sdlc agent claude-desktop` uses it ([details](Desktop-Apps#the-claude-desktop-apps-own-claude-code-claude-desktop)). If the agent that failed *is* `claude-desktop`, update the app instead: **Claude > Check for Updates...** (macOS) or **Help > Check for Updates...** (Windows).
+
+### `The agent cannot run: the Claude desktop app's Claude Code was not found`
+The `claude-desktop` agent looks where the Claude desktop app keeps the Claude Code it downloads for its Code tab. Install the app ([claude.ai/download](https://claude.ai/download)), open it once and sign in, then run again. If it lives somewhere else, point the tool at it: `SDLC_CLAUDE_DESKTOP="/path/to/claude"`. See [Using a Desktop App](Desktop-Apps#the-claude-desktop-apps-own-claude-code-claude-desktop).
+
+### `a desktop app you drive needs a terminal to wait in, and this is not one`
+A `handoff-*` agent opens an app and waits for you to press Enter, so it cannot run in CI or with its input piped. Run it from a terminal, or choose an agent that runs by itself (`./scripts/sdlc agent`). See [Using a Desktop App](Desktop-Apps#drive-a-desktop-app-yourself-hand-off).
 
 ### `No agent is configured, so nothing can write the code`
 You (or the project) chose `none`, or the command is empty. Run `./scripts/sdlc agent` to see the options and choose one, or add `--agent <name>` for one run.
