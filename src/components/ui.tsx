@@ -148,7 +148,7 @@ export function Toggle({
       >
         <span
           className={cx(
-            "absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white transition-all",
+            "absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white shadow ring-1 ring-black/10 transition-all",
             checked ? "left-[18px]" : "left-0.5",
           )}
         />

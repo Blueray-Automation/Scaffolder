@@ -30,6 +30,8 @@ The web app has three pages, so nothing sends you to GitHub:
 - **Existing project** (`/existing`): an interactive guide to adding the `.ai/` setup to a repository you already have, with a command builder, the whole workflow step by step, and a live example of exactly what it writes.
 - **Docs** (`/docs`): this README and every wiki page, with search and Copy buttons on every command. They are rendered from the markdown files at build time, and the build fails on a link that goes nowhere, so the in-app copy cannot drift from the repository.
 
+The app is **light or dark**: it follows your system by default, and the switch in the header (sun, monitor, moon) overrides it. The choice is remembered in your browser, and the page is painted in the right theme from the first frame. The colors are theme tokens in `src/app/globals.css` (see `tailwind.config.ts`); tests check that the dark palette is exactly the original and that text meets WCAG AA contrast in light.
+
 **CLI** (same engine, for automation and CI):
 
 ```bash
