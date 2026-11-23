@@ -38,7 +38,8 @@ Where such guidance contradicts the code, or two files contradict each other, li
 1. **Explore with your tools** before you write: the manifests, the entry points, a few representative modules and their tests, the existing guidance.
    Describe what you saw, not what is typical for the framework.
 2. **Every claim cites evidence in backticks.** A path relative to the repository root (`src/api/users.ts`, `backend/app/`). The tool opens every path you cite
-   and rejects the draft if one does not exist. Paths inside code fences are not checked, so cite paths in sentences and list items.
+   and rejects the draft if one does not exist (a bare file name such as `ConfigForm.tsx` is accepted when a file of that name exists somewhere, but prefer the full path). Paths inside code fences are not checked, so cite paths in sentences and list items.
+   Backticks mean "this exists in the repository": write a file that only appears when a command runs (an `init` output, say) in plain words, without backticks.
 3. **Commands must exist.** `npm run <script>` (or pnpm, yarn, bun) must be a script in a package.json, `make <target>` a Makefile target, `./.ai/sdlc <command>` a real command.
 4. **When you are not sure, say so** under "Open questions" and mark guesses with `GUESS:`. A short true description beats a long plausible one.
 

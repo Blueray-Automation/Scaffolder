@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import datetime
+import fnmatch
 import hashlib
 import json
 import os
@@ -2183,20 +2184,42 @@ def path_claim(span: str) -> str | None:
     filey = "." in last and last.rsplit(".", 1)[-1].lower() in PATH_EXTENSIONS
     if "/" in s:
         return s if s.endswith("/") or filey or (ROOT / first).exists() or "*" in first else None
-    return s if filey or "*" in s else None
+    return s if filey or ("*" in s and "." in last) else None
+
+
+# Names of the files and folders anywhere in the repository (filled by validate_onboard). A draft that says "`ConfigForm.tsx`" or "`core/`"
+# under a folder it has just named is citing something real, and rejecting it would only teach agents to repeat the folder in every sentence.
+REPO_NAMES: set = set()
+
+
+def git_ignored(claim: str) -> bool:
+    """A path git ignores is a generated or local artefact (a build output, a virtual environment): citing it is not citing something that should be committed."""
+    if not (ROOT / ".git").exists():
+        return False
+    try:
+        return subprocess.run(["git", "check-ignore", "-q", "--", claim], cwd=str(ROOT), capture_output=True, timeout=10).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def path_exists(claim: str) -> bool:
+    bare = "/" not in claim.rstrip("/")
     if "*" in claim:
+        if bare:  # `*.test.ts`: some file or folder with a matching name
+            return any(fnmatch.fnmatch(name, claim.rstrip("/")) for name in REPO_NAMES)
         try:
             return next(ROOT.glob(claim.rstrip("/")), None) is not None
         except (ValueError, NotImplementedError, OSError):
             return False
-    return (ROOT / claim.rstrip("/")).exists()
+    if (ROOT / claim.rstrip("/")).exists():
+        return True
+    if bare and (claim.rstrip("/") in REPO_NAMES or (claim.startswith(".") and any(name.endswith(claim) for name in REPO_NAMES))):
+        return True  # a name (`orders.js`, `core/`) or a suffix (`.test.ts`) that exists somewhere
+    return git_ignored(claim)
 
 
 def suggest_paths(claim: str) -> str:
-    """For a cited file that is not where the draft says: the files of that name that do exist (a bare `utils.py` usually lives in a folder)."""
+    """For a cited file that is not where the draft says: the files of that name that do exist elsewhere."""
     name = claim.rstrip("/").rsplit("/", 1)[-1]
     close = [f for f in repo_files() if f.rsplit("/", 1)[-1] == name][:3]
     return f" (did you mean {', '.join('`' + f + '`' for f in close)}?)" if close else ""
@@ -2310,6 +2333,10 @@ ONBOARD_SECTIONS = {
 
 def validate_onboard(cfg: dict) -> tuple:
     problems, stats = [], {"paths": 0, "commands": 0, "files": 0}
+    REPO_NAMES.clear()
+    for f in repo_files():
+        if not f.startswith(".ai/"):  # the overlay's own files (sdlc.py, commands.md) must not vouch for names a draft claims about the project
+            REPO_NAMES.update(f.split("/"))
     for key, (headings, min_items) in ONBOARD_SECTIONS.items():
         path = cfg["onboard"][key]
         file = ROOT / path
@@ -2434,6 +2461,11 @@ def cmd_onboard(cfg: dict, args: argparse.Namespace) -> int:
             say(bad("\nThe agent could not describe the repository:"))
             say(questions.read_text(encoding="utf-8").strip())
             return EXIT_HUMAN
+        for t in targets:  # what the agent wrote on this attempt, kept for review (and for replaying the checks offline)
+            if (ROOT / t).is_file():
+                kept = run.dir / f"attempt-{attempt}" / t
+                kept.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / t, kept)
         errors, stats = validate_onboard(cfg)
         if not errors:
             break

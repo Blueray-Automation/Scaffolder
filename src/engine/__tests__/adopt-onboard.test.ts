@@ -26,6 +26,8 @@ const PROJECT = {
   "src/index.js": "export const a = 1;\n",
   "src/util.js": "export const b = 2;\n",
   "src/api/orders.js": "export const orders = [];\n",
+  "src/index.test.js": "test\n",
+  ".gitignore": "build-output/\nsrc/generated.js\n",
 };
 
 /** A draft that satisfies every check: and mentions things that look like paths but are not, which must not be flagged. */
@@ -80,7 +82,8 @@ A shop.
 
 ## Layout
 - **Core** (\`lib/core/\`): the core.
-- **Helpers** (\`util.js\`): helpers, but the file is really \`src/util.js\`.
+- **Helpers** (\`src/missing/util.js\`): helpers, but the file is really \`src/util.js\`.
+- **Ghost** (\`ghost.js\`): a bare name that exists nowhere.
 - **Everything else** (\`src/*.py\`): python?
 - **Nowhere**: an item that points at no file at all.
 
@@ -170,7 +173,8 @@ describe.skipIf(process.platform === "win32")("sdlc onboard", () => {
     const sent = agent.prompt(2);
     for (const expected of [
       "cites `lib/core/`, which does not exist",
-      "cites `util.js`, which does not exist",
+      "cites `src/missing/util.js`, which does not exist",
+      "cites `ghost.js`, which does not exist",
       "did you mean `src/util.js`?",
       "cites `src/*.py`, which does not exist",
       "no package.json defines a script called deploy",
@@ -201,8 +205,39 @@ describe.skipIf(process.platform === "win32")("sdlc onboard", () => {
   it("does not flag what only looks like a path: routes, URLs, MIME types, scoped packages, fenced diagrams", () => {
     // GOOD_ARCH contains all of those and passes (above); this pins the individual cases against the cited-path rule
     const dir = newRepo();
-    const arch = GOOD_ARCH.replace("## Open questions", "## Notes\nTalks to `/api/v1/users`, `text/html`, `read/write`, `v1.2`, `e.g.`, `node.lint`, `@scope/pkg`, `node_modules/x/y.js`, `~/.config`.\n\n## Open questions");
+    // a bare file name is fine when a file of that name exists somewhere (agents list files under a folder they have just named)
+    const arch = GOOD_ARCH.replace("## Open questions", "## Notes\n`src/api/` holds `orders.js`; `src/` holds `util.js` and `index.js`. Talks to `/api/v1/users`, `text/html`, `read/write`, `v1.2`, `e.g.`, `node.lint`, `@scope/pkg`, `node_modules/x/y.js`, `~/.config`.\n\n## Open questions");
     expect(sdlc(dir, "onboard", "--agent", scriptedAgent([{ [ARCH_PATH]: arch, [CONV_PATH]: GOOD_CONV }]).command).status).toBe(0);
+  });
+
+  it("accepts the ways agents name things under a folder they have just named, and what git ignores", () => {
+    // found by running a real agent: folder names (`api/`), globs (`*.test.js`), suffixes (`.test.js`) and build outputs
+    const dir = newRepo();
+    const notes =
+      "## Notes\n`src/` has `api/` for handlers; tests are named `*.test.js` (the `.test.js` suffix) and the build writes `build-output/` and `src/generated.js` (both ignored by git).\n\n## Open questions";
+    const arch = GOOD_ARCH.replace("## Open questions", notes);
+    const r = sdlc(dir, "onboard", "--agent", scriptedAgent([{ [ARCH_PATH]: arch, [CONV_PATH]: GOOD_CONV }]).command);
+    expect(r.out).not.toContain("does not exist");
+    expect(r.status).toBe(0);
+  });
+
+  it("still rejects a folder, glob or suffix that exists nowhere, and a generated file that git does not ignore", () => {
+    const dir = newRepo();
+    const notes = "## Notes\n`ghost/` and `*.py` and `.rs` and `src/not-ignored.js` are all made up.\n\n## Open questions";
+    const arch = GOOD_ARCH.replace("## Open questions", notes);
+    const agent = scriptedAgent([{ [ARCH_PATH]: arch, [CONV_PATH]: GOOD_CONV }, GOOD]);
+    expect(sdlc(dir, "onboard", "--agent", agent.command).status).toBe(0);
+    const sent = agent.prompt(2);
+    for (const claim of ["`ghost/`", "`*.py`", "`.rs`", "`src/not-ignored.js`"]) expect(sent, claim).toContain(`cites ${claim}, which does not exist`);
+  });
+
+  it("keeps the draft of every attempt in the run folder, so a rejected draft can be read and replayed", () => {
+    const dir = newRepo();
+    const agent = scriptedAgent([{ [ARCH_PATH]: BAD_ARCH, [CONV_PATH]: BAD_CONV }, GOOD]);
+    expect(sdlc(dir, "onboard", "--agent", agent.command).status).toBe(0);
+    const run = join(dir, ".ai", "evidence", readdirSync(join(dir, ".ai", "evidence")).filter((n) => /onboard(-\d+)?$/.test(n)).sort().pop()!);
+    expect(readFileSync(join(run, "attempt-1", ARCH_PATH), "utf8")).toContain("TODO(onboard)");
+    expect(readFileSync(join(run, "attempt-2", ARCH_PATH), "utf8")).toBe(GOOD_ARCH);
   });
 
   it("protects everything else: the agent may write the two files and nothing more", () => {
