@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useId, useRef, useState } from "react";
+import { Check, Copy } from "lucide-react";
 import type { Option } from "@/engine";
 import { cx } from "@/lib/utils";
 
@@ -23,7 +24,7 @@ export function Section({
   right?: React.ReactNode;
 }) {
   return (
-    <section className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/60 p-5">
+    <section className="min-w-0 space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/60 p-5">
       <header className="flex items-start justify-between gap-3">
         <div>
           <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
@@ -293,5 +294,41 @@ export function Button({
         className,
       )}
     />
+  );
+}
+
+/** A command (or a few lines) in a box with a Copy button. */
+export function CopyBlock({ code, label }: { code: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable: the text can still be selected */
+    }
+  };
+  return (
+    <div className="relative">
+      <pre
+        tabIndex={0}
+        aria-label={label}
+        // one long command wraps instead of hiding behind the Copy button; several lines scroll sideways so each keeps its shape
+        className={cx(
+          "overflow-auto rounded-lg border border-zinc-800 bg-zinc-950 p-3 pr-24 font-mono text-[12px] leading-relaxed text-zinc-200",
+          !code.includes("\n") && "whitespace-pre-wrap break-all",
+        )}
+      >
+        {code}
+      </pre>
+      <Button className="absolute right-2 top-2 !px-2 !py-1" onClick={copy} aria-label={`Copy: ${label}`}>
+        {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+        {copied ? "Copied" : "Copy"}
+      </Button>
+      <span role="status" className="sr-only">
+        {copied ? "Copied to the clipboard" : ""}
+      </span>
+    </div>
   );
 }

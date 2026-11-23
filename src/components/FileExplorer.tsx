@@ -50,10 +50,10 @@ function buildRows(paths: string[], closed: Set<string>, filter: string): Row[] 
   return rows;
 }
 
-export function FileExplorer({ files }: { files: GeneratedFile[] }) {
+export function FileExplorer({ files, initialPath = "README.md" }: { files: GeneratedFile[]; initialPath?: string }) {
   const paths = useMemo(() => files.map((f) => f.path), [files]);
   const index = useMemo(() => new Map(files.map((f) => [f.path, f])), [files]);
-  const [chosen, setSelected] = useState("README.md");
+  const [chosen, setSelected] = useState(initialPath);
   const [filter, setFilter] = useState("");
   const [closed, setClosed] = useState<Set<string>>(new Set());
   const [copied, setCopied] = useState(false);

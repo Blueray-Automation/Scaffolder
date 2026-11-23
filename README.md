@@ -24,6 +24,12 @@ npm install
 npm run dev          # http://localhost:3000
 ```
 
+The web app has three pages, so nothing sends you to GitHub:
+
+- **New project** (`/`): configure a stack, preview every generated file, download a zip.
+- **Existing project** (`/existing`): an interactive guide to adding the `.ai/` setup to a repository you already have, with a command builder, the whole workflow step by step, and a live example of exactly what it writes.
+- **Docs** (`/docs`): this README and every wiki page, with search and Copy buttons on every command. They are rendered from the markdown files at build time, and the build fails on a link that goes nowhere, so the in-app copy cannot drift from the repository.
+
 **CLI** (same engine, for automation and CI):
 
 ```bash
@@ -128,7 +134,7 @@ Generated projects run on **macOS**, **Ubuntu / other Linux** and **Windows** (n
 
 ## Documentation (wiki)
 
-Step-by-step guides live in [`docs/wiki/`](docs/wiki/Home.md) and are published to the GitHub wiki automatically:
+Step-by-step guides live in [`docs/wiki/`](docs/wiki/Home.md), are readable inside the web app (**Docs**, with search), and are published to the GitHub wiki automatically:
 
 - **Setup by Operating System**: install the tools on macOS, Ubuntu or Windows
 - **Getting Started**: from a downloaded zip to a verified, running hello world
@@ -179,6 +185,8 @@ src/engine/                 pure TypeScript, no I/O: runs unchanged in the brows
   gates.ts                    gate definitions: single source for .ai/sdlc.json AND the CI workflow
   generate.ts                 packs -> in-memory file list;   ci.ts / compose.ts / sdlcConfig.ts build YAML/JSON structurally
 cli/index.ts                the CLI (cli/adopt.ts: scan a folder, write the overlay)
+scripts/bundle-docs.mjs     README.md + docs/wiki/*.md -> HTML for the app's /docs pages (src/docs*.generated.ts; runs with the template bundler)
+src/app/, src/components/   the web app: `/` generator, `/existing` adopt guide (ExistingProject.tsx), `/docs` (DocsNav, DocsSearch, DocPageView)
 packaging/, scripts/build-cli.mjs   the standalone `ai-scaffolder` npm package (one bundled file) and its README
 src/engine/adopt/           adoption: detect.ts (what a repository defines), config.ts, generate.ts (the .ai/ overlay);
                             templates/adopt/ holds its files, and it reuses the runner from templates/core/

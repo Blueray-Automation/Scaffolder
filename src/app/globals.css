@@ -29,3 +29,31 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #52525b;
 }
+
+/* The documentation pages: markdown rendered to HTML at build time (scripts/bundle-docs.mjs), styled here. */
+@layer components {
+  .doc { @apply text-sm leading-7 text-zinc-300; }
+  .doc h1 { @apply mb-4 text-2xl font-semibold tracking-tight text-zinc-50; }
+  .doc h2 { @apply mb-3 mt-10 border-b border-zinc-800 pb-2 text-lg font-semibold text-zinc-100; }
+  .doc h3 { @apply mb-2 mt-7 text-base font-semibold text-zinc-100; }
+  .doc h4 { @apply mb-2 mt-5 text-sm font-semibold text-zinc-100; }
+  .doc :where(h1, h2, h3, h4)[id] { scroll-margin-top: 6rem; }
+  .doc p { @apply my-3; }
+  .doc a { @apply text-indigo-300 underline decoration-indigo-500/40 underline-offset-2 hover:text-indigo-200; }
+  .doc ul { @apply my-3 list-disc space-y-1 pl-6; }
+  .doc ol { @apply my-3 list-decimal space-y-1 pl-6; }
+  .doc li > p { @apply my-1; }
+  .doc strong { @apply font-semibold text-zinc-100; }
+  .doc :not(pre) > code { @apply rounded bg-zinc-800/80 px-1.5 py-0.5 font-mono text-[12px] text-zinc-100; }
+  .doc .codeblock { @apply relative my-4; }
+  .doc .codeblock pre { @apply overflow-auto rounded-lg border border-zinc-800 bg-zinc-950 p-3 pr-16 font-mono text-[12px] leading-relaxed text-zinc-200; }
+  .doc .copybtn { @apply absolute right-2 top-2 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[11px] font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60; }
+  .doc blockquote { @apply my-4 border-l-2 border-indigo-500/50 bg-zinc-900/60 py-1 pl-4 pr-3 text-zinc-400; }
+  .doc blockquote p { @apply my-2; }
+  .doc .table-wrap { @apply my-4 overflow-x-auto rounded-lg border border-zinc-800; }
+  .doc table { @apply w-full border-collapse text-left text-[13px]; }
+  .doc th { @apply whitespace-nowrap border-b border-zinc-800 bg-zinc-900 px-3 py-2 font-medium text-zinc-200; }
+  .doc td { @apply border-b border-zinc-800/70 px-3 py-2 align-top; }
+  .doc tr:last-child td { @apply border-b-0; }
+  .doc hr { @apply my-8 border-zinc-800; }
+}

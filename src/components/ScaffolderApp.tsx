@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useDeferredValue, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Check, CircleAlert, Copy, Cpu, Download, FileCog, FolderTree, Terminal, Upload } from "lucide-react";
+import { AlertTriangle, Check, CircleAlert, Copy, Download, FileCog, FolderTree, Terminal, Upload } from "lucide-react";
 import { parse } from "yaml";
 import {
   PRESETS,
@@ -18,6 +18,7 @@ import {
   type ScaffolderConfig,
 } from "@/engine";
 import { cx, downloadBlob } from "@/lib/utils";
+import { AppHeader } from "./AppHeader";
 import { ConfigForm } from "./ConfigForm";
 import { FileExplorer } from "./FileExplorer";
 import { Badge, Button, Tabs, tabDomId, type TabItem } from "./ui";
@@ -92,27 +93,7 @@ export default function ScaffolderApp() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-20 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-indigo-500/40 bg-indigo-600/20 text-indigo-400">
-              <Cpu className="h-5 w-5" aria-hidden />
-            </div>
-            <div>
-              <h1 className="text-base font-semibold tracking-tight text-zinc-100">Scaffolder</h1>
-              <p className="text-xs text-zinc-400">AI-ready projects, verified end to end</p>
-            </div>
-          </div>
-          <ol className="hidden items-center gap-1.5 text-xs text-zinc-400 md:flex" aria-label="Pipeline">
-            {["PRD", "Code", "Test", "Deploy"].map((step, i) => (
-              <li key={step} className="flex items-center gap-1.5">
-                {i > 0 && <span aria-hidden>→</span>}
-                <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-zinc-200">{step}</span>
-              </li>
-            ))}
-          </ol>
-        </div>
-      </header>
+      <AppHeader active="new" />
 
       <main className="mx-auto grid w-full max-w-7xl flex-1 grid-cols-1 gap-6 px-4 py-6 sm:px-6 lg:grid-cols-12">
         <div className="space-y-4 lg:col-span-5">
