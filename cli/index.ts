@@ -25,13 +25,18 @@ import {
 } from "../src/engine";
 import { planOverlay, renderReport, resolveTarget, scanRepository, writeOverlay } from "./adopt";
 
-const USAGE = `scaffolder: generate AI-ready projects (PRD -> Code -> Test -> Deploy), or adopt an existing one
+/** What the program is called when someone types it: `scaffolder` from a clone (npm run scaffold), `ai-scaffolder` when installed from npm (the build sets it). */
+const BIN = process.env.SCAFFOLDER_BIN ?? "scaffolder";
+/** The package version when installed from npm (the build sets it); a clone has none. */
+const VERSION = process.env.SCAFFOLDER_VERSION ?? "development";
 
-  scaffolder init      [--out scaffolder.config.yaml]
-  scaffolder validate  --config <file> [--set key=value ...]
-  scaffolder generate  --config <file> --out <dir> [--set key=value ...] [--force] [--zip <file>]
-  scaffolder adopt     <dir> [--config <file>] [--set key=value ...] [--write] [--force]
-  scaffolder list      show what can be generated today
+const USAGE = `${BIN}: generate AI-ready projects (PRD -> Code -> Test -> Deploy), or adopt an existing one
+
+  ${BIN} init      [--out scaffolder.config.yaml]
+  ${BIN} validate  --config <file> [--set key=value ...]
+  ${BIN} generate  --config <file> --out <dir> [--set key=value ...] [--force] [--zip <file>]
+  ${BIN} adopt     <dir> [--config <file>] [--set key=value ...] [--write] [--force]
+  ${BIN} list      show what can be generated today
 
 --set overrides any config path, e.g.  --set sdlc.maxIterations=8 --set web.enabled=false
 
@@ -81,6 +86,14 @@ function isNonEmptyDir(dir: string): boolean {
 
 function main(): void {
   const [command, ...rest] = process.argv.slice(2);
+  if (command === "--version" || command === "-v" || command === "version") {
+    console.log(VERSION);
+    return;
+  }
+  if (command === "--help" || command === "-h") {
+    console.log(USAGE);
+    return;
+  }
   const { values, positionals } = parseArgs({
     args: rest,
     options: {
@@ -104,7 +117,7 @@ function main(): void {
   switch (command) {
     case "adopt": {
       const [dir, ...extra] = positionals;
-      if (!dir || extra.length > 0) fail(`adopt needs exactly one folder: scaffolder adopt <dir> [--write]`, 64);
+      if (!dir || extra.length > 0) fail(`adopt needs exactly one folder: ${BIN} adopt <dir> [--write]`, 64);
       let root: string;
       try {
         root = resolveTarget(dir);
@@ -131,7 +144,7 @@ function main(): void {
       const out = values.out ?? "scaffolder.config.yaml";
       if (existsSync(out) && !values.force) fail(`${out} already exists (use --force to overwrite)`);
       writeFileSync(out, configToYaml(defaultConfig()));
-      console.log(`wrote ${out}. Edit it, then: scaffolder generate --config ${out} --out ./my-project`);
+      console.log(`wrote ${out}. Edit it, then: ${BIN} generate --config ${out} --out ./my-project`);
       return;
     }
 

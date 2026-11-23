@@ -34,6 +34,13 @@ npm run scaffold -- list                                   # what can be generat
 npm run scaffold -- adopt ../existing-repo [--write]       # add .ai/ to a repository that already exists (below)
 ```
 
+**Without cloning**: the same commands run from npm ([`ai-scaffolder`](https://www.npmjs.com/package/ai-scaffolder), MIT), needing only Node 20+ and no account or login:
+
+```bash
+npx ai-scaffolder adopt ./my-repo --write
+npx ai-scaffolder generate --config scaffolder.config.yaml --out ./my-app
+```
+
 **Then, in the generated project** (macOS, Ubuntu and WSL; on Windows PowerShell or cmd write `.\scripts\sdlc.cmd` instead of `./scripts/sdlc`):
 
 ```bash
@@ -79,6 +86,40 @@ cd ../my-repo && ./.ai/sdlc doctor && ./.ai/sdlc setup && ./.ai/sdlc baseline   
 The gates are your repository's own commands (npm/pnpm/yarn/bun scripts, ruff/mypy/pytest, Makefile targets), each with the place it was found; what it cannot detect is listed, never invented.
 Existing code is rarely green, so "done" is **nothing that passed on adoption day fails now** (a baseline, per gate), plus every acceptance criterion of the feature. Gates that were already red show as known warnings; `baseline --tighten` locks in gains. Secrets already in the repository are recorded as known and only new ones fail.
 `./.ai/sdlc onboard` has an agent draft a map of the code and its conventions (folding in any existing `CLAUDE.md` / `.cursor/rules`), then checks every path and command the draft cites against the repository; you review it. `spec` and `implement` work as above, with prompts that tell the agent to match the existing code and keep the diff small. See [Adopt an Existing Project](docs/wiki/Adopt-an-Existing-Project.md).
+
+## Publishing the CLI
+
+The repository's own `package.json` is `private` (it lists the web UI's dependencies), so the command-line tool is published as a separate, much smaller package built from it:
+
+```bash
+npm run build:cli                       # dist/cli: index.js (the whole CLI, templates and dependencies inside, ~0.75 MB), package.json, README, LICENSE
+npx vitest run src/engine/__tests__/cli-package.test.ts   # packs it, installs the tarball in an empty folder and uses it from there
+```
+
+**Releasing (automated).** Push a version tag from `main`; `.github/workflows/release.yml` runs lint, types and every test, builds the package at that version and *stages* it on npm. Nothing is public until a maintainer approves it on npmjs.com (package, **Staged Packages** tab, **Approve**, with the passkey):
+
+```bash
+git tag v0.1.1 && git push origin v0.1.1
+```
+
+The workflow refuses a tag that is not `vMAJOR.MINOR.PATCH` (or `-rc.1` and the like, which go to the `next` tag, never `latest`) or that is not on `main`. It holds no npm token: it uses npm's trusted publishing (OIDC), whose identity can stage but cannot approve, and only the staging job can obtain it.
+
+**One-time setup on npmjs.com** (package `ai-scaffolder` -> Settings -> Trusted Publisher -> GitHub Actions). The fields are case-sensitive, cannot be edited afterwards (delete and recreate), and npm only checks them when a release runs:
+
+| Field | Value |
+|---|---|
+| Organization or user | `Blueray-Automation` |
+| Repository | `Scaffolder` |
+| Workflow filename | `release.yml` |
+| Environment name | (leave empty) |
+| Allowed actions | `npm stage publish` only; leave `npm publish` off |
+
+Optionally, in the same settings page turn on "Require two-factor authentication and disallow tokens". The workflow has not run on GitHub yet: the first tag will show whether the trusted-publisher fields match.
+
+**Releasing by hand** still works: `cd dist/cli && npm publish --access public` stages the version the same way (no `--otp`: a passkey is approved in the browser).
+
+The package is `ai-scaffolder` (MIT); `0.1.0` was published on 2026-11-23 (by hand). npm *stages* a publish and holds it until a maintainer approves it with their 2FA: after `npm publish` open the package on npmjs.com, go to the **Staged Packages** tab and approve the version (publishing again meanwhile fails with `409 ... previously staged version`). A passkey is enough for 2FA; there is no `--otp` code. `npm publish --dry-run --access public` in `dist/cli` shows exactly what would be published (four files) without sending anything.
+The bundle is checked not to contain the build machine's home folder, user name or paths. The package's `repository` field points at this GitHub repository (npm's trusted publishing needs it); the package has no `homepage`. npm generates provenance only for public repositories.
 
 ## Platforms
 
@@ -138,6 +179,7 @@ src/engine/                 pure TypeScript, no I/O: runs unchanged in the brows
   gates.ts                    gate definitions: single source for .ai/sdlc.json AND the CI workflow
   generate.ts                 packs -> in-memory file list;   ci.ts / compose.ts / sdlcConfig.ts build YAML/JSON structurally
 cli/index.ts                the CLI (cli/adopt.ts: scan a folder, write the overlay)
+packaging/, scripts/build-cli.mjs   the standalone `ai-scaffolder` npm package (one bundled file) and its README
 src/engine/adopt/           adoption: detect.ts (what a repository defines), config.ts, generate.ts (the .ai/ overlay);
                             templates/adopt/ holds its files, and it reuses the runner from templates/core/
 src/components/             the web UI (config form, file explorer, zip download)
@@ -168,7 +210,7 @@ npm run e2e       # slow, needs network, python3 >= 3.12 and node >= 22 on PATH
 
 - Windows support was written without a Windows machine: its platform-specific logic is unit-tested by simulation, and `npm run smoke` on `windows-latest` in CI is the real check. The full `npm run e2e` (bash-based fake tools, Docker) is for macOS and Linux. Deploying from a Windows machine needs Git for Windows' bash or WSL (the generated `cd.yml` deploys from Linux).
 - One full vertical slice: **FastAPI + Next.js (App Router) + PostgreSQL + GitHub Actions + GHCR**. Other stacks are planned.
-- Adopting an existing repository: detection covers Node and Python projects and Makefiles (anything else goes in `gates.add`). It is tested on in-memory repositories and the generated runner is driven in throwaway git repositories (baseline, ratchet, secrets, `implement`, integrity), but not on a real third-party repository, with the real agent CLIs, or on Windows. Creating a Python virtual environment and installing with pnpm, yarn, bun, Poetry or uv are generated and unit-tested, never executed. The baseline is per gate (no coverage or test-count ratchet yet) and there is no web UI for it yet.
+- Adopting an existing repository: detection covers Node and Python projects and Makefiles (anything else goes in `gates.add`). It is tested on in-memory repositories and the generated runner is driven in throwaway git repositories (baseline, ratchet, secrets, `implement`, integrity), and `onboard` was run for real with the `claude` agent on scratch clones of this repository (its drafts passed the checks, and a planted false claim in `CLAUDE.md` was reported as a conflict). Not tested: a third-party repository, the other agent CLIs, or Windows. Creating a Python virtual environment and installing with pnpm, yarn, bun, Poetry or uv are generated and unit-tested, never executed. The baseline is per gate (no coverage or test-count ratchet yet) and there is no web UI for it yet.
 - `spec` drafts are only as good as the document and the AI that reads it: the tool validates their form, a human must review their meaning. Scanned PDFs have no text to read.
 - Agent presets: the whole pipeline around the agent (document reading included) is tested with a scripted agent. The `claude`, `codex`, `gemini`, `copilot` and `cursor` presets follow each tool's documented
   non-interactive mode but have **not been run against the real CLIs** (use `implement --dry-run` to inspect the command and prompt first).

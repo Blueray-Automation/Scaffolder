@@ -20,6 +20,9 @@
 # production
 /build
 
+# the standalone CLI package built by `npm run build:cli`
+/dist
+
 # misc
 .DS_Store
 *.pem

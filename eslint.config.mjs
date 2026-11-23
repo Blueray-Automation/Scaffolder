@@ -9,5 +9,5 @@ export default defineConfig([
     files: ["**/__tests__/**", "scripts/**"],
     rules: { "@typescript-eslint/no-explicit-any": "off" },
   },
-  globalIgnores([".next/**", "out/**", "build/**", "coverage/**", "next-env.d.ts", "src/engine/templates.generated.ts"]),
+  globalIgnores([".next/**", "out/**", "build/**", "dist/**", "coverage/**", "next-env.d.ts", "src/engine/templates.generated.ts"]),
 ]);
