@@ -12,6 +12,52 @@ interface LocalService {
   startTimeoutSeconds: number;
 }
 
+/**
+ * The `agent` section of `.ai/sdlc.json`: which agent runs, every agent a person may pick, the desktop apps, the prompt files.
+ * Shared by generated and adopted projects. `command` is already resolved (an explicit command, else the preset's).
+ */
+export function buildAgentSection(
+  agent: { preset: string; command: string; timeoutSeconds: number },
+  /** Prompt files only some kinds of project have (an adopted project's `onboard`). */
+  extraPrompts: Record<string, string> = {},
+): Record<string, unknown> {
+  return {
+    preset: agent.preset,
+    // Resolved: an explicit command wins, otherwise the preset's command (empty = human in the loop).
+    command: agent.command,
+    // Every agent the person may pick with `sdlc agent`, installed or not. Lives here, in the file the
+    // agent may not edit, so choosing one can only ever select a command that was generated, never invent one.
+    presets: AGENT_PRESETS.filter((p) => p.command).map((p) => ({
+      id: p.id,
+      label: p.label,
+      mode: p.mode,
+      command: p.command,
+      program: p.program,
+      install: p.install,
+      docs: p.docs,
+    })),
+    // Desktop apps a person can hand the work to (`handoff:<id>` in a preset's command): how to open and find them.
+    desktopApps: DESKTOP_APPS.map((a) => ({
+      id: a.id,
+      label: a.label,
+      open: a.open,
+      detect: a.detect,
+      steps: a.steps,
+      install: a.install,
+      docs: a.docs,
+    })),
+    timeoutSeconds: agent.timeoutSeconds,
+    prompts: {
+      prd: ".ai/prompts/prd.md",
+      spec: ".ai/prompts/spec.md",
+      specFix: ".ai/prompts/spec-fix.md",
+      implement: ".ai/prompts/implement.md",
+      heal: ".ai/prompts/heal.md",
+      ...extraPrompts,
+    },
+  };
+}
+
 /** Builds the machine-readable `.ai/sdlc.json` consumed by `scripts/sdlc.py`. */
 export function buildSdlcConfig(cfg: ScaffolderConfig): Record<string, unknown> {
   const backendUrl = `http://127.0.0.1:${cfg.backend.port}`;
@@ -60,40 +106,7 @@ export function buildSdlcConfig(cfg: ScaffolderConfig): Record<string, unknown> 
       noProgressLimit: cfg.sdlc.noProgressLimit,
       failFast: cfg.sdlc.failFast,
     },
-    agent: {
-      preset: cfg.sdlc.agent.preset,
-      // Resolved: an explicit command wins, otherwise the preset's command (empty = human in the loop).
-      command: agentCommand(cfg),
-      // Every agent the person may pick with `./scripts/sdlc agent`, installed or not. Lives here, in the file the
-      // agent may not edit, so choosing one can only ever select a command that was generated, never invent one.
-      presets: AGENT_PRESETS.filter((p) => p.command).map((p) => ({
-        id: p.id,
-        label: p.label,
-        mode: p.mode,
-        command: p.command,
-        program: p.program,
-        install: p.install,
-        docs: p.docs,
-      })),
-      // Desktop apps a person can hand the work to (`handoff:<id>` in a preset's command): how to open and find them.
-      desktopApps: DESKTOP_APPS.map((a) => ({
-        id: a.id,
-        label: a.label,
-        open: a.open,
-        detect: a.detect,
-        steps: a.steps,
-        install: a.install,
-        docs: a.docs,
-      })),
-      timeoutSeconds: cfg.sdlc.agent.timeoutSeconds,
-      prompts: {
-        prd: ".ai/prompts/prd.md",
-        spec: ".ai/prompts/spec.md",
-        specFix: ".ai/prompts/spec-fix.md",
-        implement: ".ai/prompts/implement.md",
-        heal: ".ai/prompts/heal.md",
-      },
-    },
+    agent: buildAgentSection({ preset: cfg.sdlc.agent.preset, command: agentCommand(cfg), timeoutSeconds: cfg.sdlc.agent.timeoutSeconds }),
     integrity: {
       // Verification machinery: the agent may never edit these (all phases).
       protected: [

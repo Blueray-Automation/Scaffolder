@@ -1,0 +1,18 @@
+# Task: fix the repository description (attempt {{attempt}} of {{maxAttempts}})
+
+You drafted `{{architectureFile}}` and `{{conventionsFile}}`. The tool checked them against the repository and found these problems:
+
+{{errors}}
+
+## What to do
+
+- Fix **only** `{{architectureFile}}` and `{{conventionsFile}}`. Do not touch any other file.
+- A path that does not exist: look it up with your tools (list the folder, search for the name). Correct it to the real path, or drop the claim. Never create a file, folder, script or command to make a claim true.
+- An item with no evidence: cite the file where you actually saw it, in backticks. If you cannot point at one, remove the item or move it to the open questions.
+- A command that does not exist: name the real one (see `{{commands}}`), or remove it.
+- Keep everything that is already correct and keep the `Status: Draft (...)` line. Do not pad the files to satisfy the checks.
+- If the problem is that you cannot find out the truth, say so under the open questions instead of inventing it. If the repository gives you nothing to describe, write why to `{{questionsFile}}` and stop.
+
+## Final message
+
+What you changed and why.

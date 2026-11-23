@@ -15,6 +15,8 @@ Standard library only (Python 3.9+). Configured by .ai/sdlc.json; see .ai/README
   agent     see which AI agents are installed and choose one (command-line agents, the Claude desktop app, a desktop app you drive, or your own)
   feature   drive one feature through PRD -> Code -> Test (-> Deploy)
   sync      install dependencies, only if the manifests changed since the last install
+  onboard   adopted projects: an agent drafts a map of the repository and its conventions; the tool checks every path and command it cites
+  baseline  adopted projects: record which gates pass today (--tighten locks in gates that now pass)
   new       create an empty feature spec from the template, by NAME (new user-login); for a document use `spec`
   deploy    deploy an image tag to an environment, then verify facts there
   secrets   scan the working tree for committed secrets
@@ -234,9 +236,9 @@ def install_hints(minimum: str) -> list:
         "  other:             https://www.python.org/downloads/",
     ]
     if IS_WINDOWS:
-        lines.append("Already installed somewhere unusual?  $env:SDLC_PYTHON='C:\\path\\to\\python.exe'; .\\scripts\\sdlc.cmd setup   (PowerShell)")
+        lines.append("Already installed somewhere unusual?  $env:SDLC_PYTHON='C:\\path\\to\\python.exe'; .\\<%sdlcDir%>\\sdlc.cmd setup   (PowerShell)")
     else:
-        lines.append("Already installed somewhere unusual?  SDLC_PYTHON=/path/to/python ./scripts/sdlc setup")
+        lines.append("Already installed somewhere unusual?  SDLC_PYTHON=/path/to/python ./<%sdlcDir%>/sdlc setup")
     return lines
 
 
@@ -289,7 +291,7 @@ def resolve_python(minimum: str, what: str, *, interactive: bool) -> str | None:
         installed = offer_python_install(minimum)
         if installed and (v := python_version(installed)) and v >= parse_version(minimum):
             return installed
-    say(f"Install Python {minimum}, then run ./scripts/sdlc setup again:")
+    say(f"Install Python {minimum}, then run ./<%sdlcDir%>/sdlc setup again:")
     for line in install_hints(minimum):
         say(line)
     return None
@@ -319,8 +321,12 @@ def build_env(extra: dict | None = None, path_prepend: list | None = None) -> di
     return env
 
 
-# The interpreter inside a project virtual environment, relative to the component directory.
-VENV_PYTHON = r".venv\Scripts\python.exe" if IS_WINDOWS else ".venv/bin/python"
+def venv_python(name: str = ".venv") -> str:
+    """The interpreter inside a virtual environment folder, relative to the component directory."""
+    return rf"{name}\Scripts\python.exe" if IS_WINDOWS else f"{name}/bin/python"
+
+
+VENV_PYTHON = venv_python()
 
 # POSIX: each child gets its own session, so the shell AND the server it starts can be signalled together.
 GROUP_KWARGS: dict = {} if IS_WINDOWS else {"start_new_session": True}
@@ -455,6 +461,16 @@ def git(*args: str) -> str:
         return ""
 
 
+def git_porcelain(*extra: str) -> list:
+    """`git status --porcelain` lines exactly as git prints them. (`git()` strips its output, which would eat the leading space of the
+    first line: " M file" is a modified file, and its path would be read one character off.)"""
+    try:
+        out = subprocess.run(["git", "status", "--porcelain", *extra], cwd=str(ROOT), capture_output=True, encoding="utf-8", errors="replace", timeout=20)
+        return [ln for ln in out.stdout.splitlines() if ln.strip()] if out.returncode == 0 else []
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+
+
 def git_info() -> dict:
     return {"sha": git("rev-parse", "--short", "HEAD"), "dirty": bool(git("status", "--porcelain"))}
 
@@ -475,6 +491,12 @@ def render_report(data: dict, specs: list) -> str:
         lines += ["## Gates", "", "| Status | Gate | Stage | Time | Log |", "|---|---|---|---|---|"]
     for i in gate_items:
         lines.append(f"| {icon[i['status']]} | `{i['id']}` {i['label']} | {i['stage']} | {i['seconds']}s | `{i.get('log', '')}` |")
+    known = [i for i in gate_items if i.get("known")]
+    if known:
+        lines += ["", "### Known failures (failing before adoption, not regressions)", ""] + [f"- `{i['id']}` {i['label']}" for i in known]
+    improved = [i for i in gate_items if i.get("improved")]
+    if improved:
+        lines += ["", "### Now passing (failed at adoption)", ""] + [f"- `{i['id']}` {i['label']}" for i in improved]
     facts = [x for x in items if x["kind"] == "fact"]
     if facts or specs:
         lines += ["", "## Facts (acceptance criteria -> checks)", ""]
@@ -515,12 +537,33 @@ def render_report(data: dict, specs: list) -> str:
 # --------------------------------------------------------------------------- gates
 
 
-def run_gate(gate: dict, run: Run) -> dict:
+def ratchet_config(cfg: dict) -> dict | None:
+    """Adopted projects (existing code) are judged by a baseline: what passed on adoption day may not fail. None = strict."""
+    r = cfg.get("ratchet") or {}
+    return r if r.get("enabled") else None
+
+
+def load_baseline(cfg: dict) -> dict | None:
+    r = ratchet_config(cfg)
+    if not r:
+        return None
+    try:
+        data = json.loads((ROOT / r["baseline"]).read_text(encoding="utf-8"))
+        return data if isinstance(data.get("gates"), dict) else None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def run_gate(gate: dict, run: Run, baseline: dict | None = None) -> dict:
     log = run.logs / f"{gate['id']}.log"
     env = build_env(gate.get("env"), gate.get("pathPrepend"))
     t0 = time.time()
     code = run_shell(adapt_command(gate["cmd"]), ROOT / gate["cwd"], log, env=env, timeout=gate.get("timeoutSeconds", 600))
     status = "pass" if code == 0 else ("fail" if gate.get("required", True) else "warn")
+    was = (baseline or {}).get("gates", {}).get(gate["id"])
+    known_red = was is not None and not was.get("passed", False)
+    if known_red and status == "fail":
+        status = "warn"  # failing before adoption: reported, never blocking, and it may not be made worse by pretending it is fine
     item = {
         "kind": "gate",
         "id": gate["id"],
@@ -533,6 +576,11 @@ def run_gate(gate: dict, run: Run) -> dict:
         "log": rel(log),
         "cmd": gate["cmd"],
     }
+    if known_red and code != 0:
+        item["known"] = True
+        item["detail"] = "known: already failing when this project was adopted (baseline), not a regression"
+    if known_red and code == 0:
+        item["improved"] = True
     if status != "pass":
         item["tail"] = tail_lines(log)
     return run.add(item)
@@ -804,9 +852,15 @@ def run_facts(cfg: dict, run: Run, opts: argparse.Namespace) -> list:
                      "detail": f"no folder for {opts.feature} under {cfg['facts']['specsDir']}/"})
             show(run.items[-1])
             return specs
+    if not specs and not cfg["facts"].get("requireSpec", True):
+        # an adopted repository has no feature specs on day one; that is not a failure, but it is not a pass either
+        item = run.add({"kind": "fact", "id": "facts.spec", "label": "feature specs", "status": "skip", "required": False, "notApplicable": True,
+                        "detail": f"no feature specs yet under {cfg['facts']['specsDir']}/; start one with ./<%sdlcDir%>/sdlc new <slug>"})
+        show(item)
+        return specs
     if not specs:
         run.add({"kind": "fact", "id": "facts.spec", "label": "at least one feature spec exists", "status": "fail", "required": True,
-                 "detail": f"no spec folders under {cfg['facts']['specsDir']}/; run ./scripts/sdlc new <slug>"})
+                 "detail": f"no spec folders under {cfg['facts']['specsDir']}/; run ./<%sdlcDir%>/sdlc new <slug>"})
         show(run.items[-1])
         return specs
 
@@ -880,7 +934,14 @@ def run_facts(cfg: dict, run: Run, opts: argparse.Namespace) -> list:
 # --------------------------------------------------------------------------- pipeline
 
 
-def run_verify(cfg: dict, label: str, args: argparse.Namespace, *, with_facts: bool = True) -> tuple:
+def run_verify(cfg: dict, label: str, args: argparse.Namespace, *, with_facts: bool = True, use_baseline: bool = True) -> tuple:
+    baseline = None
+    if use_baseline and ratchet_config(cfg):
+        baseline = load_baseline(cfg)
+        if baseline is None:
+            say(bad("No baseline yet: this project was adopted, but nobody has recorded what passes today."))
+            say("Run  ./<%sdlcDir%>/sdlc baseline  once (it runs every gate and records the result), commit .ai/baseline.json, then run this again.")
+            sys.exit(EXIT_HUMAN)
     run = Run(label)
     fail_fast = cfg["loop"]["failFast"] and not getattr(args, "keep_going", False)
     only = set(getattr(args, "only", None) or [])
@@ -900,10 +961,15 @@ def run_verify(cfg: dict, label: str, args: argparse.Namespace, *, with_facts: b
             if not gates:
                 say(dim("  (no gates)"))
             for g in gates:
-                show(run_gate(g, run))
+                show(run_gate(g, run, baseline))
         if fail_fast and run.required_failures():
             run.notes.append(f"Stopped after stage '{stage}' (failFast). Later stages did not run.")
             break
+    better = [i["id"] for i in run.items if i.get("improved")]
+    if better:
+        msg = f"These gates failed at the baseline and pass now: {', '.join(better)}. Lock the gain in with `./<%sdlcDir%>/sdlc baseline --tighten`."
+        run.notes.append(msg)
+        say(ok(f"\n  {msg}"))
     run.finish(cfg, specs)
     return run, specs
 
@@ -1026,17 +1092,17 @@ def explain_blocker(agent: str, kind: str) -> None:
             say("Update it: npm install -g @anthropic-ai/claude-code@latest   (or: claude update)")
             say("Several installs can exist side by side and the first on PATH wins: `which -a claude` (Windows: `where claude`) lists them.")
             if find_claude_desktop():
-                say("Or skip the CLI: the Claude desktop app keeps its own, current Claude Code. Use it with  ./scripts/sdlc agent claude-desktop")
+                say("Or skip the CLI: the Claude desktop app keeps its own, current Claude Code. Use it with  ./<%sdlcDir%>/sdlc agent claude-desktop")
         else:
-            say(f"Update `{program}`, or name a model it still serves in its command: ./scripts/sdlc agent")
-        say("Or use another agent: ./scripts/sdlc agent")
+            say(f"Update `{program}`, or name a model it still serves in its command: ./<%sdlcDir%>/sdlc agent")
+        say("Or use another agent: ./<%sdlcDir%>/sdlc agent")
         return
     say(bad("\nThe agent is not signed in, so it did nothing: no file was drafted or changed."))
     if program == CLAUDE_DESKTOP:
         say("Open the Claude desktop app and sign in there, then run this again.")
     else:
         say(f"Run `{program}` once in a terminal and sign in" + (" (type /login)" if program == "claude" else " (or set its API key)") + ", then run this again.")
-    say("Or use another agent: ./scripts/sdlc agent")
+    say("Or use another agent: ./<%sdlcDir%>/sdlc agent")
 
 
 def failures_markdown(run: Run) -> str:
@@ -1083,7 +1149,7 @@ def setup_command(step: dict, python: str | None) -> str:
     # `npm ci` needs a lockfile; without one fall back to `npm install` (decided here, not with `if [ -f ... ]`, which cmd.exe cannot run)
     if step.get("fallbackCmd") and step.get("lockfile") and not (ROOT / step["cwd"] / step["lockfile"]).exists():
         command = step["fallbackCmd"]
-    command = command.replace("{venv_python}", VENV_PYTHON)
+    command = command.replace("{venv_python}", venv_python(step.get("venv", ".venv")))
     if python:
         command = command.replace("{python}", quote_arg(python))
     return command
@@ -1115,10 +1181,18 @@ def run_setup_step(step: dict, run: Run) -> bool:
 def stale_steps(cfg: dict) -> list:
     """Setup steps that never ran (marker missing) or whose dependency manifests changed since they last ran."""
     state = load_installed()
-    return [
-        step for step in cfg["setup"]
-        if (step.get("marker") and not (ROOT / step["marker"]).exists()) or state.get(step["id"]) != manifest_hash(step)
-    ]
+    stale = []
+    for step in cfg["setup"]:
+        marker_missing = bool(step.get("marker")) and not (ROOT / step["marker"]).exists()
+        if step.get("trustExisting") and step.get("marker") and not marker_missing and step["id"] not in state:
+            # Dependencies that were here before this tool (an adopted project): take them as they are, and only
+            # reinstall when the manifest changes from now on. Reinstalling over a developer's environment could wipe it.
+            state[step["id"]] = manifest_hash(step)
+            save_installed(state)
+            continue
+        if marker_missing or state.get(step["id"]) != manifest_hash(step):
+            stale.append(step)
+    return stale
 
 
 def ensure_installed(cfg: dict, run: Run) -> bool:
@@ -1276,7 +1350,7 @@ def run_handoff(cfg: dict, app_id: str, prompt_file: Path, tag: str, run_dir: Pa
         sys.exit(EXIT_USAGE)
     if not interactive_terminal():
         say(bad(f"{app['label']} is a desktop app you drive, so this needs a terminal to wait in. Nothing was opened."))
-        say("Run it in a terminal, or choose an agent that runs by itself: ./scripts/sdlc agent")
+        say("Run it in a terminal, or choose an agent that runs by itself: ./<%sdlcDir%>/sdlc agent")
         sys.exit(EXIT_HUMAN)
     instruction = f"Read {rel(prompt_file)} and do exactly what it says."
     say(c(f"\n== hand-off to {app['label']} ==", "1"))
@@ -1314,7 +1388,7 @@ def agent_preset_command(cfg: dict, name: str) -> str | None:
 
 
 def read_agent_choice() -> dict:
-    """This person's own choice (`./scripts/sdlc agent`): kept out of git, because every developer has different tools."""
+    """This person's own choice (`./<%sdlcDir%>/sdlc agent`): kept out of git, because every developer has different tools."""
     try:
         data = json.loads(AGENT_LOCAL.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -1415,7 +1489,7 @@ def save_agent_choice(cfg: dict, name: str, custom: str = "") -> str | None:
     if name == "custom":
         command = custom.strip()
         if not command:
-            say(bad("A custom agent needs its command, e.g.  ./scripts/sdlc agent custom --command 'my-agent --prompt-stdin'"))
+            say(bad("A custom agent needs its command, e.g.  ./<%sdlcDir%>/sdlc agent custom --command 'my-agent --prompt-stdin'"))
             return None
         data = {"preset": "custom", "command": command}
     else:
@@ -1437,7 +1511,7 @@ def save_agent_choice(cfg: dict, name: str, custom: str = "") -> str | None:
         if problem:
             install = next((p["install"] for p in agent_presets(cfg) if p["id"] == name and p.get("install")), "")
             say(warn(f"  {problem}.") + (f" Install it with: {install}" if install else ""))
-            say(dim("  Run `./scripts/sdlc doctor` after installing to check."))
+            say(dim("  Run `./<%sdlcDir%>/sdlc doctor` after installing to check."))
     return command
 
 
@@ -1483,10 +1557,10 @@ def require_agent(cfg: dict, args: argparse.Namespace, task: str) -> tuple:
         if chosen and not agent_problem(chosen, cfg):
             return chosen, None
         if chosen is not None:  # a pick that cannot run yet: the choice was saved and how to fix it was already said
-            say("\nWith no usable agent nothing can " + task + ". Install it (or pick another with ./scripts/sdlc agent), then run this again."
-                if chosen else "\nWith no agent nothing can " + task + ": a human does the coding. Pick one with ./scripts/sdlc agent to continue.")
+            say("\nWith no usable agent nothing can " + task + ". Install it (or pick another with ./<%sdlcDir%>/sdlc agent), then run this again."
+                if chosen else "\nWith no agent nothing can " + task + ": a human does the coding. Pick one with ./<%sdlcDir%>/sdlc agent to continue.")
             return None, None
-    say("\nChoose one:  ./scripts/sdlc agent   (or  ./scripts/sdlc agent <name>,  or add  --agent <name>  to this command)")
+    say("\nChoose one:  ./<%sdlcDir%>/sdlc agent   (or  ./<%sdlcDir%>/sdlc agent <name>,  or add  --agent <name>  to this command)")
     return None, None
 
 
@@ -1506,9 +1580,9 @@ def cmd_agent(cfg: dict, args: argparse.Namespace) -> int:
     command, source = current_agent(cfg)
     print_agent_options(cfg, command, source)
     if args.list or not interactive_terminal():
-        say("\nChoose one:  ./scripts/sdlc agent <name>      e.g.  ./scripts/sdlc agent codex"
+        say("\nChoose one:  ./<%sdlcDir%>/sdlc agent <name>      e.g.  ./<%sdlcDir%>/sdlc agent codex"
             "\nOne run:     add  --agent <name>  to spec, implement or loop"
-            "\nUndo:        ./scripts/sdlc agent --reset")
+            "\nUndo:        ./<%sdlcDir%>/sdlc agent --reset")
         return EXIT_OK
     choose_agent_interactive(cfg)
     return EXIT_OK
@@ -1534,7 +1608,7 @@ def dirty_files(exclude: Path) -> list:
         return []
     skip = rel(exclude).rstrip("/") + "/"
     out = []
-    for line in git("status", "--porcelain").splitlines():
+    for line in git_porcelain():
         name = line[3:].split(" -> ")[-1].strip().strip('"')
         if not name.startswith(skip) and not name.startswith(".ai/evidence"):
             out.append(line)
@@ -2021,7 +2095,369 @@ def cmd_spec(cfg: dict, args: argparse.Namespace) -> int:
     say(warn("This is a DRAFT written by an AI. Read it before anyone implements it (skill: .ai/skills/review-spec):"))
     say(f"  1. compare {rel(spec_dir / 'prd.md')} and acceptance.json with {src.name} (each criterion cites its source)")
     say("  2. confirm or change every ASSUMPTION and answer the open questions, then set `Status: Accepted`")
-    say(f"  3. ./scripts/sdlc implement {values['feature']}")
+    say(f"  3. ./<%sdlcDir%>/sdlc implement {values['feature']}")
+    return EXIT_OK
+
+
+# --------------------------------------------------------------------------- onboard: an agent maps the existing code, the tool checks what it can
+#
+# The agent drafts two files (a map of the repository and the conventions its code follows) and a person reviews them. An AI's
+# description of a code base is only worth having if it is true, so the tool checks everything that can be checked mechanically
+# against the repository itself: every path the draft cites exists, every `npm run x` / `make x` / `sdlc x` it names is real, every
+# convention points at the code it was seen in, and nothing is left as a placeholder. What it cannot check (is the description
+# right?) stays with the person, and the files say so with `Status: Draft` until they have been read.
+
+ONBOARD_MIN_CHARS = 300
+# A name with one of these extensions is taken to be a file; names without one are only checked when they contain a "/".
+PATH_EXTENSIONS = {
+    "json", "toml", "yaml", "yml", "md", "py", "ts", "tsx", "js", "jsx", "mjs", "cjs", "go", "rs", "java", "kt", "rb", "php", "cs",
+    "sh", "cfg", "ini", "txt", "lock", "sql", "html", "css", "scss", "xml", "gradle", "mk", "env", "tf", "vue", "svelte",
+}
+# Generated or installed locations: a draft may mention them without them being in the repository.
+GENERATED_TOP = {"node_modules", "dist", "build", ".venv", "venv", "__pycache__", ".next", ".nuxt", "coverage", "target", ".git", ".tox", ".cache", ".mypy_cache"}
+GUIDANCE_FILES = ("AGENTS.md", "CLAUDE.md", "GEMINI.md", "CONVENTIONS.md", ".cursorrules", ".windsurfrules", ".github/copilot-instructions.md")
+TREE_SKIP = GENERATED_TOP | {".pytest_cache", ".ruff_cache", ".turbo", ".idea", ".gradle", ".terraform"}
+CODE_FENCE = re.compile(r"^(```|~~~).*?^\1[^\n]*$", re.M | re.S)
+CODE_SPAN = re.compile(r"`([^`\n]+)`")
+RUN_SCRIPT = re.compile(r"(?<![\w./-])(?:npm|pnpm|yarn|bun)\s+run\s+([A-Za-z0-9:_.-]+)")
+MAKE_TARGET = re.compile(r"(?<![\w./-])make\s+([A-Za-z0-9_.-]+)")
+SDLC_COMMAND = re.compile(r"(?<![\w-])\.?[/\\]?\.ai[/\\]sdlc(?:\.cmd)?\s+([a-z][a-z-]*)")
+BOLD_BULLET = re.compile(r"^[-*]\s+\*\*")
+STATUS_DRAFT = re.compile(r"^Status:\s*Draft", re.I | re.M)
+
+
+def repo_files() -> list:
+    """Every file of the repository the way git sees it (tracked, and untracked but not ignored); a folder walk without git."""
+    if (ROOT / ".git").exists():
+        listed = git("ls-files", "-co", "--exclude-standard")
+        if listed:
+            return sorted({f for f in listed.splitlines() if not f.startswith(".ai/evidence/")})
+    files = []
+    for dirpath, dirnames, filenames in os.walk(ROOT):
+        dirnames[:] = sorted(d for d in dirnames if d not in TREE_SKIP)
+        for name in sorted(filenames):
+            path = Path(dirpath, name).relative_to(ROOT).as_posix()
+            if not path.startswith(".ai/evidence/"):
+                files.append(path)
+    return files
+
+
+def repo_tree(files: list, depth: int = 3, max_lines: int = 160) -> str:
+    """A bounded map of the repository: top-level files, then folders (with how many files each holds), breadth first."""
+    counts: dict = {}
+    for f in files:
+        parts = f.split("/")
+        for d in range(1, min(len(parts), depth + 1)):
+            key = "/".join(parts[:d])
+            counts[key] = counts.get(key, 0) + 1
+    top_files = [f for f in files if "/" not in f]
+    lines = [f"{name}" for name in top_files[:40]] + ([f"... {len(top_files) - 40} more files at the top level"] if len(top_files) > 40 else [])
+    shown = sorted(counts, key=lambda k: (k.count("/"), k))[: max(0, max_lines - len(lines))]
+    lines += [f"{k}/  ({counts[k]} file{'s' if counts[k] != 1 else ''})" for k in sorted(shown)]
+    if len(counts) > len(shown):
+        lines.append(f"... {len(counts) - len(shown)} more folders below this depth or beyond the line limit")
+    return "\n".join(lines) or "(empty)"
+
+
+def existing_guidance(files: list) -> list:
+    return [f for f in files if f in GUIDANCE_FILES or f.startswith(".cursor/rules/")]
+
+
+def strip_fences(text: str) -> str:
+    return CODE_FENCE.sub("", text)
+
+
+def path_claim(span: str) -> str | None:
+    """The repository path a backticked span claims to be, or None when it is not (clearly) a path: a URL, a route (/api/x),
+    a command, a package name, a method call. A name with a "/" is checked when its first part is a folder of this repository,
+    when it ends with "/", or when it looks like a file; a bare name only when it looks like a file."""
+    s = re.sub(r":\d+(?:-\d+)?$", "", span.strip())
+    if s.startswith("./"):
+        s = s[2:]
+    if not s or not re.fullmatch(r"[A-Za-z0-9_.@+*/-]+", s) or s.startswith(("/", "@", "-", ".../")) or "//" in s or ".." in s.split("/"):
+        return None
+    first = s.split("/")[0]
+    if first in GENERATED_TOP or s.startswith(".ai/evidence"):
+        return None
+    last = s.rstrip("/").rsplit("/", 1)[-1]
+    filey = "." in last and last.rsplit(".", 1)[-1].lower() in PATH_EXTENSIONS
+    if "/" in s:
+        return s if s.endswith("/") or filey or (ROOT / first).exists() or "*" in first else None
+    return s if filey or "*" in s else None
+
+
+def path_exists(claim: str) -> bool:
+    if "*" in claim:
+        try:
+            return next(ROOT.glob(claim.rstrip("/")), None) is not None
+        except (ValueError, NotImplementedError, OSError):
+            return False
+    return (ROOT / claim.rstrip("/")).exists()
+
+
+def suggest_paths(claim: str) -> str:
+    """For a cited file that is not where the draft says: the files of that name that do exist (a bare `utils.py` usually lives in a folder)."""
+    name = claim.rstrip("/").rsplit("/", 1)[-1]
+    close = [f for f in repo_files() if f.rsplit("/", 1)[-1] == name][:3]
+    return f" (did you mean {', '.join('`' + f + '`' for f in close)}?)" if close else ""
+
+
+def code_text(text: str) -> str:
+    """What a draft marks as code: fenced blocks and backticked spans (prose like "make sure" is not a command)."""
+    fenced = [m.group(0) for m in CODE_FENCE.finditer(text)]
+    return "\n".join(fenced + CODE_SPAN.findall(strip_fences(text)))
+
+
+def repo_scripts() -> tuple:
+    """(package.json script names anywhere in the repository, Makefile targets)."""
+    scripts, targets = set(), set()
+    for f in repo_files():
+        name = f.rsplit("/", 1)[-1]
+        try:
+            if name == "package.json":
+                scripts |= set((json.loads((ROOT / f).read_text(encoding="utf-8")).get("scripts") or {}))
+            elif name in ("Makefile", "makefile", "GNUmakefile"):
+                targets |= set(re.findall(r"^([A-Za-z0-9_.-]+)\s*:(?!=)", (ROOT / f).read_text(encoding="utf-8", errors="replace"), re.M))
+        except (OSError, ValueError, AttributeError):
+            continue
+    return scripts, targets
+
+
+def sdlc_commands() -> set:
+    parsers = next(a for a in build_parser()._actions if isinstance(a, argparse._SubParsersAction))
+    return set(parsers.choices)
+
+
+def evidence_blocks(text: str) -> list:
+    """Bold-led list items ("- **Thing**: ...") with everything indented under them, outside an "open questions" section."""
+    blocks, current, skipping = [], None, False
+    for line in text.splitlines():
+        if re.match(r"^#{1,6}\s", line):
+            skipping = bool(re.search(r"open question|assumption|unknown|conflict|not sure", line, re.I))
+            if current is not None:
+                blocks.append(current)
+                current = None
+        elif BOLD_BULLET.match(line):
+            if current is not None:
+                blocks.append(current)
+            current = None if skipping else [line]
+        elif current is not None and (line.strip() == "" or line.startswith((" ", "\t"))):
+            current.append(line)
+        elif current is not None:
+            blocks.append(current)
+            current = None
+    if current is not None:
+        blocks.append(current)
+    return ["\n".join(b) for b in blocks]
+
+
+def check_context_file(path: str, text: str, headings: list, min_items: int) -> tuple:
+    """Everything about one drafted file that can be checked against the repository. Returns (problems, stats)."""
+    problems, stats = [], {"paths": 0, "commands": 0}
+    if len(text.strip()) < ONBOARD_MIN_CHARS:
+        problems.append(f"{path} is nearly empty ({len(text.strip())} characters): describe what is actually in the repository")
+    if "TODO(onboard)" in text:
+        problems.append(f"{path} still contains TODO(onboard) placeholders")
+    if not STATUS_DRAFT.search("\n".join(text.splitlines()[:8])):
+        problems.append(f"{path}: the first lines must include `Status: Draft (drafted by an agent; a human must review it)`")
+    for label, pattern in headings:
+        if not re.search(rf"^#{{1,6}}\s*.*(?:{pattern})", text, re.I | re.M):
+            problems.append(f"{path}: missing a section about {label} (a heading containing: {pattern.replace('|', ' / ')})")
+
+    prose = strip_fences(text)
+    seen: set = set()
+    for span in CODE_SPAN.findall(prose):
+        claim = path_claim(span)
+        if claim is None or claim in seen:
+            continue
+        seen.add(claim)
+        stats["paths"] += 1
+        if not path_exists(claim):
+            problems.append(f"{path} cites `{claim}`, which does not exist in this repository (paths are relative to the repository root){suggest_paths(claim)}")
+
+    scripts, targets = repo_scripts()
+    commands = sdlc_commands()
+    code = code_text(text)
+    for name in sorted(set(RUN_SCRIPT.findall(code))):
+        stats["commands"] += 1
+        if name not in scripts:
+            problems.append(f"{path} names `... run {name}`, but no package.json defines a script called {name} (defined: {', '.join(sorted(scripts)) or 'none'})")
+    for name in sorted(set(MAKE_TARGET.findall(code))):
+        stats["commands"] += 1
+        if name not in targets:
+            problems.append(f"{path} names `make {name}`, but no Makefile defines that target (defined: {', '.join(sorted(targets)) or 'no Makefile'})")
+    for name in sorted(set(SDLC_COMMAND.findall(code))):
+        stats["commands"] += 1
+        if name not in commands:
+            problems.append(f"{path} names `sdlc {name}`, which is not a command (commands: {', '.join(sorted(commands))})")
+
+    items = evidence_blocks(text)
+    if len(items) < min_items:
+        problems.append(f"{path}: expected at least {min_items} bold-led items (`- **Name**: ...`), found {len(items)}")
+    for block in items:
+        claims = [p for p in (path_claim(s) for s in CODE_SPAN.findall(strip_fences(block))) if p]
+        if not any(path_exists(p) for p in claims):
+            problems.append(f"{path}: this item cites no existing file as evidence (name where in the code it was seen, in backticks): {block.strip().splitlines()[0][:90]}")
+    return problems, stats
+
+
+ONBOARD_SECTIONS = {
+    "architecture": ([("what this is", "purpose|overview|what this"), ("the layout", "layout|structure"), ("entry points", "entry points?"),
+                      ("open questions", "open questions|assumptions|unknown")], 3),
+    "conventions": ([("conventions", "convention"), ("open questions and conflicts", "open questions|conflict|unclear|not sure")], 3),
+}
+
+
+def validate_onboard(cfg: dict) -> tuple:
+    problems, stats = [], {"paths": 0, "commands": 0, "files": 0}
+    for key, (headings, min_items) in ONBOARD_SECTIONS.items():
+        path = cfg["onboard"][key]
+        file = ROOT / path
+        if not file.is_file():
+            problems.append(f"{path} was not written")
+            continue
+        found, counts = check_context_file(path, file.read_text(encoding="utf-8", errors="replace"), headings, min_items)
+        problems += found
+        stats["files"] += 1
+        stats["paths"] += counts["paths"]
+        stats["commands"] += counts["commands"]
+    return problems, stats
+
+
+def context_state(cfg: dict) -> list:
+    """(path, "missing" | "draft" | "reviewed") for each file `onboard` writes."""
+    out = []
+    for path in (cfg.get("onboard") or {}).values():
+        file = ROOT / path
+        if not file.is_file():
+            out.append((path, "missing"))
+        else:
+            head = "\n".join(file.read_text(encoding="utf-8", errors="replace").splitlines()[:8])
+            out.append((path, "draft" if STATUS_DRAFT.search(head) else "reviewed"))
+    return out
+
+
+def dirty_outside(allowed: list) -> list:
+    """Uncommitted changes to anything except the allowed files (and the evidence folder). Empty when not a git repository."""
+    if not (ROOT / ".git").exists():
+        return []
+    out = []
+    for line in git_porcelain("-uall"):
+        name = line[3:].split(" -> ")[-1].strip().strip('"')
+        if name not in allowed and not name.startswith(".ai/evidence"):
+            out.append(line)
+    return out
+
+
+def cmd_onboard(cfg: dict, args: argparse.Namespace) -> int:
+    """An agent drafts a map of the repository and its conventions; the tool checks every claim it can; a person reviews."""
+    if not cfg.get("onboard") or "onboard" not in cfg["agent"]["prompts"]:
+        say(bad("`onboard` is for a repository adopted with `scaffolder adopt`: this project has no existing code to map."))
+        return EXIT_USAGE
+    targets = [cfg["onboard"][k] for k in ONBOARD_SECTIONS]
+    if args.max_attempts < 1:
+        die("--max-attempts must be at least 1")
+    say(c("\n=== onboard: describe this repository ===", "1;35"))
+    agent, problem = require_agent(cfg, args, "draft the repository context")
+    if agent is None:
+        return EXIT_HUMAN
+    present = [t for t in targets if (ROOT / t).exists()]
+    if present and not args.force:
+        say(bad("These files already exist, so drafting again would overwrite your work:"))
+        for t in present:
+            say(f"  {t}")
+        say("Edit them by hand, or pass --force to have the agent redraft them (your versions are kept in the evidence folder).")
+        return EXIT_HUMAN
+    if not (ROOT / ".git").exists():
+        say(warn("  not a git repository: the agent's changes cannot be reviewed or reverted easily (run `git init` first)"))
+    dirty = dirty_outside(targets)
+    if dirty and not args.allow_dirty:
+        say(bad("You have uncommitted changes:"))
+        for line in dirty[:15]:
+            say(f"  {line}")
+        say("Commit or stash them first so you can see exactly what the agent changes (or pass --allow-dirty).")
+        return EXIT_HUMAN
+
+    run = Run("onboard")
+    files = repo_files()
+    guidance = existing_guidance(files)
+    questions = run.dir / "QUESTIONS.md"
+    integ = cfg["integrity"]
+    values = {
+        "architectureFile": targets[0], "conventionsFile": targets[1], "questionsFile": rel(questions),
+        "tree": repo_tree([f for f in files if not f.startswith(".ai/")]),  # the overlay itself is not the project
+        "stack": "\n".join(f"- {st['id'].split('.')[0]}: `{st['cwd']}/` (dependency manifest: {', '.join('`' + m + '`' for m in st.get('manifests', []))})"
+                           for st in cfg["setup"]) or "(no install steps were detected)",
+        "gates": "\n".join(f"- `{g['id']}`: `{g['cmd']}` (in `{g['cwd']}`)" for g in cfg["gates"]) or "(none)",
+        "existingGuidance": "\n".join(f"- `{g}`" for g in guidance) or "(none)",
+        "previous": ("Earlier drafts exist at " + ", ".join(f"`{t}`" for t in present) + ". Read them: keep what is still true and checkable, drop what is not, and do not discard a person's corrections.")
+                    if present else "There is no earlier draft.",
+        "rules": listing(".ai/rules/*.md"), "commands": ".ai/context/commands.md",
+    }
+    prompt = render_prompt(cfg["agent"]["prompts"]["onboard"], values)
+    if args.dry_run:
+        prompt_file = run.dir / "onboard.prompt.md"
+        prompt_file.write_text(prompt, encoding="utf-8")
+        say(ok("\nDry run: nothing was executed or written."))
+        say(f"  agent command : {agent}" + (f"   (WARNING: {problem})" if problem else ""))
+        handoff_note(cfg, agent)
+        say(f"  would write   : {', '.join(targets)}")
+        say(f"  prompt        : {rel(prompt_file)}  ({len(prompt.splitlines())} lines; {len(files)} files in the repository, {len(guidance)} existing guidance file(s) to fold in)")
+        return EXIT_OK
+
+    for t in present:  # --force: the earlier version is kept
+        keep = run.dir / "previous" / t
+        keep.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / t, keep)
+    guard = integ["protected"] + integ["protectedWhileHealing"] + guidance
+    before_snap, before_dirty = snapshot(guard), set(dirty_outside(targets))
+    for attempt in range(1, args.max_attempts + 1):
+        say(c(f"\n== agent: describing the repository (attempt {attempt}/{args.max_attempts}) ==", "1"))
+        code = run_agent(cfg, agent, prompt, f"onboard-{attempt}", run.dir)
+        blocker = agent_blocker(run.dir, f"onboard-{attempt}", code)
+        if blocker:
+            explain_blocker(agent, blocker)
+            return EXIT_HUMAN
+        if code != 0:
+            say(warn(f"  the agent exited with {code}; validation below decides whether the draft is usable"))
+        violations = changed(before_snap, snapshot(guard)) + sorted(set(dirty_outside(targets)) - before_dirty)
+        if violations:
+            say(bad("\nINTEGRITY VIOLATION: onboarding may only write the two files below, but these changed:"))
+            for t in targets:
+                say(f"  (allowed) {t}")
+            for v in violations:
+                say(bad(f"  - {v}"))
+            say("Revert them (git checkout -- <path>; remove untracked files) and run again. Existing guidance files (AGENTS.md, CLAUDE.md, ...) are read, never edited.")
+            (run.dir / "integrity-violation.md").write_text("\n".join(violations), encoding="utf-8")
+            return EXIT_INTEGRITY
+        if questions.exists() and questions.read_text(encoding="utf-8").strip():
+            say(bad("\nThe agent could not describe the repository:"))
+            say(questions.read_text(encoding="utf-8").strip())
+            return EXIT_HUMAN
+        errors, stats = validate_onboard(cfg)
+        if not errors:
+            break
+        say(warn(f"  the draft has {len(errors)} problem(s):"))
+        for e in errors[:10]:
+            say(f"    - {e}")
+        if len(errors) > 10:
+            say(f"    ... and {len(errors) - 10} more")
+        if attempt == args.max_attempts:
+            say(bad(f"\nThe draft is still not valid after {attempt} attempts. Fix {' and '.join(targets)} by hand; run `./<%sdlcDir%>/sdlc onboard --dry-run` to see the prompt."))
+            return EXIT_FAIL
+        prompt = render_prompt(cfg["agent"]["prompts"]["onboardFix"], {
+            "attempt": attempt + 1, "maxAttempts": args.max_attempts, "errors": "\n".join(f"- {e}" for e in errors),
+            "architectureFile": targets[0], "conventionsFile": targets[1], "questionsFile": rel(questions),
+        })
+
+    say(ok("\nDraft ready:"))
+    for t in targets:
+        say(f"  {t}")
+    say(f"  checked against the repository: {stats['paths']} cited path(s) exist, {stats['commands']} command(s) are real, every item cites code")
+    say(warn("This is a DRAFT written by an AI. The tool can check that what it cites exists, not that its description is right. Read it:"))
+    say("  1. correct anything wrong or misleading; answer the open questions or leave them listed")
+    say("  2. change each file's `Status: Draft ...` line to `Status: Reviewed`")
+    say("  3. commit them: agents read these files before every task, so a wrong sentence misleads every one of them")
     return EXIT_OK
 
 
@@ -2046,7 +2482,7 @@ def cmd_implement(cfg: dict, args: argparse.Namespace) -> int:
     if spec_dir is None:
         existing = sorted(p.name for p in (ROOT / specs_dir).glob("FEAT-*") if not p.name.startswith(EXAMPLE_FEATURE))
         say(bad(f"No feature '{args.name}' under {specs_dir}/."))
-        say("Create one with ./scripts/sdlc new <slug>, write its prd.md and acceptance.json, then run this again."
+        say("Create one with ./<%sdlcDir%>/sdlc new <slug>, write its prd.md and acceptance.json, then run this again."
             + (f"\nExisting features: {', '.join(existing)}" if existing else ""))
         return EXIT_HUMAN
     fid = spec_dir.name.split("-", 2)[0] + "-" + spec_dir.name.split("-", 2)[1]
@@ -2056,11 +2492,11 @@ def cmd_implement(cfg: dict, args: argparse.Namespace) -> int:
     if fid == EXAMPLE_FEATURE:
         say(warn(f"{fid} is the worked example, and it is already built: its code and tests ship with this project."))
         say("There is nothing left for an agent to write, so `implement` would not change a single file.\n")
-        say("  See it proven against the running system:  ./scripts/sdlc verify")
+        say("  See it proven against the running system:  ./<%sdlcDir%>/sdlc verify")
         say("  Have an agent build something new:")
-        say("    ./scripts/sdlc new <slug>                 then write its prd.md and acceptance.json")
-        say("    ./scripts/sdlc spec requirements.pdf      or let an agent draft them from a requirements document")
-        say("    ./scripts/sdlc implement FEAT-001         the agent writes the code and the loop proves it")
+        say("    ./<%sdlcDir%>/sdlc new <slug>                 then write its prd.md and acceptance.json")
+        say("    ./<%sdlcDir%>/sdlc spec requirements.pdf      or let an agent draft them from a requirements document")
+        say("    ./<%sdlcDir%>/sdlc implement FEAT-001         the agent writes the code and the loop proves it")
         return EXIT_HUMAN
 
     # 1. the spec is the contract: it must be complete before an agent spends effort on it
@@ -2122,7 +2558,11 @@ def cmd_implement(cfg: dict, args: argparse.Namespace) -> int:
         "skills": listing(".ai/skills/*/SKILL.md"),
         "protected": ", ".join(f"`{p}`" for p in integ["protected"] + integ["protectedWhileHealing"]),
         "questionsFile": rel(questions),
+        "context": listing(".ai/context/*.md"),
     })
+    for path, state in context_state(cfg):
+        if state == "draft":
+            say(warn(f"  note: {path} is still an unreviewed draft; the agent will use it, so read it soon (./<%sdlcDir%>/sdlc doctor)"))
     if args.dry_run:
         prompt_file = run.dir / "implement.prompt.md"
         prompt_file.write_text(prompt, encoding="utf-8")
@@ -2135,6 +2575,7 @@ def cmd_implement(cfg: dict, args: argparse.Namespace) -> int:
     # 7. the agent writes tests, code, dependencies, config and the contract
     say(c("\n== agent: implementing ==", "1"))
     before = snapshot(integ["protected"] + integ["protectedWhileHealing"])
+    guarded_before = snapshot(integ["guarded"])
     head = git("rev-parse", "HEAD")
     work_before = work_fingerprint()
     code = run_agent(cfg, agent, prompt, f"implement-{fid}", run.dir)
@@ -2154,6 +2595,9 @@ def cmd_implement(cfg: dict, args: argparse.Namespace) -> int:
         say("The spec and the gate config belong to you, not the agent. Revert them (git checkout -- <path>) and run again.")
         (run.dir / "integrity-violation.md").write_text("\n".join(violations), encoding="utf-8")
         return EXIT_INTEGRITY
+    guard_changes = changed(guarded_before, snapshot(integ["guarded"]))
+    if guard_changes:
+        say(warn("  the agent changed files that define what is checked (lint, types, tests, contract). Review them: " + ", ".join(guard_changes)))
     if questions.exists() and questions.read_text(encoding="utf-8").strip():
         say(bad("\nThe agent could not proceed without answers from you:"))
         say(questions.read_text(encoding="utf-8").strip())
@@ -2209,7 +2653,7 @@ def cmd_loop(cfg: dict, args: argparse.Namespace) -> int:
             "iteration": i, "maxIterations": max_iter, "failures": failures_markdown(run),
             "previousAttempts": "\n".join(f"- iteration {n + 1}: {h}" for n, h in enumerate(history[:-1])) or "none",
             "feature": getattr(args, "focus", None) or args.feature or "(all)", "changedFiles": git("status", "--short") or "(unknown)",
-            "report": f"{rel(run.dir)}/report.md",
+            "report": f"{rel(run.dir)}/report.md", "context": listing(".ai/context/*.md"),
         })
         if not agent:
             path = run.dir / f"heal-{i}.prompt.md"
@@ -2246,10 +2690,90 @@ def cmd_loop(cfg: dict, args: argparse.Namespace) -> int:
 
 def cmd_setup(cfg: dict, args: argparse.Namespace) -> int:
     run = Run("setup")
+    needed = {step["id"] for step in stale_steps(cfg)}
     for step in cfg["setup"]:
+        if step.get("trustExisting") and step["id"] not in needed:
+            # an adopted project's own environment: reinstalling over it (npm ci deletes node_modules) is not what "set up" should do
+            say(dim(f"  {step['label']}: already installed, used as it is"))
+            continue
         if not run_setup_step(step, run):
             return EXIT_FAIL
     say(ok("setup complete"))
+    return EXIT_OK
+
+
+def gate_results(run: Run) -> dict:
+    """What each gate did in this run, as recorded in the baseline: the exit code decides, not the (possibly softened) status."""
+    return {
+        i["id"]: {"label": i["label"], "passed": i["exitCode"] == 0, "exitCode": i["exitCode"]}
+        for i in run.items if i["kind"] == "gate"
+    }
+
+
+def cmd_baseline(cfg: dict, args: argparse.Namespace) -> int:
+    """Record which gates pass today (an adopted project's starting line), or lock in gates that have started to pass."""
+    ratchet = ratchet_config(cfg)
+    if not ratchet:
+        say(bad("This project has no baseline: `baseline` is for a repository adopted with `scaffolder adopt`."))
+        return EXIT_USAGE
+    path = ROOT / ratchet["baseline"]
+    existing = load_baseline(cfg)
+    if args.tighten and args.force:
+        die("use either --tighten or --force, not both")
+    if existing is not None and not (args.tighten or args.force):
+        say(warn(f"{rel(path)} already exists."))
+        say("  ./<%sdlcDir%>/sdlc baseline --tighten   lock in gates that pass now (it never loosens anything)")
+        say("  ./<%sdlcDir%>/sdlc baseline --force     record everything again from scratch: every current failure becomes the new normal")
+        return EXIT_HUMAN
+    if args.tighten and existing is None:
+        say(bad("Nothing to tighten: there is no baseline yet. Run ./<%sdlcDir%>/sdlc baseline first."))
+        return EXIT_HUMAN
+
+    run = Run("baseline")
+    if not ensure_installed(cfg, run):
+        return EXIT_FAIL
+    if secrets_baseline_path(cfg) is not None and not args.tighten:
+        n = write_secrets_baseline(cfg)
+        if n:
+            say(warn(f"  {n} possible secret(s) are already in the repository: recorded as known so they do not block you, but they are still there. Review them and rotate anything real."))
+    say(c("\n== baseline: running every gate once ==", "1"))
+    every = argparse.Namespace(stage=None, only=None, keep_going=True)
+    result, _ = run_verify(cfg, "baseline", every, with_facts=False, use_baseline=bool(args.tighten))
+    now = gate_results(result)
+
+    if args.tighten:
+        before = existing["gates"]
+        regressions = sorted(g for g, was in before.items() if was.get("passed") and g in now and not now[g]["passed"])
+        if regressions:
+            say(bad(f"\nNot tightened: these gates passed at the baseline and fail now: {', '.join(regressions)}. Fix them first."))
+            return EXIT_FAIL
+        promoted = sorted(g for g, was in before.items() if not was.get("passed") and g in now and now[g]["passed"])
+        added = sorted(g for g in now if g not in before)
+        for g in promoted + added:
+            before[g] = now[g]
+        if not promoted and not added:
+            say(ok("\nNothing to tighten: no gate that failed at the baseline passes yet."))
+            return EXIT_OK
+        existing["recorded"] = datetime.datetime.now().isoformat(timespec="seconds")
+        path.write_text(json.dumps(existing, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        say(ok(f"\nTightened {rel(path)}: " + "; ".join(x for x in (
+            f"now locked as passing: {', '.join(promoted)}" if promoted else "", f"new gates recorded: {', '.join(added)}" if added else "") if x)))
+        say("Commit it.")
+        return EXIT_OK
+
+    data = {"version": 1, "recorded": datetime.datetime.now().isoformat(timespec="seconds"),
+            "git": git_info().get("sha", ""), "gates": now}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    passing = sorted(g for g, r in now.items() if r["passed"])
+    failing = sorted(g for g, r in now.items() if not r["passed"])
+    say("")
+    say(ok(f"Baseline recorded in {rel(path)}: {len(passing)} gate(s) pass, {len(failing)} fail."))
+    if failing:
+        say(warn("These fail today. They are recorded as known: they will show as warnings and will not block, until you fix them and run `baseline --tighten`:"))
+        for g in failing:
+            say(f"  - {g}  ({now[g]['label']})")
+    say(f"What passes now may not fail from here on. Commit .ai/ including {rel(path)}, then use ./<%sdlcDir%>/sdlc verify.")
     return EXIT_OK
 
 
@@ -2259,6 +2783,11 @@ def cmd_doctor(cfg: dict, args: argparse.Namespace) -> int:
         needed.update({"node": True, "npm": True})
     if cfg["runtime"]["mode"] == "docker":
         needed["docker"] = True
+    for tool in cfg.get("tools", []):  # an adopted project says which programs its gates run (node, pnpm, uv, make, ...)
+        needed[tool] = True
+    for step in cfg["setup"]:
+        for tool in step.get("tools", []):
+            needed[tool] = True
     bad_count = 0
     say(f"  {ok('ok  ')}  {'system':12} {describe_platform()}")
     # the interpreter running this tool is the proof that Python works; `python3` on PATH may be a Windows Store stub
@@ -2286,9 +2815,21 @@ def cmd_doctor(cfg: dict, args: argparse.Namespace) -> int:
             say(f"  {bad('MISS')}  {name:12} {step['label']} needs Python >= {minimum}; the newest found is {shown}")
             for line in install_hints(minimum):
                 say(f"        {line.strip()}")
+    if ratchet_config(cfg):
+        if load_baseline(cfg) is None:
+            say(f"  {warn('note')}  {'baseline':12} not recorded yet: run ./<%sdlcDir%>/sdlc baseline once (after setup) and commit .ai/baseline.json")
+        else:
+            say(f"  {ok('ok  ')}  {'baseline':12} {ratchet_config(cfg)['baseline']}")
+    for path, state in context_state(cfg):
+        if state == "missing":
+            say(f"  {warn('note')}  {'context':12} {path}: not drafted yet (./<%sdlcDir%>/sdlc onboard)")
+        elif state == "draft":
+            say(f"  {warn('note')}  {'context':12} {path}: still a draft. Read it, correct it, then change its Status line to Reviewed")
+        else:
+            say(f"  {ok('ok  ')}  {'context':12} {path}")
     agent, source = current_agent(cfg)
     if not agent:
-        say(f"  {warn('note')}  {'agent':12} none configured: `spec` and `implement` will ask you to choose one (./scripts/sdlc agent)")
+        say(f"  {warn('note')}  {'agent':12} none configured: `spec` and `implement` will ask you to choose one (./<%sdlcDir%>/sdlc agent)")
     else:
         problem = agent_problem(agent, cfg)
         say(f"  {warn('note') if problem else ok('ok  ')}  {'agent':12} {agent_name(cfg, agent)}" + (f"   ({problem})" if problem else f"   ({source})"))
@@ -2296,12 +2837,12 @@ def cmd_doctor(cfg: dict, args: argparse.Namespace) -> int:
     here = [row["id"] for row in rows if row["path"] and not row["command"].startswith(HANDOFF)]
     apps = [row["id"] for row in rows if row["path"] and row["command"].startswith(HANDOFF)]
     if here:
-        say(f"  {ok('ok  ')}  {'agents':12} installed here: {', '.join(here)}   (choose with ./scripts/sdlc agent)")
+        say(f"  {ok('ok  ')}  {'agents':12} installed here: {', '.join(here)}   (choose with ./<%sdlcDir%>/sdlc agent)")
     else:
         names = ", ".join(row["id"] for row in rows if not row["command"].startswith(HANDOFF))
-        say(f"  {warn('note')}  {'agents':12} none of {names} is installed: ./scripts/sdlc agent shows how to install one")
+        say(f"  {warn('note')}  {'agents':12} none of {names} is installed: ./<%sdlcDir%>/sdlc agent shows how to install one")
     if apps:
-        say(f"  {ok('ok  ')}  {'desktop apps':12} you can drive: {', '.join(apps)}   (the tool opens one and waits for you; see ./scripts/sdlc agent)")
+        say(f"  {ok('ok  ')}  {'desktop apps':12} you can drive: {', '.join(apps)}   (the tool opens one and waits for you; see ./<%sdlcDir%>/sdlc agent)")
     say(f"  {ok('ok  ')}  {'pdf reader':12} {pdf_reader_name()}   (for `spec`; .docx, .md and .txt need nothing)")
     say("")
     say(ok("toolchain ready") if not bad_count else bad(f"{bad_count} required tool(s) missing"))
@@ -2350,9 +2891,9 @@ def cmd_new(cfg: dict, args: argparse.Namespace) -> int:
         # `new` only copies the empty template, so a document would be silently ignored and leave a PRD full of TODO(prd)
         say(bad(f"`new` takes a feature name, not a document: '{args.slug}' would only create an empty spec and never be read."))
         say("To draft the spec from the document with your agent:")
-        say(f"  ./scripts/sdlc spec {args.slug}")
+        say(f"  ./<%sdlcDir%>/sdlc spec {args.slug}")
         say("To write the spec yourself, give `new` a short name:")
-        say("  ./scripts/sdlc new user-login")
+        say("  ./<%sdlcDir%>/sdlc new user-login")
         return EXIT_USAGE
     base = ROOT / cfg["facts"]["specsDir"]
     slug, title = slugify(args.slug), args.title or args.slug.replace("-", " ").title()
@@ -2365,7 +2906,7 @@ def cmd_new(cfg: dict, args: argparse.Namespace) -> int:
     shutil.copytree(base / "_template", dest)
     for f in dest.iterdir():
         f.write_text(f.read_text(encoding="utf-8").replace("{{ID}}", fid).replace("{{TITLE}}", title).replace("{{SLUG}}", slug), encoding="utf-8")
-    say(ok(f"created {rel(dest)}/  (edit prd.md + acceptance.json, or run: ./scripts/sdlc feature {fid})"))
+    say(ok(f"created {rel(dest)}/  (edit prd.md + acceptance.json, or run: ./<%sdlcDir%>/sdlc feature {fid})"))
     return EXIT_OK
 
 
@@ -2472,7 +3013,8 @@ FIXTURE_PATH = re.compile(r"(^|/)(tests|__tests__)/|^\.ai/specs/")
 SECRET_BAD_NAMES = re.compile(r"(^|/)(\.env|id_rsa|id_ed25519|.*\.pem|.*\.p12|.*\.pfx)$")
 
 
-def cmd_secrets(cfg: dict, args: argparse.Namespace) -> int:
+def scan_secrets() -> list:
+    """Every secret-like finding as (stable key, readable text). The key survives line moves, so a baseline stays valid."""
     listed = git("ls-files", "-co", "--exclude-standard")
     if listed:
         files = [ROOT / f for f in listed.splitlines()]
@@ -2484,7 +3026,7 @@ def cmd_secrets(cfg: dict, args: argparse.Namespace) -> int:
         if not f.is_file() or any(r.startswith(d + "/") for d in SECRET_SKIP_DIRS) or f.name in SECRET_SKIP_FILES:
             continue
         if SECRET_BAD_NAMES.search(r):
-            findings.append(f"{r}: file that should never be committed")
+            findings.append((f"{r}|file", f"{r}: file that should never be committed"))
             continue
         if f.suffix in (".md", ".png", ".jpg", ".ico", ".zip", ".gz", ".woff2") or f.stat().st_size > 1_000_000:
             continue
@@ -2499,14 +3041,50 @@ def cmd_secrets(cfg: dict, args: argparse.Namespace) -> int:
                 if name == "hard-coded credential" and FIXTURE_PATH.search(r):
                     continue
                 if rx.search(line):
-                    findings.append(f"{r}:{n}: {name}")
+                    findings.append((f"{r}|{name}|{hashlib.sha256(line.strip().encode()).hexdigest()[:12]}", f"{r}:{n}: {name}"))
+    return findings
+
+
+def secrets_baseline_path(cfg: dict) -> Path | None:
+    configured = (cfg.get("secrets") or {}).get("baseline")
+    return ROOT / configured if configured else None
+
+
+def load_secrets_baseline(cfg: dict) -> set:
+    path = secrets_baseline_path(cfg)
+    try:
+        return {f["key"] for f in json.loads(path.read_text(encoding="utf-8")).get("findings", [])} if path else set()
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return set()
+
+
+def write_secrets_baseline(cfg: dict) -> int:
+    """Record what is already in the repository, so only NEW secrets fail. The findings stay in the repository: they still need a human."""
+    path = secrets_baseline_path(cfg)
+    found = scan_secrets()
+    path.write_text(json.dumps({"version": 1, "findings": [{"key": k, "where": t} for k, t in sorted(found)]}, indent=2) + "\n", encoding="utf-8")
+    return len(found)
+
+
+def cmd_secrets(cfg: dict, args: argparse.Namespace) -> int:
+    if args.update_baseline:
+        if secrets_baseline_path(cfg) is None:
+            say(bad("This project has no secrets baseline (only adopted projects do)."))
+            return EXIT_USAGE
+        n = write_secrets_baseline(cfg)
+        say(warn(f"{n} possible secret(s) recorded in {rel(secrets_baseline_path(cfg))} as known. They are still in the repository: review them and rotate anything real."))
+        return EXIT_OK
+    found = scan_secrets()
+    known_keys = load_secrets_baseline(cfg)
+    findings = [text for key, text in found if key not in known_keys]
+    known = len(found) - len(findings)
     if findings:
         say(bad(f"{len(findings)} possible secret(s):"))
         for x in findings[:50]:
             say(f"  - {x}")
         say("Remove them and rotate anything real. Add '# sdlc:allow-secret' to a line only for a deliberate fake.")
         return EXIT_FAIL
-    say(ok("no secrets found"))
+    say(ok("no secrets found" if not known else f"no new secrets found ({known} already known from adoption day are in the baseline: review and rotate them)"))
     return EXIT_OK
 
 
@@ -2529,7 +3107,7 @@ def cmd_down(cfg: dict, args: argparse.Namespace) -> int:
 def cmd_report(cfg: dict, args: argparse.Namespace) -> int:
     path = EVIDENCE / "latest" / "report.md"
     if not path.exists():
-        die("no report yet: run ./scripts/sdlc verify", EXIT_FAIL)
+        die("no report yet: run ./<%sdlcDir%>/sdlc verify", EXIT_FAIL)
     say(path.read_text(encoding="utf-8"))
     return EXIT_OK
 
@@ -2599,13 +3177,23 @@ def build_parser() -> argparse.ArgumentParser:
     ag.add_argument("--list", action="store_true", help="only list, never ask")
     ag.add_argument("--reset", action="store_true", help="forget your choice and use the project default again")
     sub.add_parser("sync")
+    ob = sub.add_parser("onboard")
+    ob.add_argument("--agent", help="agent command (reads the prompt on stdin) or an agent's name (see `sdlc agent`); overrides your choice")
+    ob.add_argument("--force", action="store_true", help="redraft files that already exist (your versions are kept in the evidence folder)")
+    ob.add_argument("--allow-dirty", action="store_true", help="proceed with uncommitted changes")
+    ob.add_argument("--dry-run", action="store_true", help="write the prompt and print the agent command; run nothing")
+    ob.add_argument("--max-attempts", type=int, default=3, help="how many times the agent may fix an invalid draft")
+    bl = sub.add_parser("baseline")
+    bl.add_argument("--tighten", action="store_true", help="lock in gates that failed at the baseline and pass now (never loosens)")
+    bl.add_argument("--force", action="store_true", help="record everything again from scratch: every current failure becomes the new normal")
     nw = sub.add_parser("new")
     nw.add_argument("slug", help="a short feature name such as user-login (not a document: use `spec` for requirements.pdf)")
     nw.add_argument("--title")
     dp = sub.add_parser("deploy")
     dp.add_argument("environment")
     dp.add_argument("--tag")
-    sub.add_parser("secrets")
+    sc = sub.add_parser("secrets")
+    sc.add_argument("--update-baseline", action="store_true", help="adopted projects: record the secrets that are already here as known")
     sub.add_parser("up")
     sub.add_parser("down")
     sub.add_parser("report")
@@ -2614,7 +3202,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 COMMANDS = {
     "setup": cmd_setup, "doctor": cmd_doctor, "agent": cmd_agent, "gates": cmd_gates, "facts": cmd_facts, "verify": cmd_verify, "loop": cmd_loop,
-    "feature": cmd_feature, "spec": cmd_spec, "implement": cmd_implement, "sync": cmd_sync, "new": cmd_new, "deploy": cmd_deploy, "secrets": cmd_secrets, "up": cmd_up, "down": cmd_down, "report": cmd_report,
+    "feature": cmd_feature, "spec": cmd_spec, "implement": cmd_implement, "sync": cmd_sync, "onboard": cmd_onboard, "baseline": cmd_baseline, "new": cmd_new, "deploy": cmd_deploy, "secrets": cmd_secrets, "up": cmd_up, "down": cmd_down, "report": cmd_report,
 }
 
 

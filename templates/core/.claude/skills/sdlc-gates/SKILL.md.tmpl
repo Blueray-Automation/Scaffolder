@@ -2,15 +2,15 @@
 name: sdlc-gates
 description: Run the fast checks (lint, types, unit tests, build, contract, security) without starting the system. Type /sdlc-gates.
 disable-model-invocation: true
-allowed-tools: Bash(./scripts/sdlc gates) Bash(./scripts/sdlc gates *)
+allowed-tools: Bash(./<%sdlcDir%>/sdlc gates) Bash(./<%sdlcDir%>/sdlc gates *)
 ---
 
 # /sdlc-gates
 
-Run `./scripts/sdlc gates` (on Windows PowerShell or cmd: `.\scripts\sdlc.cmd gates`). These are the checks that do not need the running system, so they are the fast feedback.
+Run `./<%sdlcDir%>/sdlc gates` (on Windows PowerShell or cmd: `.\<%sdlcDir%>\sdlc.cmd gates`). These are the checks that do not need the running system, so they are the fast feedback.
 Give the command up to 10 minutes.
 
 - Report one line per gate: its id, PASS or FAIL, and the time. Then the verdict.
 - A gate failed: show the first lines of its log (the report names the path under `.ai/evidence/`) and say in a sentence what is wrong.
   This command only reports: do not change any file unless the person asks you to.
-- To check just one gate again: `./scripts/sdlc gates --only <gate-id>`. The facts against the running system are `/sdlc-verify`.
+- To check just one gate again: `./<%sdlcDir%>/sdlc gates --only <gate-id>`. The facts against the running system are `/sdlc-verify`.

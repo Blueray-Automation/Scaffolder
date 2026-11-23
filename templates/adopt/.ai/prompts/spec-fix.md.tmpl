@@ -1,0 +1,18 @@
+# Task: fix the draft specification for {{feature}} (attempt {{attempt}} of {{maxAttempts}})
+
+You drafted `{{specDir}}/prd.md` and `{{specDir}}/acceptance.json` from `{{sourceName}}`. The tool validated them and found these problems:
+
+{{errors}}
+
+## What to do
+
+- Fix **only** `{{specDir}}/prd.md` and `{{specDir}}/acceptance.json`. Do not touch any other file.
+- Every `- **AC-xxx**` line in prd.md needs at least one check in acceptance.json (`covers`), and every check must cite criteria that exist in prd.md.
+- Check `type` is `http`, `cmd` or `file`. An `http` check's `target` must be one of: {{targets}} (none listed = use `cmd` and `file` only). Check ids must be unique.
+- Remove every `TODO(prd)` marker. Both files must be valid (acceptance.json must be valid JSON).
+- Keep everything that is already correct. Do not drop requirements from the document to make validation pass.
+- If the problem is that the source document gives you nothing to base a criterion on, say so under **Assumptions & open questions** instead of inventing it.
+
+## Final message
+
+What you changed and why.

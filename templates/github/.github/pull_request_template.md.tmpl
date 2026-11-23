@@ -2,7 +2,7 @@
 <!-- One paragraph. Link the feature: FEAT-xxx -->
 
 ## Evidence
-- [ ] `./scripts/sdlc verify` exits 0 on the final commit
+- [ ] `./<%sdlcDir%>/sdlc verify` exits 0 on the final commit
 - Report summary (paste from `.ai/evidence/latest/report.md`):
 
 ```text
@@ -14,7 +14,7 @@
 <%#hasBackend%>
 - [ ] API changes are intentional and `.ai/contract/openapi.json` is updated in this PR (or: no API change)
 <%/hasBackend%>
-- [ ] `.ai/sdlc.json`, `scripts/sdlc*` and `.github/workflows/` are untouched (or: a human asked for it)
+- [ ] `.ai/sdlc.json`, `<%sdlcDir%>/sdlc*` and `.github/workflows/` are untouched (or: a human asked for it)
 
 ## Risk and rollout
 <!-- New env vars/secrets, migrations, backwards compatibility, rollback plan -->

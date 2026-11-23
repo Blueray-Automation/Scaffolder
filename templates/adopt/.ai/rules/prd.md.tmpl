@@ -1,0 +1,20 @@
+# Rule: PRDs (feature specs)
+
+Every feature lives in `.ai/specs/FEAT-<nnn>-<slug>/` with `prd.md` and `acceptance.json`. No code before both exist and a human has reviewed them.
+
+## prd.md structure (in this order)
+1. **Objective**: one or two sentences. Who benefits and what changes.
+2. **User stories & acceptance criteria**: one line each, `- **AC-001** Given ..., when ..., then ...`.
+3. **Existing behaviour that must keep working**: what this change touches and must not break. Each item becomes a criterion or is covered by an existing test (name it).
+4. **Permissions & roles**, 5. **Data & validation**, 6. **Contract impact** (routes, payloads, migrations; "None" if nothing changes), 7. **Out of scope**.
+
+## Writing acceptance criteria
+- Observable from outside: a status and body, a page's content, a command's result, a file. Not "handles errors well".
+- One behaviour per criterion; split "and" sentences. Include unhappy paths, empty and boundary values.
+- No implementation words (no class or table names). IDs are stable (`AC-001` ...): never renumber.
+
+## acceptance.json
+- Each check has `id`, `name`, `covers` (AC ids), `type` (`cmd` | `file` | `http`) and what to run or expect.
+- Every AC is covered by at least one check, every check covers at least one AC; `./<%sdlcDir%>/sdlc facts` fails otherwise.
+- Prefer a `cmd` check that runs ONE named test (it must exist and pass). Use `http` only for targets the runtime provides (`runtime.targets` in `.ai/sdlc.json`).
+- A check that needs something this runtime may not have declares `needs` instead of being weakened.

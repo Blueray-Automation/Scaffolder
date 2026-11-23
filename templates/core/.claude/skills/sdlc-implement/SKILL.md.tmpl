@@ -3,16 +3,16 @@ name: sdlc-implement
 description: Implement a feature from its spec (.ai/specs/FEAT-xxx) and prove it with the verification loop. Type /sdlc-implement FEAT-001.
 argument-hint: FEAT-001
 disable-model-invocation: true
-allowed-tools: Bash(./scripts/sdlc sync) Bash(./scripts/sdlc sync *) Bash(./scripts/sdlc gates) Bash(./scripts/sdlc gates *) Bash(./scripts/sdlc verify) Bash(./scripts/sdlc verify *) Bash(./scripts/sdlc implement * --dry-run *) Bash(git status *) Bash(git diff *) Bash(git log *) Bash(git hash-object *)
+allowed-tools: Bash(./<%sdlcDir%>/sdlc sync) Bash(./<%sdlcDir%>/sdlc sync *) Bash(./<%sdlcDir%>/sdlc gates) Bash(./<%sdlcDir%>/sdlc gates *) Bash(./<%sdlcDir%>/sdlc verify) Bash(./<%sdlcDir%>/sdlc verify *) Bash(./<%sdlcDir%>/sdlc implement * --dry-run *) Bash(git status *) Bash(git diff *) Bash(git log *) Bash(git hash-object *)
 ---
 
 # /sdlc-implement $ARGUMENTS
 
-The person asked you to implement the feature `$ARGUMENTS` from its specification. **You are the agent; `./scripts/sdlc` is the judge.**
-`./scripts/sdlc implement` normally does the steps below around an agent it starts itself. In this chat you are already that agent, so you do those
+The person asked you to implement the feature `$ARGUMENTS` from its specification. **You are the agent; `./<%sdlcDir%>/sdlc` is the judge.**
+`./<%sdlcDir%>/sdlc implement` normally does the steps below around an agent it starts itself. In this chat you are already that agent, so you do those
 steps yourself, in this order, and the tool's own checks decide whether the work is done. Never say "done" for anything you did not see pass.
 
-On Windows PowerShell or cmd, write `.\scripts\sdlc.cmd` wherever this says `./scripts/sdlc`.
+On Windows PowerShell or cmd, write `.\<%sdlcDir%>\sdlc.cmd` wherever this says `./<%sdlcDir%>/sdlc`.
 
 ## 0. Which feature
 
@@ -27,12 +27,12 @@ On Windows PowerShell or cmd, write `.\scripts\sdlc.cmd` wherever this says `./s
    commit or stash it so they can review exactly what you change, and stop.
 2. Fingerprint the spec so you can prove you did not touch it. For an id like `FEAT-001` its folder is `.ai/specs/FEAT-001-*/`:
    `git hash-object .ai/specs/$ARGUMENTS-*/prd.md .ai/specs/$ARGUMENTS-*/acceptance.json`. Keep the two hashes.
-3. `./scripts/sdlc sync` installs the toolchain if it is missing (it does nothing when everything is current).
-4. `./scripts/sdlc gates` must be green **before** you change anything, so every later failure is yours. Red? Show the person which gate and stop.
+3. `./<%sdlcDir%>/sdlc sync` installs the toolchain if it is missing (it does nothing when everything is current).
+4. `./<%sdlcDir%>/sdlc gates` must be green **before** you change anything, so every later failure is yours. Red? Show the person which gate and stop.
 
 ## 2. Get the exact prompt the CLI would send an agent
 
-`./scripts/sdlc implement $ARGUMENTS --dry-run --agent claude` runs nothing and starts no agent. It checks that the spec is complete (if not, it says what is
+`./<%sdlcDir%>/sdlc implement $ARGUMENTS --dry-run --agent claude` runs nothing and starts no agent. It checks that the spec is complete (if not, it says what is
 missing: tell the person, and stop) and prints `prompt: .ai/evidence/<run>/implement.prompt.md`.
 
 **Read that whole file and do what it says.** It holds the PRD, every check, this repository's rules and playbooks, which files are protected, and the
@@ -42,7 +42,7 @@ for the answer instead of guessing.
 ## 3. Build it
 
 Follow the prompt: tests first (watch each fail for the right reason), then the simplest code that passes, one acceptance criterion at a time.
-After adding a dependency to a manifest run `./scripts/sdlc sync`. Iterate quickly with `./scripts/sdlc gates --only <gate-id>`.
+After adding a dependency to a manifest run `./<%sdlcDir%>/sdlc sync`. Iterate quickly with `./<%sdlcDir%>/sdlc gates --only <gate-id>`.
 Do not edit the specification or any protected file, and never weaken, skip or delete a test or a threshold to get green.
 
 ## 4. Check you stayed inside the rules
@@ -55,11 +55,11 @@ If any of these fails, undo your change to that file (`git checkout -- <path>`),
 
 ## 5. Prove it, and heal
 
-`./scripts/sdlc verify` runs every gate and then checks each acceptance criterion against the **running** system. That starts the whole stack and can take
+`./<%sdlcDir%>/sdlc verify` runs every gate and then checks each acceptance criterion against the **running** system. That starts the whole stack and can take
 minutes: give the command up to 10 minutes (or run it in the background and wait for it).
 
 - Green (exit 0): go to step 6.
-- Red: read `.ai/evidence/latest/report.md` and the log it points to, fix the **code** (not the spec, not the checks), run `./scripts/sdlc verify` again.
+- Red: read `.ai/evidence/latest/report.md` and the log it points to, fix the **code** (not the spec, not the checks), run `./<%sdlcDir%>/sdlc verify` again.
 - It cannot start the system at all (for example Docker is not running): that is not yours to fix and it does not count as a round. Say what it printed, tell the
   person to start Docker (or to change `runtime.mode` in `.ai/sdlc.json`, which only they may edit), and stop.
 - Stop and report instead of looping on when `verify` has failed <%maxIterations%> times, or when the same checks fail with the same errors <%noProgressLimit%> times in a row.
@@ -72,6 +72,6 @@ Finish with: for each acceptance criterion, the test(s) and the check id(s) that
 
 ## Never
 
-- Run `./scripts/sdlc implement` without `--dry-run`, or `spec`, `feature`, `loop` or `deploy`: they start another agent, wait for a person, or change a real environment.
+- Run `./<%sdlcDir%>/sdlc implement` without `--dry-run`, or `spec`, `feature`, `loop` or `deploy`: they start another agent, wait for a person, or change a real environment.
 - Commit, push, change git configuration, or put secrets anywhere.
 - Claim a pass you did not see in this chat.

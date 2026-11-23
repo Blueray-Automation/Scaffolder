@@ -1,6 +1,6 @@
-# Thin wrappers so humans and agents share one vocabulary. All logic is in scripts/sdlc.py.
+# Thin wrappers so humans and agents share one vocabulary. All logic is in <%sdlcDir%>/sdlc.py.
 .DEFAULT_GOAL := help
-SDLC := ./scripts/sdlc
+SDLC := ./<%sdlcDir%>/sdlc
 
 .PHONY: help setup doctor verify gates facts loop new feature spec implement sync report secrets<%#hasDocker%> up down<%/hasDocker%><%#hasCd%> deploy<%/hasCd%>
 

@@ -48,7 +48,7 @@ function outsideFences(markdown: string): string {
 describe("wiki pages (docs/wiki)", () => {
   it("has the expected pages", () => {
     expect([...pages.keys()].sort()).toEqual(
-      ["Desktop-Apps", "Getting-Started", "Home", "Reference-Login-Implementation", "Setup-by-Operating-System", "The-Verification-Loop", "Troubleshooting", "Tutorial-Add-a-Login-API", "_Sidebar"].sort(),
+      ["Adopt-an-Existing-Project", "Desktop-Apps", "Getting-Started", "Home", "Reference-Login-Implementation", "Setup-by-Operating-System", "The-Verification-Loop", "Troubleshooting", "Tutorial-Add-a-Login-API", "_Sidebar"].sort(),
     );
   });
 
@@ -93,6 +93,23 @@ describe("wiki pages (docs/wiki)", () => {
       }
     }
     expect(seen).toBeGreaterThan(5);
+  });
+
+  it("only mentions ./.ai/sdlc commands (adopted projects) that exist, in both the POSIX and the Windows spelling", () => {
+    const template = readFileSync(SDLC_TEMPLATE, "utf8");
+    const real = new Set([...template.matchAll(/add_parser\("([a-z]+)"\)/g)].map((m) => m[1]!));
+    expect(real.has("baseline")).toBe(true);
+    let seen = 0;
+    for (const [name, markdown] of pages) {
+      for (const m of markdown.matchAll(/\.\/\.ai\/sdlc\s+([a-z]+)/g)) {
+        seen++;
+        expect(real.has(m[1]!), `${name}: "./.ai/sdlc ${m[1]}" is not a command`).toBe(true);
+      }
+      for (const m of markdown.matchAll(/\.ai\\sdlc\.cmd\s+([a-z]+)/g)) {
+        expect(real.has(m[1]!), `${name}: ".ai\\sdlc.cmd ${m[1]}" is not a command`).toBe(true);
+      }
+    }
+    expect(seen).toBeGreaterThan(8);
   });
 
   it("explains setup for macOS, Ubuntu, native Windows and WSL2, and every page says what to type on Windows", () => {

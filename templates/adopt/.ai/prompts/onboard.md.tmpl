@@ -1,0 +1,76 @@
+# Task: describe this repository
+
+You are an AI coding agent. Write **exactly two files** that people and other agents will read before every task in this repository:
+
+- `{{architectureFile}}`: a map of what is here and how it fits together
+- `{{conventionsFile}}`: the conventions this code actually follows
+
+A person reviews them before anyone relies on them, and the tool checks everything it can against the repository itself (below). Do not change
+anything else: no code, no tests, no configuration, no existing guidance files.
+
+## What you are looking at
+
+Install steps found by the tool:
+
+{{stack}}
+
+Gates the repository defines (already listed in `{{commands}}`; do not repeat that file):
+
+{{gates}}
+
+Files (top levels; folders show how many files they hold):
+
+```text
+{{tree}}
+```
+
+## Guidance that already exists
+
+{{existingGuidance}}
+
+Read each of these (in `AGENTS.md`, ignore the block between the `scaffolder:begin` and `scaffolder:end` markers: it is generated). Fold what is **still true and checkable** into the conventions file, with its source in the item (for example `(from CLAUDE.md)`).
+Where such guidance contradicts the code, or two files contradict each other, list it under "Open questions and conflicts". Never edit these files.
+
+{{previous}}
+
+## How to work
+
+1. **Explore with your tools** before you write: the manifests, the entry points, a few representative modules and their tests, the existing guidance.
+   Describe what you saw, not what is typical for the framework.
+2. **Every claim cites evidence in backticks.** A path relative to the repository root (`src/api/users.ts`, `backend/app/`). The tool opens every path you cite
+   and rejects the draft if one does not exist. Paths inside code fences are not checked, so cite paths in sentences and list items.
+3. **Commands must exist.** `npm run <script>` (or pnpm, yarn, bun) must be a script in a package.json, `make <target>` a Makefile target, `./.ai/sdlc <command>` a real command.
+4. **When you are not sure, say so** under "Open questions" and mark guesses with `GUESS:`. A short true description beats a long plausible one.
+
+## {{architectureFile}}
+
+First two lines: `# Architecture`, then `Status: Draft (drafted by an agent from the code; a human must review it)`. Then these sections, with these words in the headings:
+
+- `## Purpose`: what this software does and for whom, in two to four sentences (evidence: the README, a manifest description).
+- `## Layout`: one bold-led item per top-level area: `- **Name** (`path/`): what lives there and how it relates to the other areas`.
+- `## Entry points`: where execution starts (servers, command-line tools, jobs, UI routes), each citing its file.
+- `## Key flows`: two to four important paths through the code, naming the files in the order they are touched.
+- `## Data and integrations`: stores, external services, configuration. Environment variable **names** only, never values.
+- `## Open questions`: what you could not determine.
+
+At most about 150 lines.
+
+## {{conventionsFile}}
+
+First two lines: `# Conventions`, then the same `Status: Draft (...)` line. Then:
+
+- `## Conventions`: at least three bold-led items, `- **Short name**: the rule as this code does it (`path/that/shows/it.ts`)`.
+  Cover what you can see: naming and file layout, where logic and I/O live, error handling, configuration, logging, how tests are written and where they live, how the code is formatted and linted.
+  Only include a convention you saw in at least two places, or that existing guidance states and the code follows.
+- `## Open questions and conflicts`: guidance the code does not follow, inconsistent areas, anything unclear.
+
+## Hard rules
+
+- Write only those two files. Do **not** edit anything else, and do not run `git commit`, `git push` or change git configuration.
+- No secrets and no values from `.env` files. No placeholders, no `TODO(onboard)`.
+- Do not create files, scripts or commands to make a claim true. Describe the repository as it is.
+- If the repository is empty or unreadable, write your explanation to `{{questionsFile}}` and stop.
+
+## Final message
+
+What you could not determine, and which existing guidance you folded in or found to conflict with the code.

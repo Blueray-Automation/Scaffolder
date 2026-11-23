@@ -1,0 +1,15 @@
+---
+name: write-tests
+description: Write tests that can fail and prove behaviour, in this repository's own test framework. Use whenever you add behaviour or fix a bug.
+---
+
+# Write tests
+
+1. Find how this repository tests: framework, folder, naming, fixtures (`.ai/context/commands.md`, and the tests next to the code you change). Match it.
+2. One behaviour per test, named by behaviour. Arrange, act, assert.
+3. Cover: the happy path, each validation rule, boundaries (0, 1, max, max+1), error paths, and each acceptance criterion.
+4. Run the new test **before** writing the code and confirm it fails for the right reason. A test you never saw fail proves nothing.
+5. Deterministic: no sleeping, no real clock, network or randomness without control. Fake only at the system boundary.
+6. A bug fix starts with a test that reproduces the bug.
+
+Never skip, `xfail`, `.only`, comment out or delete a test to get green; never lower a coverage threshold.

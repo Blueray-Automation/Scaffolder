@@ -1,0 +1,24 @@
+---
+name: implement-feature
+description: Implement a specified feature in small test-first slices inside this existing code base until the verification loop shows no regression. Use after the spec exists and is reviewed.
+---
+
+# Implement a feature
+
+## Before you start
+- Read `AGENTS.md`, `.ai/rules/*` and the feature's `prd.md` and `acceptance.json`.
+- Read the code around where the change goes: naming, layering, error handling, how its tests are written.
+- Run `./<%sdlcDir%>/sdlc gates` once. Failures that were already there are the baseline (shown as known warnings); anything new is yours.
+
+## Loop (repeat per acceptance criterion)
+1. **Red**: the smallest failing test for one criterion, in the repository's own test framework and folder. Run it; confirm it fails for the right reason.
+2. **Green**: the simplest code that passes, in the style of the code next to it.
+3. **Refactor** only what you just wrote. Tests stay green.
+4. `./<%sdlcDir%>/sdlc gates` for fast feedback.
+
+## Then
+5. Add or refine the `acceptance.json` checks for the criterion (a `cmd` check naming the test you wrote).
+6. `./<%sdlcDir%>/sdlc verify`. Red? Follow the fix-failing-gate skill. Green? Summarise the report in the pull request.
+
+## Done when
+`./<%sdlcDir%>/sdlc verify` exits 0 and every criterion of the feature is PASS in the report. Never commit or push; a human reviews the diff.

@@ -26,11 +26,11 @@ If a failure below is the same as one listed above, your previous fix did not wo
 ## Procedure
 1. Reproduce: run the failing command yourself (shown above) and read the real output.
 2. Find the root cause. Say it in one sentence before you edit anything.
-3. Make the smallest change that fixes the cause. Fix the CODE so it meets the spec. If you add a dependency to a manifest, run `./scripts/sdlc sync`.
-4. Re-run just the failing gate: `./scripts/sdlc gates --only <gate-id>`; then the whole `./scripts/sdlc verify`.
+3. Make the smallest change that fixes the cause. Fix the CODE so it meets the spec. If you add a dependency to a manifest, run `./<%sdlcDir%>/sdlc sync`.
+4. Re-run just the failing gate: `./<%sdlcDir%>/sdlc gates --only <gate-id>`; then the whole `./<%sdlcDir%>/sdlc verify`.
 
 ## Hard rules (the loop enforces some of these and stops with an integrity violation)
-- DO NOT edit `.ai/sdlc.json`, `scripts/sdlc*`, `.github/workflows/`, or anything under `.ai/specs/` (PRDs and acceptance checks). Healing fixes code, not the definition of correct.
+- DO NOT edit `.ai/sdlc.json`, `<%sdlcDir%>/sdlc*`, `.github/workflows/`, or anything under `.ai/specs/` (PRDs and acceptance checks). Healing fixes code, not the definition of correct.
 - DO NOT delete, skip (`xfail`, `.skip`, `-k` filters) or weaken tests, lower coverage thresholds, add `# noqa` / `eslint-disable` / `type: ignore` to silence a real problem, or mock the thing under test.
 <%#hasBackend%>
 - DO NOT regenerate `.ai/contract/openapi.json` just to make the contract gate pass. It changes only when the PRD intentionally changes the API.

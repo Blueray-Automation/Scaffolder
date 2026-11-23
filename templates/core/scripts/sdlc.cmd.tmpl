@@ -1,7 +1,7 @@
 @echo off
 rem Entry point for the SDLC loop tooling on Windows (cmd.exe and PowerShell).
-rem All logic lives in scripts\sdlc.py (stdlib-only Python 3.9+).  macOS, Linux, WSL and Git Bash use scripts/sdlc.
-rem Usage:  scripts\sdlc.cmd doctor     (PowerShell: .\scripts\sdlc.cmd doctor)
+rem All logic lives in <%sdlcDir%>\sdlc.py (stdlib-only Python 3.9+).  macOS, Linux, WSL and Git Bash use <%sdlcDir%>/sdlc.
+rem Usage:  <%sdlcDir%>\sdlc.cmd doctor     (PowerShell: .\<%sdlcDir%>\sdlc.cmd doctor)
 setlocal
 set "PYTHONUTF8=1"
 set "SDLC_PY=%~dp0sdlc.py"

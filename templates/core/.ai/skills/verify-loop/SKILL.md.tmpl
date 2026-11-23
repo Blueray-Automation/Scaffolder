@@ -8,16 +8,16 @@ description: Run and interpret the verification loop (gates, facts, evidence, ex
 ## Commands
 | Goal | Command |
 |---|---|
-| Is my toolchain ready? | `./scripts/sdlc doctor` then `./scripts/sdlc setup` |
-| Fast feedback while coding | `./scripts/sdlc gates` (or `--only <gate-id>`, `--stage unit`) |
-| Prove acceptance criteria on the running system | `./scripts/sdlc facts` |
-| Everything CI runs | `./scripts/sdlc verify` |
-| Verify, heal, verify until green | `./scripts/sdlc loop` |
-| Requirements document to a draft spec (then review it) | `./scripts/sdlc spec requirements.pdf` (`--dry-run` shows the prompt first) |
-| Spec in, verified code out (agent writes it) | `./scripts/sdlc implement FEAT-xxx` (`--dry-run` shows the prompt first) |
-| One feature incl. PRD drafting and deploy | `./scripts/sdlc feature FEAT-xxx` |
-| Install dependencies after editing a manifest | `./scripts/sdlc sync` |
-| Read the last result | `./scripts/sdlc report` |
+| Is my toolchain ready? | `./<%sdlcDir%>/sdlc doctor` then `./<%sdlcDir%>/sdlc setup` |
+| Fast feedback while coding | `./<%sdlcDir%>/sdlc gates` (or `--only <gate-id>`, `--stage unit`) |
+| Prove acceptance criteria on the running system | `./<%sdlcDir%>/sdlc facts` |
+| Everything CI runs | `./<%sdlcDir%>/sdlc verify` |
+| Verify, heal, verify until green | `./<%sdlcDir%>/sdlc loop` |
+| Requirements document to a draft spec (then review it) | `./<%sdlcDir%>/sdlc spec requirements.pdf` (`--dry-run` shows the prompt first) |
+| Spec in, verified code out (agent writes it) | `./<%sdlcDir%>/sdlc implement FEAT-xxx` (`--dry-run` shows the prompt first) |
+| One feature incl. PRD drafting and deploy | `./<%sdlcDir%>/sdlc feature FEAT-xxx` |
+| Install dependencies after editing a manifest | `./<%sdlcDir%>/sdlc sync` |
+| Read the last result | `./<%sdlcDir%>/sdlc report` |
 
 ## Reading the result
 - `PASS`/`FAIL` per gate and per check. `WARN` = non-required gate failed (audit): report it, don't hide it. `SKIP` = capability missing in this runtime: *not verified*.

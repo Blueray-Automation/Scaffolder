@@ -26,13 +26,13 @@ Images are immutable, so rollback is "deploy the previous good tag":
 ```bash
 ./scripts/deploy.sh <environment> sha-<previous-12-chars>
 ```
-then confirm with `./scripts/sdlc facts --no-runtime --base-url web=<url>`.
+then confirm with `./<%sdlcDir%>/sdlc facts --no-runtime --base-url web=<url>`.
 
 ## Deploy target: `<%cdTarget%>`
 Implementation: `scripts/deploy.sh` -> `deploy/targets/<%cdTarget%>.sh`. Required secrets are listed at the top of that script and are set per GitHub Environment, never in the repo.
 
 ## Checklist
-- [ ] `./scripts/sdlc verify` green on the commit being released
+- [ ] `./<%sdlcDir%>/sdlc verify` green on the commit being released
 - [ ] Contract changes are backward compatible, or clients ship first
 - [ ] New env vars and secrets exist in the target environment
 - [ ] Post-deploy facts PASS; evidence artifact attached to the run

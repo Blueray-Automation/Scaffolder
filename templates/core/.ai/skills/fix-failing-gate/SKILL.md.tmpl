@@ -1,6 +1,6 @@
 ---
 name: fix-failing-gate
-description: Diagnose and fix a failing verification gate or fact check at its root cause without weakening checks. Use whenever ./scripts/sdlc reports FAIL, and in every heal iteration.
+description: Diagnose and fix a failing verification gate or fact check at its root cause without weakening checks. Use whenever ./<%sdlcDir%>/sdlc reports FAIL, and in every heal iteration.
 ---
 
 # Fix a failing gate
@@ -10,7 +10,7 @@ description: Diagnose and fix a failing verification gate or fact check at its r
 2. **Reproduce** by running the exact command from the report in the right directory.
 3. **Root cause in one sentence** before touching code. If you cannot write it, you do not understand it yet.
 4. **Smallest fix in the code** that makes the spec true. Keep unrelated changes out.
-5. **Re-run only that gate** (`./scripts/sdlc gates --only <id>`), then the full `./scripts/sdlc verify`.
+5. **Re-run only that gate** (`./<%sdlcDir%>/sdlc gates --only <id>`), then the full `./<%sdlcDir%>/sdlc verify`.
 
 ## Per failure type
 | Failure | Typical cause | Fix in |
@@ -28,7 +28,7 @@ description: Diagnose and fix a failing verification gate or fact check at its r
 | secrets | credential-like string committed | remove it, rotate if real |
 
 ## Never
-Skip/xfail/delete tests, lower thresholds, add blanket suppressions,<%#hasBackend%> regenerate the contract to hide drift,<%/hasBackend%> edit `.ai/sdlc.json`, `scripts/sdlc*`, `.github/workflows/` or (while healing) `.ai/specs/`. The loop will stop with exit code 4.
+Skip/xfail/delete tests, lower thresholds, add blanket suppressions,<%#hasBackend%> regenerate the contract to hide drift,<%/hasBackend%> edit `.ai/sdlc.json`, `<%sdlcDir%>/sdlc*`, `.github/workflows/` or (while healing) `.ai/specs/`. The loop will stop with exit code 4.
 
 ## If stuck
 Same failure twice? Your hypothesis is wrong: re-read the raw output, add a failing test that isolates it, bisect with `git diff`. After that, report what you know and what blocks you.

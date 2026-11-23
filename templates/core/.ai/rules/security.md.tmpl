@@ -1,6 +1,6 @@
 # Rule: security
 
-- **Secrets**: never in the repo, logs, tests or prompts. Config via environment variables; `.env.example` documents names with safe development defaults only. `./scripts/sdlc secrets` is a required gate.
+- **Secrets**: never in the repo, logs, tests or prompts. Config via environment variables; `.env.example` documents names with safe development defaults only. `./<%sdlcDir%>/sdlc secrets` is a required gate.
 - **Input**: validate at the boundary with typed schemas (length, range, format). Reject, don't sanitise and continue. Never build SQL/shell/HTML from input by string concatenation.
 - **Errors**: return stable error payloads; never leak stack traces, SQL, file paths or internal ids.
 - **AuthN/Z**: deny by default. Check permission on the server for every request; the client UI is not a control.

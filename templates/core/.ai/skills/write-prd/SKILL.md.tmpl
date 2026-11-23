@@ -8,21 +8,21 @@ description: Turn a feature request into a testable PRD (acceptance criteria) pl
 **Goal**: a spec so precise that "done" can be proven by running the system.
 
 ## Steps
-1. `./scripts/sdlc new <slug>` (skip if the folder exists). Open `.ai/specs/FEAT-xxx-<slug>/prd.md`.
+1. `./<%sdlcDir%>/sdlc new <slug>` (skip if the folder exists). Open `.ai/specs/FEAT-xxx-<slug>/prd.md`.
 2. Restate the request in one or two sentences under **Objective**. If you cannot, ask the requester; do not guess.
 3. Enumerate behaviours as acceptance criteria, one line each: `- **AC-001** Given ..., when ..., then ...`.
    - Happy path first, then each validation rule, not-found, unauthorized, empty and boundary case.
    - Observable from outside (HTTP status/body, page content, file/command result). No class or table names.
 4. Fill **Permissions**, **Data & validation**, **Contract impact**, **Out of scope**. Anything you assumed goes into an "Open questions" list at the end instead of being silently decided.
 5. Write `acceptance.json`: for every AC at least one check (see the write-fact-checks skill). Prefer `http` against the running system.
-6. Delete every `TODO(prd)` marker. Run `./scripts/sdlc facts --feature FEAT-xxx --runtime none`: traceability must pass (checks needing the runtime are skipped at this point; that is fine).
+6. Delete every `TODO(prd)` marker. Run `./<%sdlcDir%>/sdlc facts --feature FEAT-xxx --runtime none`: traceability must pass (checks needing the runtime are skipped at this point; that is fine).
 
 ## Have a requirements document instead?
-`./scripts/sdlc spec requirements.pdf` has an agent draft `prd.md` and `acceptance.json` from it (each criterion cites its source), and the tool checks the draft is well-formed.
+`./<%sdlcDir%>/sdlc spec requirements.pdf` has an agent draft `prd.md` and `acceptance.json` from it (each criterion cites its source), and the tool checks the draft is well-formed.
 The draft is still **yours to review** (skill `review-spec`): the tool checks its form, not whether it says the right thing.
 
 ## Then hand it over
-`./scripts/sdlc implement FEAT-xxx` gives the finished PRD and checks to your agent as its prompt, installs the dependencies it adds,
+`./<%sdlcDir%>/sdlc implement FEAT-xxx` gives the finished PRD and checks to your agent as its prompt, installs the dependencies it adds,
 and verifies the result. Whatever you leave vague, the agent will have to guess: it is told to ask (stop) instead of guessing, so unclear specs cost a round trip.
 
 ## Exit criteria

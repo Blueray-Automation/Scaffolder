@@ -12,7 +12,7 @@ description: Design the HTTP API contract (schemas, status codes, errors) before
 4. Write tests from the contract (status, body shape, each validation rule).
 5. Intentional API change? Regenerate the snapshot and review the diff line by line:
    `<%#hasBackend%>cd <%backendDir%> && python -m app.export_openapi --write <%openapiFromBackend%><%/hasBackend%>`
-6. `./scripts/sdlc gates --only backend.contract` must pass; the PR description lists every contract change.
+6. `./<%sdlcDir%>/sdlc gates --only backend.contract` must pass; the PR description lists every contract change.
 
 ## Rules
 - Never edit the snapshot by hand and never regenerate it to silence a failing gate you do not understand.

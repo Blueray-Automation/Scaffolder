@@ -58,6 +58,8 @@ export function buildView(cfg: ScaffolderConfig) {
     licenseProprietary: cfg.project.license === "UNLICENSED",
     year: new Date().getUTCFullYear(),
     defaultBranch: cfg.ci.defaultBranch,
+    /** Folder that holds the launcher and runner (`<dir>/sdlc`, `<dir>/sdlc.py`): `scripts` in a generated project, `.ai` in an adopted one. */
+    sdlcDir: "scripts",
 
     hasBackend,
     hasWeb,

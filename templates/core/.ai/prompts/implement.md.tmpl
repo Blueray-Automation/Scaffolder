@@ -1,7 +1,7 @@
 # Task: build {{feature}} from its specification
 
 You are an AI coding agent working inside this repository. The product owner wrote the specification below. It is the only
-source of truth: implement it completely, with tests, so that `./scripts/sdlc verify` passes. Nobody can answer questions while
+source of truth: implement it completely, with tests, so that `./<%sdlcDir%>/sdlc verify` passes. Nobody can answer questions while
 you work, so follow the steps and rules below and keep going until the work is done.
 
 ## The specification (read-only)
@@ -34,7 +34,7 @@ Study each check and make the implementation satisfy it exactly. A `cmd` check r
 2. **List** every acceptance criterion (`AC-xxx`) and the check(s) that prove it.
 3. **Tests first.** Write the failing test for each behaviour (including every unhappy path and boundary in the PRD), run it, watch it fail
    for the right reason, then implement. Follow the repository's conventions (typed code, thin handlers, settings from environment variables).
-4. **Dependencies.** If you need a new library, add it to the dependency manifest listed above, then run `./scripts/sdlc sync` to install it.
+4. **Dependencies.** If you need a new library, add it to the dependency manifest listed above, then run `./<%sdlcDir%>/sdlc sync` to install it.
    Never leave the manifest and the installed packages out of step.
 5. **Configuration.** Every new environment variable needs a safe *development* default in `.env.example` **and** in `docker-compose.yml`
    (the facts run against the compose stack). Never put real secrets anywhere. The app must refuse unsafe configuration rather than guess.
@@ -42,7 +42,7 @@ Study each check and make the implementation satisfy it exactly. A `cmd` check r
 6. **API contract.** If you added or changed HTTP endpoints, update the committed contract with
    `cd <%backendDir%> && python -m app.export_openapi --write <%openapiFromBackend%>` and check that the diff contains only your changes.
 <%/hasBackend%>
-7. **Prove it.** Run `./scripts/sdlc gates` until it is green (use `--only <gate-id>` while iterating). After you finish, the loop runs the facts
+7. **Prove it.** Run `./<%sdlcDir%>/sdlc gates` until it is green (use `--only <gate-id>` while iterating). After you finish, the loop runs the facts
    against the running system and sends you any failure to fix.
 
 ## Hard rules

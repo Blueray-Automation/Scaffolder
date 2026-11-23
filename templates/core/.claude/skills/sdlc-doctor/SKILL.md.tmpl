@@ -2,12 +2,12 @@
 name: sdlc-doctor
 description: Check that the tools this project needs are installed (Python, Node, Docker, git, an AI agent). Type /sdlc-doctor.
 disable-model-invocation: true
-allowed-tools: Bash(./scripts/sdlc doctor) Bash(./scripts/sdlc doctor *)
+allowed-tools: Bash(./<%sdlcDir%>/sdlc doctor) Bash(./<%sdlcDir%>/sdlc doctor *)
 ---
 
 # /sdlc-doctor
 
-Run `./scripts/sdlc doctor` (on Windows PowerShell or cmd: `.\scripts\sdlc.cmd doctor`) and tell the person what it found. It only looks; it changes nothing.
+Run `./<%sdlcDir%>/sdlc doctor` (on Windows PowerShell or cmd: `.\<%sdlcDir%>\sdlc.cmd doctor`) and tell the person what it found. It only looks; it changes nothing.
 
 - Every line says `ok` and it ends with "toolchain ready": say so in one sentence, name the Python and Node versions it printed, and suggest `/sdlc-setup` next.
 - Any line that is not `ok`: list each problem with the fix the tool printed next to it (an install command or a link), in the order it printed them.

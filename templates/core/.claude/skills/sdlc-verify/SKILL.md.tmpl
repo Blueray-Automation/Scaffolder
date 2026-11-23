@@ -2,12 +2,12 @@
 name: sdlc-verify
 description: Run every gate, then check each acceptance criterion of every feature against the running system. Type /sdlc-verify.
 disable-model-invocation: true
-allowed-tools: Bash(./scripts/sdlc verify) Bash(./scripts/sdlc verify *)
+allowed-tools: Bash(./<%sdlcDir%>/sdlc verify) Bash(./<%sdlcDir%>/sdlc verify *)
 ---
 
 # /sdlc-verify
 
-Run `./scripts/sdlc verify` (on Windows PowerShell or cmd: `.\scripts\sdlc.cmd verify`). It is exactly what CI runs: all gates, then the checks in each feature's
+Run `./<%sdlcDir%>/sdlc verify` (on Windows PowerShell or cmd: `.\<%sdlcDir%>\sdlc.cmd verify`). It is exactly what CI runs: all gates, then the checks in each feature's
 `acceptance.json` against the **running** system. That starts the whole stack and can take minutes: give the command up to 10 minutes (or run it in the background and wait for it).
 
 Then read `.ai/evidence/latest/report.md` and tell the person:

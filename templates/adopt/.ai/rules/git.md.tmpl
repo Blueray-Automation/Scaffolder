@@ -1,0 +1,7 @@
+# Rule: git and pull requests
+
+- Follow the repository's existing conventions: look at `git log` and open pull requests for branch names and commit message style, and copy them.
+- Agents never commit, push, reset, stash or change git configuration. A human reviews `git diff` and commits.
+- One feature per branch and pull request; reference the feature id (`FEAT-xxx`).
+- A pull request says what changed and why, and pastes the summary of `.ai/evidence/latest/report.md`.
+- Never force-push a shared branch. Never commit `.env`, keys or build output.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Entry point for the SDLC loop tooling on macOS, Linux, WSL and Git Bash.
-# All logic lives in scripts/sdlc.py (stdlib-only Python 3.9+). On Windows (cmd, PowerShell) use scripts\sdlc.cmd.
+# All logic lives in <%sdlcDir%>/sdlc.py (stdlib-only Python 3.9+). On Windows (cmd, PowerShell) use <%sdlcDir%>\sdlc.cmd.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The first interpreter that actually runs wins. `python3` is not enough everywhere: on Windows (Git Bash)

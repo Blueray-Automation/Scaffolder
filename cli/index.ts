@@ -5,6 +5,7 @@
  *   scaffolder init      [--out scaffolder.config.yaml]
  *   scaffolder validate  --config <file> [--set key=value ...]
  *   scaffolder generate  --config <file> --out <dir> [--set key=value ...] [--force] [--zip <file>]
+ *   scaffolder adopt     <dir> [--config <file>] [--set key=value ...] [--write] [--force]
  *   scaffolder list
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
@@ -12,6 +13,7 @@ import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { parse } from "yaml";
 import {
+  adoptProject,
   CAPABILITIES,
   configToYaml,
   defaultConfig,
@@ -21,15 +23,21 @@ import {
   toZip,
   type Issue,
 } from "../src/engine";
+import { planOverlay, renderReport, resolveTarget, scanRepository, writeOverlay } from "./adopt";
 
-const USAGE = `scaffolder: generate AI-ready projects (PRD -> Code -> Test -> Deploy)
+const USAGE = `scaffolder: generate AI-ready projects (PRD -> Code -> Test -> Deploy), or adopt an existing one
 
   scaffolder init      [--out scaffolder.config.yaml]
   scaffolder validate  --config <file> [--set key=value ...]
   scaffolder generate  --config <file> --out <dir> [--set key=value ...] [--force] [--zip <file>]
+  scaffolder adopt     <dir> [--config <file>] [--set key=value ...] [--write] [--force]
   scaffolder list      show what can be generated today
 
 --set overrides any config path, e.g.  --set sdlc.maxIterations=8 --set web.enabled=false
+
+adopt adds the .ai/ folder (and a marked block in AGENTS.md) to a repository that already exists. It only shows what it found
+until you add --write, and it never overwrites a file of yours (--force overwrites the files it generated). Its optional
+--config file can drop or add gates, declare how to run the app, and set the agent, e.g.  --set rootFile=none
 `;
 
 function fail(message: string, code = 1): never {
@@ -73,25 +81,52 @@ function isNonEmptyDir(dir: string): boolean {
 
 function main(): void {
   const [command, ...rest] = process.argv.slice(2);
-  const { values } = parseArgs({
+  const { values, positionals } = parseArgs({
     args: rest,
     options: {
       config: { type: "string", short: "c" },
       out: { type: "string", short: "o" },
       set: { type: "string", multiple: true },
       force: { type: "boolean", short: "f", default: false },
+      write: { type: "boolean", default: false },
       zip: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
     },
-    allowPositionals: false,
+    allowPositionals: true,
   });
 
   if (!command || command === "help" || values.help) {
     console.log(USAGE);
     return;
   }
+  if (command !== "adopt" && positionals.length > 0) fail(`unexpected argument "${positionals[0]}" for "${command}"\n\n${USAGE}`, 64);
 
   switch (command) {
+    case "adopt": {
+      const [dir, ...extra] = positionals;
+      if (!dir || extra.length > 0) fail(`adopt needs exactly one folder: scaffolder adopt <dir> [--write]`, 64);
+      let root: string;
+      try {
+        root = resolveTarget(dir);
+      } catch (e) {
+        return fail((e as Error).message);
+      }
+      const result = adoptProject(scanRepository(root), loadConfig(values.config, values.set ?? []));
+      if (result.issues.some((i) => i.level === "error")) {
+        console.error("Invalid adopt settings:");
+        printIssues(result.issues);
+        process.exit(1);
+      }
+      if (!existsSync(join(root, ".git"))) {
+        result.hints.push("This folder is not a git repository. Run `git init` and commit first: the loop starts agents from a clean tree so you can review exactly what they change.");
+      }
+      const plan = planOverlay(root, result, values.force);
+      if (values.write) writeOverlay(root, plan);
+      console.log(renderReport(dir, result, plan, values.write));
+      if (plan.some((p) => p.action === "skip")) process.exit(1);
+      return;
+    }
+
     case "init": {
       const out = values.out ?? "scaffolder.config.yaml";
       if (existsSync(out) && !values.force) fail(`${out} already exists (use --force to overwrite)`);

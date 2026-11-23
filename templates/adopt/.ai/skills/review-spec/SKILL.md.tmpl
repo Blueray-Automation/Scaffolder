@@ -1,0 +1,17 @@
+---
+name: review-spec
+description: Review a drafted feature spec (prd.md and acceptance.json) before anything is implemented. A human does this; use it as the checklist.
+---
+
+# Review a spec
+
+The spec is the contract: whatever it says is what gets built and what "done" means. An agent may have drafted it; the tool only checks its *form*. You check its *meaning*.
+
+- [ ] Every criterion states something observable and matches what the stakeholder actually wants. Numbers, limits and wording are exact.
+- [ ] Unhappy paths, empty states and boundaries are there.
+- [ ] "Existing behaviour that must keep working" lists what this change could break, and each item is covered by a check or a named existing test.
+- [ ] Every check can fail: the named test exists (or will be written), the command really runs it, the expectation is not trivially true.
+- [ ] Every `ASSUMPTION:` and open question is answered or accepted on purpose.
+- [ ] Nothing is out of scope that should be in, and nothing is in that should not be.
+
+Edit the files yourself, then `./<%sdlcDir%>/sdlc facts --feature FEAT-xxx` (traceability) and `./<%sdlcDir%>/sdlc implement FEAT-xxx --dry-run` (the exact prompt the agent would get).

@@ -31,6 +31,7 @@ npm run scaffold -- init                                   # writes scaffolder.c
 npm run scaffold -- generate --config scaffolder.config.yaml --out ../my-app
 npm run scaffold -- generate --out ../api-only --set web.enabled=false --set database.type=none
 npm run scaffold -- list                                   # what can be generated today
+npm run scaffold -- adopt ../existing-repo [--write]       # add .ai/ to a repository that already exists (below)
 ```
 
 **Then, in the generated project** (macOS, Ubuntu and WSL; on Windows PowerShell or cmd write `.\scripts\sdlc.cmd` instead of `./scripts/sdlc`):
@@ -63,6 +64,21 @@ sees which agents are installed on their machine, with install lines for the res
 See [Using a Desktop App](docs/wiki/Desktop-Apps.md).
 
 Opening the generated folder in a desktop app (Claude Code, Codex) instead? In Claude Code just type `/sdlc` and pick a command (`/sdlc-doctor`, `/sdlc-setup`, `/sdlc-gates`, `/sdlc-verify`, `/sdlc-new`, `/sdlc-spec`, `/sdlc-implement FEAT-001`): the project ships them, and Claude does the work as the agent while `./scripts/sdlc` stays the judge. The generated README also has a guide, "Use it from an AI desktop app", with the same steps by hand for other apps, or to run the commands in the app's terminal for identical behaviour.
+
+## Adopt an existing project
+
+Already have a repository? Add the `.ai/` folder and the verification loop to it. Nothing is generated and your code, dependencies and CI are not touched:
+
+```bash
+npm run scaffold -- adopt ../my-repo            # dry run: what it found, which gates, which files it would write
+npm run scaffold -- adopt ../my-repo --write    # writes .ai/ and one marked block in AGENTS.md; never overwrites a file of yours
+cd ../my-repo && ./.ai/sdlc doctor && ./.ai/sdlc setup && ./.ai/sdlc baseline    # then commit .ai/ with baseline.json
+./.ai/sdlc verify                                # from now on
+```
+
+The gates are your repository's own commands (npm/pnpm/yarn/bun scripts, ruff/mypy/pytest, Makefile targets), each with the place it was found; what it cannot detect is listed, never invented.
+Existing code is rarely green, so "done" is **nothing that passed on adoption day fails now** (a baseline, per gate), plus every acceptance criterion of the feature. Gates that were already red show as known warnings; `baseline --tighten` locks in gains. Secrets already in the repository are recorded as known and only new ones fail.
+`./.ai/sdlc onboard` has an agent draft a map of the code and its conventions (folding in any existing `CLAUDE.md` / `.cursor/rules`), then checks every path and command the draft cites against the repository; you review it. `spec` and `implement` work as above, with prompts that tell the agent to match the existing code and keep the diff small. See [Adopt an Existing Project](docs/wiki/Adopt-an-Existing-Project.md).
 
 ## Platforms
 
@@ -121,7 +137,9 @@ src/engine/                 pure TypeScript, no I/O: runs unchanged in the brows
   config.ts, capabilities.ts  typed config, validation, what is available
   gates.ts                    gate definitions: single source for .ai/sdlc.json AND the CI workflow
   generate.ts                 packs -> in-memory file list;   ci.ts / compose.ts / sdlcConfig.ts build YAML/JSON structurally
-cli/index.ts                the CLI
+cli/index.ts                the CLI (cli/adopt.ts: scan a folder, write the overlay)
+src/engine/adopt/           adoption: detect.ts (what a repository defines), config.ts, generate.ts (the .ai/ overlay);
+                            templates/adopt/ holds its files, and it reuses the runner from templates/core/
 src/components/             the web UI (config form, file explorer, zip download)
 scripts/bundle-templates.mjs   templates/ -> src/engine/templates.generated.ts   (runs automatically before dev/build/test)
 scripts/e2e-generated.ts       proof that generated projects work (below)
@@ -150,6 +168,7 @@ npm run e2e       # slow, needs network, python3 >= 3.12 and node >= 22 on PATH
 
 - Windows support was written without a Windows machine: its platform-specific logic is unit-tested by simulation, and `npm run smoke` on `windows-latest` in CI is the real check. The full `npm run e2e` (bash-based fake tools, Docker) is for macOS and Linux. Deploying from a Windows machine needs Git for Windows' bash or WSL (the generated `cd.yml` deploys from Linux).
 - One full vertical slice: **FastAPI + Next.js (App Router) + PostgreSQL + GitHub Actions + GHCR**. Other stacks are planned.
+- Adopting an existing repository: detection covers Node and Python projects and Makefiles (anything else goes in `gates.add`). It is tested on in-memory repositories and the generated runner is driven in throwaway git repositories (baseline, ratchet, secrets, `implement`, integrity), but not on a real third-party repository, with the real agent CLIs, or on Windows. Creating a Python virtual environment and installing with pnpm, yarn, bun, Poetry or uv are generated and unit-tested, never executed. The baseline is per gate (no coverage or test-count ratchet yet) and there is no web UI for it yet.
 - `spec` drafts are only as good as the document and the AI that reads it: the tool validates their form, a human must review their meaning. Scanned PDFs have no text to read.
 - Agent presets: the whole pipeline around the agent (document reading included) is tested with a scripted agent. The `claude`, `codex`, `gemini`, `copilot` and `cursor` presets follow each tool's documented
   non-interactive mode but have **not been run against the real CLIs** (use `implement --dry-run` to inspect the command and prompt first).

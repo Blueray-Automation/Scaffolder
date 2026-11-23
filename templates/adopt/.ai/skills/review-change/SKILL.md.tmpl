@@ -1,0 +1,16 @@
+---
+name: review-change
+description: Self-review a change against the spec, tests, security and the existing code base before opening a pull request. Use right before declaring work complete.
+---
+
+# Review your change
+
+1. **Spec**: every criterion is implemented, nothing beyond it, and each has a PASS check in the report.
+2. **Fit**: the change reads like the code around it (naming, layering, errors, tests). No unrelated refactoring, formatting or renames in the diff.
+3. **Tests**: new behaviour has tests that fail without the change; none were skipped, weakened or deleted.
+4. **Security**: no secrets, no unvalidated input reaching SQL, shell or HTML, no new dependency without a reason.
+5. **Operability**: new configuration is documented where the repository documents the existing ones; logs are useful and free of personal data.
+6. **Baseline**: `verify` shows no new failure; list any known-red gate you left alone, and any that now pass.
+7. **Machinery untouched**: `git diff --stat` shows no change to `.ai/sdlc.json`, `.ai/sdlc*`, `.ai/baseline.json`, `.github/workflows/` unless a human asked for it.
+
+Write the pull request description: feature id, what and why, the report summary, risks and rollout notes.

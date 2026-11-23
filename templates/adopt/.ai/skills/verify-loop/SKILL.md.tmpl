@@ -1,0 +1,31 @@
+---
+name: verify-loop
+description: Run and interpret the verification loop (gates, facts, baseline, evidence, exit codes). Use whenever you need to prove work is done or understand a verification result.
+---
+
+# Run the verification loop
+
+| Goal | Command |
+|---|---|
+| Is the toolchain ready? | `./<%sdlcDir%>/sdlc doctor`, then `./<%sdlcDir%>/sdlc setup` |
+| Record what passes today (once, then commit it) | `./<%sdlcDir%>/sdlc baseline` |
+| Fast feedback while coding | `./<%sdlcDir%>/sdlc gates` (or `--only <gate-id>`, `--stage unit`) |
+| Prove acceptance criteria | `./<%sdlcDir%>/sdlc facts` |
+| Everything CI should run | `./<%sdlcDir%>/sdlc verify` |
+| Verify, heal, verify until green | `./<%sdlcDir%>/sdlc loop` |
+| Have an agent map the repository and its conventions (then review it) | `./<%sdlcDir%>/sdlc onboard` (`--dry-run` shows the prompt first) |
+| Requirements document to a draft spec (then review it) | `./<%sdlcDir%>/sdlc spec requirements.pdf` (`--dry-run` shows the prompt first) |
+| Spec in, verified code out | `./<%sdlcDir%>/sdlc implement FEAT-xxx` (`--dry-run` shows the prompt first) |
+| Install dependencies after editing a manifest | `./<%sdlcDir%>/sdlc sync` |
+| Lock in gates that now pass | `./<%sdlcDir%>/sdlc baseline --tighten` |
+| Read the last result | `./<%sdlcDir%>/sdlc report` |
+
+## Reading the result
+- `PASS` / `FAIL` per gate and per check. `WARN` = a non-required gate failed, or a gate that already failed at the baseline ("known"). `SKIP` = a capability is missing in this runtime: *not verified*.
+- Evidence is in `.ai/evidence/latest/`: `report.md` (for people), `results.json` (for tools), `logs/<id>.log` (full output).
+- The traceability table shows each criterion, its checks and its status. A feature is done only when all its criteria are PASS.
+
+## Exit codes
+`0` verified · `1` failed (or out of iterations) · `2` needs a human (no agent configured, spec is a stub, no baseline yet) · `3` the same failure repeated · `4` integrity violation (protected files changed).
+
+Trust the report, not your memory. Never report "verified" for anything the report shows as SKIP or FAIL.

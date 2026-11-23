@@ -365,10 +365,14 @@ export function validateConfig(cfg: ScaffolderConfig): Issue[] {
 }
 
 /** The command that will run the agent: an explicit override wins, otherwise the preset's command. */
-export function agentCommand(cfg: ScaffolderConfig): string {
-  const explicit = cfg.sdlc.agent.command.trim();
+export function resolveAgentCommand(preset: AgentPreset, command: string): string {
+  const explicit = command.trim();
   if (explicit) return explicit;
-  return AGENT_PRESETS.find((p) => p.id === cfg.sdlc.agent.preset)?.command ?? "";
+  return AGENT_PRESETS.find((p) => p.id === preset)?.command ?? "";
+}
+
+export function agentCommand(cfg: ScaffolderConfig): string {
+  return resolveAgentCommand(cfg.sdlc.agent.preset, cfg.sdlc.agent.command);
 }
 
 export function hasErrors(issues: Issue[]): boolean {

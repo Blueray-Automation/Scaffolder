@@ -1,0 +1,132 @@
+# .ai/: the AI operating system of this repository
+
+Scaffolder added this folder to an existing project (`scaffolder adopt`). It does not change your code, your dependencies or your CI.
+It gives people and AI agents one shared definition of "done" that is **checked, not claimed**.
+
+```
+.ai/
+  sdlc.json               the loop's configuration: gates, setup, integrity, agent (agents may not edit it)
+  sdlc  sdlc.cmd  sdlc.py the runner (standard-library Python 3.9+): ./<%sdlcDir%>/sdlc, on Windows .\<%sdlcDir%>\sdlc.cmd
+  baseline.json           which gates passed and failed on adoption day (made by `sdlc baseline`; commit it)
+  secrets.baseline.json   secret-like strings that were already in the repository on adoption day
+  context/commands.md     the commands this repository defines, and where each was found
+  context/architecture.md a map of the code, drafted by `sdlc onboard` and reviewed by a person
+  rules/conventions.md    what the code does by convention, drafted the same way
+  rules/                  how to work here: short, imperative
+  skills/                 step-by-step playbooks an agent loads for that kind of work
+  prompts/                templates the loop fills in and sends to the agent
+  specs/                  one folder per feature: prd.md + acceptance.json
+  evidence/               run output: logs, results.json, report.md (gitignored)
+```
+
+## First time (about five minutes)
+
+1. `./<%sdlcDir%>/sdlc doctor`: are the tools this repository needs installed?
+2. `./<%sdlcDir%>/sdlc setup`: install dependencies. An existing `node_modules` or virtual environment is used as it is, never wiped.
+3. `./<%sdlcDir%>/sdlc baseline`: run every gate once and record what passes today. Then **commit `.ai/` including `baseline.json`**.
+4. `./<%sdlcDir%>/sdlc verify`: the command to run from now on. Right after the baseline it passes by definition.
+5. (optional, worth it) `./<%sdlcDir%>/sdlc onboard`: an agent reads the repository and drafts `context/architecture.md` and `rules/conventions.md`, folding in any `CLAUDE.md`, `.cursor/rules` or
+   similar guidance that was already here. The tool then checks every path the draft cites, every `npm run` / `make` / `sdlc` command it names, and that every convention points at code. It cannot check that
+   the description is *right*: read it, correct it, set `Status: Reviewed`, and commit. Every later agent run reads these files first.
+
+## What "done" means here
+
+Existing code is rarely green, so "done" is not "everything passes". It is **nothing that passed on adoption day fails now**, plus every acceptance criterion of the feature at hand:
+
+- A gate that passed at the baseline must still pass. If it fails, the change broke something: `FAIL`.
+- A gate that already failed at the baseline is shown as `WARN` (known). It does not block and it is not the agent's job, unless the feature is about it.
+- When a known failing gate starts to pass, `verify` says so. `./<%sdlcDir%>/sdlc baseline --tighten` locks the gain in, so it cannot fall back unnoticed.
+- The baseline is per gate, not per violation: a gate that was already red can get worse without `verify` noticing. Tighten as gates turn green.
+- **Record the baseline where you verify.** A gate that passes on your laptop but fails in CI (a missing tool, a different OS) would show up as a regression there. If CI is the judge, run `baseline` in CI's environment, or fix the difference first.
+
+## Gates (what runs)
+
+Defined once in `.ai/sdlc.json` (stages: `<%stages%>`). They are the repository's own commands; see `context/commands.md` for what each one runs and where it was found.
+A failing required gate stops the run at the end of its stage (`loop.failFast`), so the agent gets one focused problem.
+
+## Features: spec, then code, then proof
+
+```bash
+./<%sdlcDir%>/sdlc new user-login               # an empty spec to fill in (prd.md + acceptance.json)
+./<%sdlcDir%>/sdlc spec requirements.pdf        # or: an agent drafts it from a document (.pdf .docx .md .txt); YOU review it
+./<%sdlcDir%>/sdlc implement FEAT-001           # an agent writes tests and code; the loop proves it; it never commits
+```
+
+`prd.md` lists acceptance criteria (`AC-001` ...); `acceptance.json` maps each to checks. Verification fails if a criterion has no check.
+Check types: `cmd` (run a command, usually ONE named test), `file` (exists, contains), `http` (needs a running app, see below).
+A check that cannot run here is reported as `SKIP`, never as pass.
+
+## Run the app for facts (optional)
+
+By default the app is not started (`runtime.mode` is `none`), so facts are `cmd` and `file` checks. To check HTTP behaviour against the live app,
+declare how to start it in `.ai/sdlc.json` (a human decision: agents may not edit that file):
+
+```json
+"runtime": {
+  "mode": "local",
+  "targets": { "web": "http://127.0.0.1:3000" },
+  "local": {
+    "provides": ["web"],
+    "services": [
+      { "name": "web", "cwd": ".", "cmd": "npm run start -- --port 3000", "env": {}, "pathPrepend": [], "healthUrl": "http://127.0.0.1:3000/", "startTimeoutSeconds": 90 }
+    ]
+  }
+}
+```
+
+Then an `http` check may use `"target": "web"`. (`"mode": "docker"` runs `runtime.docker` with its own compose project name, so it never touches your development stack.)
+
+## The healing loop (`./<%sdlcDir%>/sdlc loop`)
+
+```
+verify -> green? -> done (exit 0)
+   +-> failed: same failure <%noProgressLimit%> times in a row -> stop, ask a human (exit 3)
+               <%maxIterations%> iterations used                        -> stop (exit 1)
+               otherwise: heal prompt + evidence -> agent (or you) fixes the CODE -> integrity check (exit 4 if protected files changed) -> verify again
+```
+
+Protected for agents: `.ai/sdlc.json`, `.ai/sdlc*`, `.ai/baseline.json`, `.ai/secrets.baseline.json`, `.github/workflows/`; while healing also `.ai/specs/`.
+Guarded (an agent may change them, but every change is listed in the report):
+<%#hasGuarded%>
+
+<%#guarded%>
+- `<%path%>`
+<%/guarded%>
+<%/hasGuarded%>
+<%^hasGuarded%>
+none were found.
+<%/hasGuarded%>
+
+## Your CI
+
+<%#hasCi%>
+Your existing CI was left alone. It does not know about the baseline, so add a job that does:
+<%/hasCi%>
+<%^hasCi%>
+No CI was found. If you add one, this is the job:
+<%/hasCi%>
+
+```yaml
+name: sdlc-verify
+on: [pull_request]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # install the toolchains this project needs here, exactly as your other workflows do
+      - run: ./<%sdlcDir%>/sdlc setup
+      - run: ./<%sdlcDir%>/sdlc verify
+```
+
+(Workflows are protected from agents by design; a human adds this one.)
+
+## Configure
+
+| What | Where |
+|---|---|
+| Add, drop or change a gate | `gates` in `.ai/sdlc.json` (`id`, `stage`, `cwd`, `cmd`, `required`, `timeoutSeconds`) |
+| Which AI tool | `./<%sdlcDir%>/sdlc agent` lists them (installed or not) and saves your choice in `.ai/agent.local.json` (not committed) |
+| Make skips fatal | `facts.strictSkips: true` |
+| Loop budget | `loop.maxIterations`, `loop.noProgressLimit` |
+| Re-detect after changing the repository | run `scaffolder adopt` again: it adds files that are missing and never overwrites yours (`--force` overwrites the generated ones) |

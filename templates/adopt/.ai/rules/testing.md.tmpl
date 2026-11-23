@@ -1,0 +1,11 @@
+# Rule: testing
+
+Tests are evidence. A test that cannot fail proves nothing.
+
+- Use the repository's own test framework, folder layout and naming (see `.ai/context/commands.md` and the tests next to the code). Do not introduce a second framework.
+- Test first for new behaviour: write the failing test, watch it fail for the right reason, then make it pass.
+- A bug fix starts with a test that reproduces the bug.
+- Cover: the happy path, every validation rule, boundaries (0, 1, max, max+1), error paths, and each acceptance criterion at least once. One reason to fail per test; name tests by behaviour.
+- Deterministic: no sleeping, no real clock, network or randomness without control. Fake only at the system boundary; never mock the unit under test.
+- Coverage or other thresholds the repository enforces are real: never lower them.
+- Never `skip`, `xfail`, `.only`, comment out or delete a test to get green. If a test encodes behaviour the spec changes, change the test and say why.

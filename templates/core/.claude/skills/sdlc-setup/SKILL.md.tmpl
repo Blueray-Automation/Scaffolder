@@ -2,16 +2,16 @@
 name: sdlc-setup
 description: Install this project's dependencies (Python virtual environment, npm packages). Type /sdlc-setup.
 disable-model-invocation: true
-allowed-tools: Bash(./scripts/sdlc setup) Bash(./scripts/sdlc setup *) Bash(./scripts/sdlc doctor)
+allowed-tools: Bash(./<%sdlcDir%>/sdlc setup) Bash(./<%sdlcDir%>/sdlc setup *) Bash(./<%sdlcDir%>/sdlc doctor)
 ---
 
 # /sdlc-setup
 
-Run `./scripts/sdlc setup` (on Windows PowerShell or cmd: `.\scripts\sdlc.cmd setup`). It installs the dependencies of every part of the project.
+Run `./<%sdlcDir%>/sdlc setup` (on Windows PowerShell or cmd: `.\<%sdlcDir%>\sdlc.cmd setup`). It installs the dependencies of every part of the project.
 The first run downloads packages and can take minutes: give the command up to 10 minutes (or run it in the background and wait for it).
 
 - It succeeds: say what it installed and suggest `/sdlc-verify` next.
 - It fails: show which step failed and the log it names under `.ai/evidence/`, and say what the log says. Do not retry blindly, and do not edit a dependency
-  manifest or a lockfile to make it pass. If a tool is missing, run `./scripts/sdlc doctor` and show what it reports.
+  manifest or a lockfile to make it pass. If a tool is missing, run `./<%sdlcDir%>/sdlc doctor` and show what it reports.
 - It stops because a person has to decide something (for example it offers to install Python): pass the question on word for word and stop.
 - Never use `sudo` or an administrator shell.

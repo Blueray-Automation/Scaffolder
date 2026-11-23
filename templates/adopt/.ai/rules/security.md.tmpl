@@ -1,0 +1,9 @@
+# Rule: security
+
+- **Secrets**: never in the repository, logs, tests or prompts. Configuration comes from the environment the way the repository already does it. `./<%sdlcDir%>/sdlc secrets` is a required gate; strings already present on adoption day are recorded in `.ai/secrets.baseline.json`, anything new fails.
+- **Input**: validate at the boundary (length, range, format). Reject, do not sanitise and continue. Never build SQL, shell or HTML from input by string concatenation.
+- **Errors**: stable error payloads; never leak stack traces, SQL, file paths or internal ids.
+- **AuthN/Z**: deny by default; check permissions on the server for every request. The client UI is not a control.
+- **Dependencies**: add only what you need. Treat high or critical advisories as blockers.
+- **Logging**: structured where the repository is; no personal data or tokens.
+- **Pipelines**: agents may not edit workflows.

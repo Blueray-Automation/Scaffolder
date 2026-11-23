@@ -1,0 +1,36 @@
+---
+name: write-fact-checks
+description: Write acceptance.json checks that prove each PRD acceptance criterion (cmd, file, http). Use whenever you add or change acceptance criteria.
+---
+
+# Write fact checks
+
+A *fact check* turns one acceptance criterion into something the loop executes. If it cannot fail, it is not a check.
+
+## Check anatomy
+```json
+{
+  "id": "CHK-001",
+  "name": "A negative quantity is rejected",
+  "covers": ["AC-003"],
+  "type": "cmd",
+  "run": "<the repository's own command that runs ONE named test>",
+  "cwd": ".",
+  "expectExit": 0
+}
+```
+
+## Types
+- **cmd**: `run`, `cwd`, `expectExit` (default 0), `stdoutContains` (list), optional `env`, `pathPrepend`. The usual way to tie a criterion to one specific test: use the repository's own runner (see `.ai/context/commands.md`) with a file or test-name filter. The named test must exist and be able to fail.
+- **file**: `path`, `exists`, `contains` (list), `regex`.
+- **http**: `target` (a name from `runtime.targets` in `.ai/sdlc.json`), `method`, `path`, optional `headers`, `body` (JSON), `expect`: `status` (int or list), `json` (subset), `bodyContains`, `headers`, `maxMs`. Only works when the runtime provides that target; otherwise the check is SKIP, which is not a pass.
+
+## JSON matchers
+Exact values, or `"$exists"`, `"$type:string|number|boolean|array|object|null"`, `"$re:<regex>"`. Objects match as subsets.
+
+## Rules of thumb
+- Assert what the criterion says, no more, no less.
+- Cover unhappy paths with their exact outcomes.
+- A check needing something the runtime might not have declares `"needs": [...]`; it is then SKIP, never pass.
+- Mutating checks must be repeatable (unique ids or cleanup).
+- Never loosen a check to make it pass. If the check is wrong, the spec is wrong: raise it.

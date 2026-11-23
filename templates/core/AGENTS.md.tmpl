@@ -4,7 +4,7 @@ This file is for any AI coding agent (and any human). It is tool-neutral on purp
 Project: **<%title%>**: <%description%>
 
 ## The one rule
-**"Done" means `./scripts/sdlc verify` exits 0 and you can show its report.** Not "the code looks right", not "tests I wrote pass".
+**"Done" means `./<%sdlcDir%>/sdlc verify` exits 0 and you can show its report.** Not "the code looks right", not "tests I wrote pass".
 The report is `.ai/evidence/latest/report.md`. If you cannot run something, say so; never claim it passed.
 
 ## Workflow: PRD -> Code -> Test -> Deploy
@@ -18,25 +18,25 @@ The report is `.ai/evidence/latest/report.md`. If you cannot run something, say 
 | Test | Run the loop until green | `.ai/skills/verify-loop/`, `.ai/skills/fix-failing-gate/` |
 | Deploy | Tag, let CD promote, verify the live URL | `.ai/skills/release-and-deploy/` |
 
-Start a feature in one of two ways, then run `./scripts/sdlc implement FEAT-xxx` (the agent writes tests, code, dependencies and config from the spec, and the loop verifies it):
-- **From a document:** `./scripts/sdlc spec requirements.pdf` (also .docx, .md, .txt). An agent drafts `prd.md` and `acceptance.json`, the tool validates them, and **you review the draft** before implementing (skill `.ai/skills/review-spec`).
-- **By hand:** `./scripts/sdlc new <slug>` creates `.ai/specs/FEAT-xxx-<slug>/`; you write `prd.md` and `acceptance.json`.
+Start a feature in one of two ways, then run `./<%sdlcDir%>/sdlc implement FEAT-xxx` (the agent writes tests, code, dependencies and config from the spec, and the loop verifies it):
+- **From a document:** `./<%sdlcDir%>/sdlc spec requirements.pdf` (also .docx, .md, .txt). An agent drafts `prd.md` and `acceptance.json`, the tool validates them, and **you review the draft** before implementing (skill `.ai/skills/review-spec`).
+- **By hand:** `./<%sdlcDir%>/sdlc new <slug>` creates `.ai/specs/FEAT-xxx-<slug>/`; you write `prd.md` and `acceptance.json`.
 Worked example: `.ai/specs/FEAT-000-hello-world/`.
 
 ## Commands
 ```bash
-./scripts/sdlc setup      # install dependencies
-./scripts/sdlc doctor     # check the toolchain
-./scripts/sdlc gates      # lint, types, unit tests, build,<%#hasBackend%> contract,<%/hasBackend%> security
-./scripts/sdlc facts      # PRD acceptance criteria vs the RUNNING system (<%runtimeMode%> runtime)
-./scripts/sdlc verify     # gates + facts: exactly what CI runs
-./scripts/sdlc loop       # verify -> heal -> verify (max <%maxIterations%> iterations)
-./scripts/sdlc spec requirements.pdf   # an agent drafts prd.md + acceptance.json from a document; you review the draft
-./scripts/sdlc implement FEAT-001   # spec in (prd.md + acceptance.json), verified code out; needs an agent
-./scripts/sdlc sync       # install dependencies if a manifest (pyproject.toml / package.json) changed
+./<%sdlcDir%>/sdlc setup      # install dependencies
+./<%sdlcDir%>/sdlc doctor     # check the toolchain
+./<%sdlcDir%>/sdlc gates      # lint, types, unit tests, build,<%#hasBackend%> contract,<%/hasBackend%> security
+./<%sdlcDir%>/sdlc facts      # PRD acceptance criteria vs the RUNNING system (<%runtimeMode%> runtime)
+./<%sdlcDir%>/sdlc verify     # gates + facts: exactly what CI runs
+./<%sdlcDir%>/sdlc loop       # verify -> heal -> verify (max <%maxIterations%> iterations)
+./<%sdlcDir%>/sdlc spec requirements.pdf   # an agent drafts prd.md + acceptance.json from a document; you review the draft
+./<%sdlcDir%>/sdlc implement FEAT-001   # spec in (prd.md + acceptance.json), verified code out; needs an agent
+./<%sdlcDir%>/sdlc sync       # install dependencies if a manifest (pyproject.toml / package.json) changed
 ```
-Single gate while iterating: `./scripts/sdlc gates --only <id>`. `make help` lists the same commands.
-On Windows (PowerShell or cmd) the launcher is `.\scripts\sdlc.cmd`; every command and option is the same. Never edit the launchers (`scripts/sdlc`, `scripts/sdlc.cmd`, `scripts/sdlc.py`).
+Single gate while iterating: `./<%sdlcDir%>/sdlc gates --only <id>`. `make help` lists the same commands.
+On Windows (PowerShell or cmd) the launcher is `.\<%sdlcDir%>\sdlc.cmd`; every command and option is the same. Never edit the launchers (`<%sdlcDir%>/sdlc`, `<%sdlcDir%>/sdlc.cmd`, `<%sdlcDir%>/sdlc.py`).
 
 ## Gates (defined once in `.ai/sdlc.json`, mirrored in CI)
 | Stage | Gate | Command | Required |
@@ -69,16 +69,16 @@ docker-compose.yml   full stack, also used by the facts stage
 ```
 
 ## Hard constraints
-1. Never edit the machinery that defines "correct": `.ai/sdlc.json`, `scripts/sdlc*`, `.github/workflows/`. While healing, also never edit `.ai/specs/`. The loop detects this and stops (exit 4).
+1. Never edit the machinery that defines "correct": `.ai/sdlc.json`, `<%sdlcDir%>/sdlc*`, `.github/workflows/`. While healing, also never edit `.ai/specs/`. The loop detects this and stops (exit 4).
 2. Never delete, skip or weaken a test or a threshold to get green. Fix the code.
 <%#hasBackend%>
 3. Never change `.ai/contract/openapi.json` to hide drift. It changes only when the PRD changes the API.
-4. No secrets in the repo (`./scripts/sdlc secrets` enforces it). Config comes from environment variables; see `.env.example`.
+4. No secrets in the repo (`./<%sdlcDir%>/sdlc secrets` enforces it). Config comes from environment variables; see `.env.example`.
 5. One feature per branch/PR; reference the `FEAT-xxx` id. Conventional Commits (`feat:`, `fix:`, `chore:`).
 6. If the spec is ambiguous or seems wrong, stop and ask. Do not guess requirements.
 <%/hasBackend%>
 <%^hasBackend%>
-3. No secrets in the repo (`./scripts/sdlc secrets` enforces it). Config comes from environment variables; see `.env.example`.
+3. No secrets in the repo (`./<%sdlcDir%>/sdlc secrets` enforces it). Config comes from environment variables; see `.env.example`.
 4. One feature per branch/PR; reference the `FEAT-xxx` id. Conventional Commits (`feat:`, `fix:`, `chore:`).
 5. If the spec is ambiguous or seems wrong, stop and ask. Do not guess requirements.
 <%/hasBackend%>
@@ -88,10 +88,10 @@ Read `.ai/skills/fix-failing-gate/SKILL.md`. In short: reproduce, find the root 
 The loop stops on its own after `<%noProgressLimit%>` identical failures in a row (exit 3) or `<%maxIterations%>` iterations (exit 1): a human looks at it then.
 
 ## Agent integration
-`./scripts/sdlc implement` and the healing loop run an agent: `.ai/sdlc.json` -> `agent.command`, a shell command that reads the prompt on stdin<%#agentConfigured%> (preset `<%agentPreset%>`, currently `<%agentCommand%>`)<%/agentConfigured%><%^agentConfigured%> (currently empty: the tool prints the prompt and waits for you)<%/agentConfigured%>.
+`./<%sdlcDir%>/sdlc implement` and the healing loop run an agent: `.ai/sdlc.json` -> `agent.command`, a shell command that reads the prompt on stdin<%#agentConfigured%> (preset `<%agentPreset%>`, currently `<%agentCommand%>`)<%/agentConfigured%><%^agentConfigured%> (currently empty: the tool prints the prompt and waits for you)<%/agentConfigured%>.
 An agent can also be a **desktop app**: `claude-desktop` runs the Claude Code that the Claude desktop app keeps for its Code tab (unattended, no CLI on PATH needed), and `handoff-claude`, `handoff-cursor` and `handoff-vscode` open that app on this project, put the instruction on the clipboard and wait for the person to press Enter before the tool verifies (a hand-off needs a terminal; it reads the same prompt file).
-A person picks the agent for their machine with `./scripts/sdlc agent` (saved in `.ai/agent.local.json`, not committed); per run: `./scripts/sdlc implement FEAT-001 --agent <name>` or `SDLC_AGENT_CMD='<your-agent-cli>'`. Do not edit `.ai/sdlc.json` or `.ai/agent.local.json` yourself. Prompts: `.ai/prompts/` (`implement.md` is filled with the feature's prd.md and acceptance.json).
-If you are the agent: after adding a dependency to a manifest run `./scripts/sdlc sync`; never edit the spec; never commit or push; if the spec is unclear, write your questions to the file named in the prompt and stop.
-If a person started you from a desktop app instead of `./scripts/sdlc`, the same rules apply. Do not run `./scripts/sdlc implement`, `spec`, `feature` or `loop` yourself: they start another agent or wait for a person (`implement FEAT-001 --dry-run` is fine: it runs nothing and only writes the prompt file). Use `gates`, `facts`, `verify` and `sync`, and report what you ran and what `.ai/evidence/latest/report.md` says. Never claim a pass you did not see.
+A person picks the agent for their machine with `./<%sdlcDir%>/sdlc agent` (saved in `.ai/agent.local.json`, not committed); per run: `./<%sdlcDir%>/sdlc implement FEAT-001 --agent <name>` or `SDLC_AGENT_CMD='<your-agent-cli>'`. Do not edit `.ai/sdlc.json` or `.ai/agent.local.json` yourself. Prompts: `.ai/prompts/` (`implement.md` is filled with the feature's prd.md and acceptance.json).
+If you are the agent: after adding a dependency to a manifest run `./<%sdlcDir%>/sdlc sync`; never edit the spec; never commit or push; if the spec is unclear, write your questions to the file named in the prompt and stop.
+If a person started you from a desktop app instead of `./<%sdlcDir%>/sdlc`, the same rules apply. Do not run `./<%sdlcDir%>/sdlc implement`, `spec`, `feature` or `loop` yourself: they start another agent or wait for a person (`implement FEAT-001 --dry-run` is fine: it runs nothing and only writes the prompt file). Use `gates`, `facts`, `verify` and `sync`, and report what you ran and what `.ai/evidence/latest/report.md` says. Never claim a pass you did not see.
 In Claude Code the person starts a step with a slash command: `/sdlc-implement FEAT-001`, `/sdlc-spec <document>`, `/sdlc-new <name>`, `/sdlc-verify`, `/sdlc-gates`, `/sdlc-setup` or `/sdlc-doctor` (`.claude/skills/sdlc-*/SKILL.md`). Each walks you through exactly the rules above, in order: follow it when it is invoked.
 Skills are plain Markdown in `.ai/skills/<name>/SKILL.md` (frontmatter: name, description). To expose them to a tool that looks in another folder, link each skill there, e.g. `ln -s ../../.ai/skills/write-prd .claude/skills/write-prd` (Claude Code) or `.agents/skills/` (Codex); the README shows a loop that links them all.

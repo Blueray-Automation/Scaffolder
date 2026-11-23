@@ -107,14 +107,14 @@ const PACKS: Pack[] = [
   },
 ];
 
-const EXEC = [/\.sh$/, /^scripts\/sdlc$/, /^scripts\/sdlc\.py$/];
+const EXEC = [/\.sh$/, /^scripts\/sdlc$/, /^scripts\/sdlc\.py$/, /^\.ai\/sdlc$/, /^\.ai\/sdlc\.py$/];
 
-function isExecutable(path: string): boolean {
+export function isExecutable(path: string): boolean {
   return EXEC.some((re) => re.test(path));
 }
 
 /** Windows batch files must use CRLF line endings (labels and `goto` can misbehave with bare LF); everything else stays LF. */
-function withLineEndings(path: string, content: string): string {
+export function withLineEndings(path: string, content: string): string {
   return /\.(cmd|bat)$/i.test(path) ? content.replace(/\r?\n/g, "\r\n") : content;
 }
 

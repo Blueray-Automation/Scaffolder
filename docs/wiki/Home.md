@@ -22,6 +22,7 @@ then lets an AI agent (or you) heal failures until everything is green.
 5. **[Troubleshooting](Troubleshooting)**: common problems and fixes.
 6. **[Reference: the login implementation](Reference-Login-Implementation)**: the complete, verified code for the tutorial.
 7. **[Using a Desktop App](Desktop-Apps)**: let the Claude desktop app, Cursor or VS Code be the AI agent instead of a command-line tool.
+8. **[Adopt an Existing Project](Adopt-an-Existing-Project)**: already have a repository? Add the `.ai/` folder and the verification loop to it, judged against a baseline instead of "everything green".
 
 ## What you get
 

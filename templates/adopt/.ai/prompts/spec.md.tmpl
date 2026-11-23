@@ -1,0 +1,65 @@
+# Task: turn a requirements document into a specification ({{feature}})
+
+You are preparing a specification for a change to an **existing** code base. A human reviews it first; a developer agent then implements it. Write **exactly two files** in
+`{{specDir}}/`: `prd.md` and `acceptance.json`. Do not write code or tests, and do not touch any other file.
+
+## The source document
+
+- File: `{{sourceName}}` (a copy is at `{{sourcePath}}`: read the original with your own file tools if the text below looks incomplete)
+- Scope: {{focus}}
+- Text extraction: {{extractor}}
+
+````text
+{{sourceText}}
+````
+
+## prd.md
+
+Follow `.ai/rules/prd.md` and the playbook `.ai/skills/write-prd/SKILL.md`. The template this folder started from shows the exact format.
+Read the code the document is about before you write: the criteria must describe what changes relative to what the code does today.
+
+- First lines: `# {{feature}}: <short title>`, then `Status: Draft (generated from {{sourceName}}; a human must review it before implementation)`.
+  The title names the **feature**, in two to four words (`Customer Login`, `Password Reset`), not the document (`Requirements`): the spec folder is named after it.
+- **Objective**, then **User stories & acceptance criteria**, then **Existing behaviour that must keep working**, Permissions & roles, Data & validation, Contract impact, Out of scope.
+- Every acceptance criterion is one line: `- **AC-001** Given ..., when ..., then ... (Source: <page or section of the document>)`.
+  - One observable behaviour per criterion. Observable from outside: a response, a page, a command's result, a file.
+  - Include the unhappy paths the document implies: validation errors, not found, unauthorized, boundaries (0, 1, max, max+1), empty states.
+  - Quote numbers, limits, status codes and wording **exactly as the document states them**.
+  - **Never invent requirements.** If a criterion cannot be made testable without filling a gap, follow the conventions you see in the existing code
+    and record the gap in the last section as a line starting with `ASSUMPTION:`.
+  - Requirements that cannot be verified through a test, a command or a file (visual design, performance targets, process, policy) do **not** become
+    criteria: list them under "Out of scope / not machine-verifiable" with their source.
+- Finish with a section **Assumptions & open questions**: every assumption, ambiguity or question for the document's author, one per line. Nothing is silently decided.
+- No `TODO(prd)` markers anywhere.
+
+## acceptance.json
+
+Format: `{ "feature": "{{feature}}", "checks": [ ... ] }`. Every acceptance criterion needs at least one check; every check lists the criteria it proves in `covers`.
+See `.ai/skills/write-fact-checks/SKILL.md`. In short:
+
+```json
+{
+  "id": "CHK-001",
+  "name": "A negative quantity is rejected",
+  "covers": ["AC-002"],
+  "type": "cmd",
+  "run": "<the repository's own command that runs ONE named test; see .ai/context/commands.md>",
+  "cwd": ".",
+  "expectExit": 0
+}
+```
+
+- `type` is `cmd` (run a command and check its exit code and output), `file` (a file exists / contains something) or `http` (call the running system; `target` must be one of: {{targets}}).
+  If no target is listed, the running app is not available to the checks: use `cmd` and `file` only.
+- Prefer a `cmd` check that runs a test **you name**. The developer agent will be told to write a test with exactly that name, so give it a precise, runnable filter.
+- Check ids are `CHK-001`, `CHK-002`, ... Do not weaken a check to make it easy: it must fail when the behaviour is wrong.
+
+## Rules
+
+- Write only `{{specDir}}/prd.md` and `{{specDir}}/acceptance.json`. Both files must be complete, valid, and consistent with each other.
+- Do **not** run `git commit`, `git push` or change git configuration.
+- If the document is empty, unreadable, or contains nothing for the scope above: write your explanation to `{{questionsFile}}` and stop. Do not make up a specification.
+
+## Final message
+
+How many acceptance criteria and checks you wrote, which parts of the document you left out and why, and your assumptions and open questions.

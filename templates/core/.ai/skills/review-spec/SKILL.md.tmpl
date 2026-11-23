@@ -1,6 +1,6 @@
 ---
 name: review-spec
-description: Review a specification that an agent drafted from a requirements document (PDF, DOCX, Markdown) before anyone implements it. Use after `./scripts/sdlc spec` and before `./scripts/sdlc implement`.
+description: Review a specification that an agent drafted from a requirements document (PDF, DOCX, Markdown) before anyone implements it. Use after `./<%sdlcDir%>/sdlc spec` and before `./<%sdlcDir%>/sdlc implement`.
 ---
 
 # Review a generated spec
@@ -24,8 +24,8 @@ Open `.ai/specs/FEAT-xxx-<slug>/prd.md` and `acceptance.json` next to the origin
 ## Then
 
 ```bash
-./scripts/sdlc facts --runtime none     # the spec must still be well-formed after your edits
-./scripts/sdlc implement FEAT-xxx       # hand it to the agent
+./<%sdlcDir%>/sdlc facts --runtime none     # the spec must still be well-formed after your edits
+./<%sdlcDir%>/sdlc implement FEAT-xxx       # hand it to the agent
 ```
 
-If a requirement is wrong or missing in the *document* itself, fix it at the source and run `./scripts/sdlc spec` again with a new `--name`.
+If a requirement is wrong or missing in the *document* itself, fix it at the source and run `./<%sdlcDir%>/sdlc spec` again with a new `--name`.

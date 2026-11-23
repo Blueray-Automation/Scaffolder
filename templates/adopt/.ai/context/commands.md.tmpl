@@ -1,0 +1,75 @@
+# Commands this repository defines
+
+Written by `scaffolder adopt` from what the repository itself declares: every line says where it was found. Nothing here was invented;
+what could not be found is listed at the end. Run things through `./<%sdlcDir%>/sdlc` so the result lands in the evidence report.
+
+## Components
+
+<%#hasComponents%>
+| Component | Folder | What was found |
+|---|---|---|
+<%#components%>
+| `<%id%>` | `<%dir%>` | <%summary%> |
+<%/components%>
+<%/hasComponents%>
+<%^hasComponents%>
+No Node or Python component and no Makefile gate was detected.
+<%/hasComponents%>
+
+## Gates (`./<%sdlcDir%>/sdlc gates`, part of `verify`)
+
+<%#hasGates%>
+| Stage | Gate | Command (run in `cwd`) | Required | Where it came from |
+|---|---|---|---|---|
+<%#gates%>
+| <%stage%> | `<%id%>` | `<%cmd%>` (in `<%cwd%>`) | <%required%> | <%evidence%> |
+<%/gates%>
+<%/hasGates%>
+<%^hasGates%>
+None. Add gates in `.ai/sdlc.json`.
+<%/hasGates%>
+
+## Installing dependencies (`./<%sdlcDir%>/sdlc setup`)
+
+<%#hasSetup%>
+| Step | Command (run in `cwd`) | Note |
+|---|---|---|
+<%#setup%>
+| <%label%> | `<%cmd%>` (in `<%cwd%>`) | <%existing%> |
+<%/setup%>
+<%/hasSetup%>
+<%^hasSetup%>
+No install step was detected: install the dependencies yourself.
+<%/hasSetup%>
+
+## Configuration that defines "correct"
+
+<%#hasGuarded%>
+Changes to these files are allowed, but every one is listed in the verification report for a human to review:
+
+<%#guarded%>
+- `<%path%>`
+<%/guarded%>
+<%/hasGuarded%>
+<%^hasGuarded%>
+None were found.
+<%/hasGuarded%>
+
+## Not covered
+
+<%#hasNotCovered%>
+<%#notCovered%>
+- <%text%>
+<%/notCovered%>
+<%/hasNotCovered%>
+<%^hasNotCovered%>
+Nothing was left out.
+<%/hasNotCovered%>
+<%#hasSuggestions%>
+
+## Worth enabling by hand
+
+<%#suggestions%>
+- <%text%>
+<%/suggestions%>
+<%/hasSuggestions%>

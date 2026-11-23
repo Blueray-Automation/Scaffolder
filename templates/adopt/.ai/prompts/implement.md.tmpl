@@ -1,0 +1,61 @@
+# Task: build {{feature}} from its specification
+
+You are an AI coding agent working inside an **existing** repository. The product owner wrote the specification below. It is the only source of
+truth for this change: implement it completely, with tests, so that `./<%sdlcDir%>/sdlc verify` shows no regression and every check of this feature
+passes. Nobody can answer questions while you work, so follow the steps and rules below and keep going until the work is done.
+
+## The specification (read-only)
+
+### {{specDir}}/prd.md
+
+{{prd}}
+
+### {{specDir}}/acceptance.json
+
+```json
+{{acceptance}}
+```
+
+A `cmd` check runs the command it names: the test it points at must exist and pass. An `http` check calls the **running** system with exactly that
+method, path and body and compares the answer with `expect`. Study each check and make the implementation satisfy it exactly.
+
+## How this repository works
+
+{{stack}}
+
+- Read `AGENTS.md` first, then the rules: {{rules}}
+- Repository context: {{context}}. `commands.md` lists the commands this repository defines (how to lint, test and build) and where each was found: use those. If `architecture.md` and
+  `.ai/rules/conventions.md` exist they describe how the code is organised; they may be agent-drafted, so when one disagrees with the code, trust the code and say so in your final message.
+- Playbooks you can follow: {{skills}}
+- Gates that must not regress: {{gates}}
+
+## This code base already exists
+
+- **Match what is here.** Before you write anything, read the code next to where your change goes: naming, layering, error handling, how its tests are
+  written and where they live. Copy that, not your own preferences.
+- **Smallest diff that satisfies the spec.** No renaming, reformatting, restructuring or dependency upgrades that the feature does not need.
+- Some gates may have been failing before you started (the baseline). `verify` shows them as known warnings. They are not yours to fix, but do not make them worse.
+
+## What to do, in this order
+
+1. **Read** `AGENTS.md`, the rules, and the existing code around the change.
+2. **List** every acceptance criterion (`AC-xxx`) and the check(s) that prove it.
+3. **Tests first**, in the repository's own test framework and folder: write the failing test for each behaviour (every unhappy path and boundary in the PRD),
+   watch it fail for the right reason, then implement.
+4. **Dependencies.** Add one only if nothing in the repository does the job: put it in the dependency manifest listed above, then run `./<%sdlcDir%>/sdlc sync`.
+5. **Configuration.** Document every new setting where the repository documents the existing ones. Never put real secrets anywhere.
+6. **Prove it.** Run `./<%sdlcDir%>/sdlc gates` until nothing regresses (use `--only <gate-id>` while iterating). After you finish, the loop runs the facts and sends you any failure to fix.
+
+## Hard rules
+
+- Do **not** edit the specification or anything protected: {{protected}}. A change there stops the run (integrity violation).
+- Never delete, skip or weaken a test, lint rule or threshold, and never silence a real problem with `noqa` / `eslint-disable` / `type: ignore`.
+  A one-line, explained suppression for a proven false alarm is fine.
+- Do **not** run `git commit`, `git push`, `git reset`, `git stash` or change git configuration: a human reviews your diff and commits.
+- No secrets, no debug leftovers, no commented-out code, no changes unrelated to this feature.
+- **If the specification is ambiguous, contradictory or impossible, do not guess.** Write your questions (one per line, with what you would
+  otherwise have assumed) to `{{questionsFile}}` and stop.
+
+## Final message
+
+For each acceptance criterion: the test(s) and check id(s) that prove it. Then anything you could not verify and why.

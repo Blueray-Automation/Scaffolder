@@ -1,0 +1,16 @@
+## AI operating system (`.ai/`)
+
+This repository is verified by a loop, not by assertion. **"Done" means `./<%sdlcDir%>/sdlc verify` shows no regression against the recorded baseline** and, for a feature, every acceptance criterion of its spec passes. The report is `.ai/evidence/latest/report.md`. If you could not run something, say so; never claim it passed.
+
+- Start with `.ai/README.md`, then `.ai/rules/` (how to work here) and `.ai/context/commands.md` (the commands this repository defines).
+- `.ai/context/architecture.md` and `.ai/rules/conventions.md` (drafted by `./<%sdlcDir%>/sdlc onboard`, then reviewed by a person) describe how this code base is organised and what its code does by convention. Read them when they exist; if one disagrees with the code, trust the code and say so.
+- A feature starts as a spec: `.ai/specs/FEAT-xxx-<slug>/` with `prd.md` and `acceptance.json`. Then `./<%sdlcDir%>/sdlc implement FEAT-xxx`.
+- Commands: `./<%sdlcDir%>/sdlc doctor | setup | baseline | gates | facts | verify | onboard | spec | implement | new` (Windows: `.\<%sdlcDir%>\sdlc.cmd`).
+- Match this repository's existing conventions first: read the code around your change and copy it. Smallest diff; no refactoring of unrelated code.
+- Never edit `.ai/sdlc.json`, `.ai/sdlc*`, `.ai/baseline.json`, `.ai/secrets.baseline.json` or `.github/workflows/`; while healing, never edit `.ai/specs/`. Never delete, skip or weaken a test, lint rule or threshold to get green. Never commit or push: a human reviews the diff.
+<%#hasExistingAgentFiles%>
+- Guidance that was already in this repository still applies; read it too:
+<%#existingAgentFiles%>
+  - `<%path%>`
+<%/existingAgentFiles%>
+<%/hasExistingAgentFiles%>

@@ -7,22 +7,22 @@ description: Implement a specified feature in small test-first vertical slices u
 
 ## Before you start
 - Read `AGENTS.md`, `.ai/rules/*`, and the feature's `prd.md` + `acceptance.json`.
-- Run `./scripts/sdlc gates` once: you need a green baseline so new failures are yours.
+- Run `./<%sdlcDir%>/sdlc gates` once: you need a green baseline so new failures are yours.
 
 ## Loop (repeat per acceptance criterion)
 1. **Red**: write the smallest failing test for one AC (unit, or an API test). Run it; confirm it fails for the right reason.
 2. **Green**: the simplest code that passes. Handlers thin; logic in services; data access in repositories.
 3. **Refactor**: remove duplication, improve names. Tests stay green.
-4. `./scripts/sdlc gates` (fast feedback), commit with a Conventional Commit message.
+4. `./<%sdlcDir%>/sdlc gates` (fast feedback), commit with a Conventional Commit message.
 
 ## Then
 5. Add or refine the `acceptance.json` checks for the AC you just finished.
 <%#hasBackend%>
 6. Update the contract snapshot if the API changed (define-contract skill).
-7. `./scripts/sdlc verify`. Red? Follow the fix-failing-gate skill. Green? Open the PR with the report summary.
+7. `./<%sdlcDir%>/sdlc verify`. Red? Follow the fix-failing-gate skill. Green? Open the PR with the report summary.
 <%/hasBackend%>
 <%^hasBackend%>
-6. `./scripts/sdlc verify`. Red? Follow the fix-failing-gate skill. Green? Open the PR with the report summary.
+6. `./<%sdlcDir%>/sdlc verify`. Red? Follow the fix-failing-gate skill. Green? Open the PR with the report summary.
 <%/hasBackend%>
 
 ## Conventions
@@ -36,4 +36,4 @@ description: Implement a specified feature in small test-first vertical slices u
 - No `TODO` without an issue reference; no dead code; no commented-out code.
 
 ## Done when
-`./scripts/sdlc verify` exits 0 and every AC of the feature is PASS in the report.
+`./<%sdlcDir%>/sdlc verify` exits 0 and every AC of the feature is PASS in the report.

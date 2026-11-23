@@ -1,0 +1,12 @@
+# Rule: work the way this repository already works
+
+This code base existed before this folder did. Its conventions beat your preferences and beat generic best practice.
+
+- **Read before you write.** Open the code around your change: naming, layering, error handling, logging, how its tests are written and where they live. Copy that.
+- **Smallest diff.** Do what the spec asks. No renaming, reformatting, restructuring or dependency upgrades that the feature does not need; they hide the real change from the reviewer.
+- **Use what exists.** Prefer the repository's own helpers, types, components and test utilities over new ones. Add a dependency only when nothing here does the job, and say why.
+- **Read the context first.** `.ai/context/architecture.md` (a map of the code) and `.ai/rules/conventions.md` (what its code does by convention) exist once `./<%sdlcDir%>/sdlc onboard` has run. They were drafted by an agent and checked against the repository, so their paths and commands are real; their descriptions may still be wrong. When one disagrees with the code, the code wins: say so.
+- **Commands come from the repository.** `.ai/context/commands.md` lists how to lint, test and build, and where each command was found. Do not invent others.
+- **Existing guidance still applies.** If `AGENTS.md`, `CLAUDE.md`, `.cursor/rules/` or similar existed before adoption, read them; where they disagree with a rule here, say so instead of choosing silently.
+- **Known red gates are not yours.** Some gates may have been failing on adoption day (the baseline). `verify` shows them as known warnings. Do not try to fix them as a side effect and do not make them worse.
+- **Unsure about a convention or a requirement?** Stop and ask. Do not guess.

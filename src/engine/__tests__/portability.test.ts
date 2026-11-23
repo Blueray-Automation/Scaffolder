@@ -106,7 +106,7 @@ describe("generated scripts/sdlc.py: rules that keep it portable (it cannot be r
     expect(source.split("shlex.quote(").length - 1).toBe(1);
     expect(source.split("shlex.split(").length - 1).toBe(1);
     expect(source).toContain("subprocess.list2cmdline");
-    expect(source).toContain('r".venv\\Scripts\\python.exe" if IS_WINDOWS else ".venv/bin/python"');
+    expect(source).toContain('rf"{name}\\Scripts\\python.exe" if IS_WINDOWS else f"{name}/bin/python"');
   });
 
   it("does not require `python3` on PATH (on Windows it is usually the Microsoft Store stub)", () => {
@@ -164,6 +164,9 @@ py_step = {"cwd": "backend", "cmd": '{python} -m venv --clear .venv && {venv_pyt
 cmd = m.setup_command(py_step, r"C:\\Program Files\\Python312\\python.exe")
 check("setup command: spaces quoted, venv path is the Windows one",
       cmd == '"C:\\\\Program Files\\\\Python312\\\\python.exe" -m venv --clear .venv && .venv\\\\Scripts\\\\python.exe -m pip install --quiet -e ".[dev]"', cmd)
+# an adopted project may keep its environment under another name (venv/, env/): {venv_python} follows the step's own folder
+adopted = {"cwd": "api", "venv": "venv", "cmd": "{venv_python} -m pip install --quiet -r requirements.txt"}
+check("setup command: an existing venv named venv/ gets the Windows interpreter path", m.setup_command(adopted, None) == "venv\\Scripts\\python.exe -m pip install --quiet -r requirements.txt", m.setup_command(adopted, None))
 web = {"cwd": "web", "cmd": "npm ci", "lockfile": "package-lock.json", "fallbackCmd": "npm install"}
 check("no lockfile: npm install", m.setup_command(web, None) == "npm install")
 (root / "web" / "package-lock.json").write_text("{}")

@@ -1,0 +1,40 @@
+# Task: make verification pass (iteration {{iteration}} of {{maxIterations}})
+
+You are healing a failing verification run in an existing repository. Work only on what the failures below show.
+
+Feature in focus: {{feature}}
+Full evidence report: {{report}}
+
+## Read first
+- `AGENTS.md` (how this repository works) and `.ai/skills/fix-failing-gate/SKILL.md` (the procedure to follow).
+- The relevant rules in `.ai/rules/`, and the repository context ({{context}}) for the commands this repository defines and how the code is organised. Where a context file disagrees with the code, trust the code.
+- The PRD and `acceptance.json` of the feature under `.ai/specs/`: they define "correct".
+
+## Failures (these are facts, not suggestions)
+{{failures}}
+
+## Already attempted in earlier iterations
+{{previousAttempts}}
+
+If a failure below is the same as one listed above, your previous fix did not work or fixed a symptom. Find the root cause instead of repeating it.
+
+## Files currently changed in the working tree
+```text
+{{changedFiles}}
+```
+
+## Procedure
+1. Reproduce: run the failing command yourself (shown above) and read the real output.
+2. Find the root cause. Say it in one sentence before you edit anything.
+3. Make the smallest change that fixes the cause, in the style of the surrounding code. If you add a dependency to a manifest, run `./<%sdlcDir%>/sdlc sync`.
+4. Re-run just the failing gate: `./<%sdlcDir%>/sdlc gates --only <gate-id>`; then the whole `./<%sdlcDir%>/sdlc verify`.
+
+Gates shown as "known" failed before this repository was adopted. Do not spend this iteration on them unless one of the failures above is the same gate.
+
+## Hard rules (the loop enforces some of these and stops with an integrity violation)
+- DO NOT edit `.ai/sdlc.json`, `.ai/sdlc*`, `.ai/baseline.json`, `.github/workflows/`, or anything under `.ai/specs/` (PRDs and acceptance checks). Healing fixes code, not the definition of correct.
+- DO NOT delete, skip (`xfail`, `.skip`, `-k` filters) or weaken tests, lower thresholds, add `# noqa` / `eslint-disable` / `type: ignore` to silence a real problem, or mock the thing under test.
+- If you believe the spec itself is wrong, STOP and say so in your final message instead of changing it.
+
+## Final message
+State: root cause, files changed, and which acceptance criteria (AC-xxx) your change affects.

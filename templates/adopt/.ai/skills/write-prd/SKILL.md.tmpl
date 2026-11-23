@@ -1,0 +1,15 @@
+---
+name: write-prd
+description: Write or refine a feature spec (prd.md and acceptance.json) for a change to this existing code base. Use before any code for a new feature or behaviour change.
+---
+
+# Write a PRD
+
+1. `./<%sdlcDir%>/sdlc new <slug>` creates `.ai/specs/FEAT-<nnn>-<slug>/` from the template (or `./<%sdlcDir%>/sdlc spec <document>` drafts it from a requirements document).
+2. Read `.ai/rules/prd.md` for the structure. Read the code the change touches first: the spec must describe the behaviour that exists today and what changes.
+3. Write the acceptance criteria: observable, one behaviour each, with unhappy paths and boundaries. Add every existing behaviour the change must not break under "Existing behaviour that must keep working".
+4. Write `acceptance.json` (skill: write-fact-checks). Every criterion needs a check; every check cites a criterion.
+5. Remove every `TODO(prd)` marker. `./<%sdlcDir%>/sdlc facts --feature FEAT-<nnn>` must report the traceability as PASS.
+6. A human reviews the spec (skill: review-spec) before `implement`.
+
+Do not invent requirements. Anything you had to assume goes in the last section as a line starting with `ASSUMPTION:`.

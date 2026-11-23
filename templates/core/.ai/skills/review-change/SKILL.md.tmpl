@@ -18,7 +18,7 @@ Run `git diff <%defaultBranch%>...HEAD` and answer each question with evidence.
 4. **Security** (`.ai/rules/security.md`): input validated at the boundary? Any secret, token, personal data in code/logs/tests? Auth checked server-side?
 5. **Operability**: new env vars in `.env.example` and compose? Health/readiness still honest? Logs useful and free of personal data?
 6. **Hygiene**: no dead code, debug prints, commented-out code, unrelated edits; Conventional Commit messages.
-7. **Machinery untouched**: `git diff --stat` shows no change to `.ai/sdlc.json`, `scripts/sdlc*`, `.github/workflows/` unless a human asked for it.
-8. **Proof**: `./scripts/sdlc verify` exits 0 on the final commit.
+7. **Machinery untouched**: `git diff --stat` shows no change to `.ai/sdlc.json`, `<%sdlcDir%>/sdlc*`, `.github/workflows/` unless a human asked for it.
+8. **Proof**: `./<%sdlcDir%>/sdlc verify` exits 0 on the final commit.
 
 Write the PR description: feature id, what/why, report summary,<%#hasBackend%> contract changes,<%/hasBackend%> risks, rollout notes.
