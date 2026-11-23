@@ -2115,7 +2115,7 @@ PATH_EXTENSIONS = {
     "sh", "cfg", "ini", "txt", "lock", "sql", "html", "css", "scss", "xml", "gradle", "mk", "env", "tf", "vue", "svelte",
 }
 # Generated or installed locations: a draft may mention them without them being in the repository.
-GENERATED_TOP = {"node_modules", "dist", "build", ".venv", "venv", "__pycache__", ".next", ".nuxt", "coverage", "target", ".git", ".tox", ".cache", ".mypy_cache"}
+GENERATED_TOP = {"node_modules", "dist", "build", ".venv", "venv", "__pycache__", ".next", ".nuxt", ".output", "coverage", "target", ".git", ".tox", ".cache", ".mypy_cache"}
 GUIDANCE_FILES = ("AGENTS.md", "CLAUDE.md", "GEMINI.md", "CONVENTIONS.md", ".cursorrules", ".windsurfrules", ".github/copilot-instructions.md")
 TREE_SKIP = GENERATED_TOP | {".pytest_cache", ".ruff_cache", ".turbo", ".idea", ".gradle", ".terraform"}
 CODE_FENCE = re.compile(r"^(```|~~~).*?^\1[^\n]*$", re.M | re.S)
@@ -3037,7 +3037,7 @@ SECRET_PATTERNS = [
     ("Anthropic/OpenAI style API key", re.compile(r"\b(?:sk-ant-|sk-)[A-Za-z0-9_-]{24,}")),
     ("hard-coded credential", re.compile(r"""(?i)\b(?:api[_-]?key|secret|token|passwd|password)\b['"]?\s*[:=]\s*['"](?![$<{%])[^'"\s]{12,}['"]""")),
 ]
-SECRET_SKIP_DIRS = {".git", "node_modules", ".venv", ".next", "__pycache__", ".ai/evidence"}
+SECRET_SKIP_DIRS = {".git", "node_modules", ".venv", ".next", ".nuxt", ".output", "__pycache__", ".ai/evidence"}
 SECRET_SKIP_FILES = {".env.example", "package-lock.json", "docker-compose.yml"}
 # Fake credentials are normal in tests and specs, so the generic keyword heuristic skips them.
 # High-confidence formats (cloud keys, tokens, private keys) are still caught everywhere.

@@ -1,0 +1,37 @@
+<%#hasBackend%>
+<script setup lang="ts">
+/** Presentational: every state the page can be in is explicit (success, error). */
+defineProps<{
+  state: "success" | "error";
+  message?: string;
+  detail?: string;
+}>();
+</script>
+
+<template>
+  <section v-if="state === 'error'" class="card card-error" role="alert">
+    <p class="eyebrow"><%title%></p>
+    <h1>Backend unavailable</h1>
+    <p class="muted">{{ detail }}</p>
+  </section>
+  <section v-else class="card">
+    <p class="eyebrow"><%title%></p>
+    <h1>{{ message }}</h1>
+    <p class="muted">Rendered by Nuxt from the API at /api/v1/hello.</p>
+  </section>
+</template>
+<%/hasBackend%>
+<%^hasBackend%>
+<script setup lang="ts">
+/** Presentational: the text in, the markup out. */
+defineProps<{ message: string }>();
+</script>
+
+<template>
+  <section class="card">
+    <p class="eyebrow"><%title%></p>
+    <h1>{{ message }}</h1>
+    <p class="muted">Rendered by Nuxt. Add ?name=Ada to the address to be greeted by name.</p>
+  </section>
+</template>
+<%/hasBackend%>

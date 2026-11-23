@@ -26,6 +26,15 @@ const MATRIX: Record<string, Json> = {
     cd: { enabled: false },
     sdlc: { runtime: "local" },
   },
+  "full stack with Nuxt": { web: { framework: "nuxt" } },
+  "web only (Nuxt, no API)": { web: { framework: "nuxt" }, backend: { enabled: false }, database: { type: "none" } },
+  "Nuxt, node 24, custom directories and ports, no docker": {
+    web: { framework: "nuxt", nodeVersion: "24", port: 9300 },
+    layout: { backendDir: "services/api", webDir: "apps/web" },
+    docker: { enabled: false },
+    cd: { enabled: false },
+    sdlc: { runtime: "local" },
+  },
   "custom directories": { layout: { backendDir: "services/api", webDir: "apps/web" } },
   "python 3.11, node 24, custom ports": {
     backend: { version: "3.11", port: 9100 },
@@ -241,6 +250,136 @@ describe("generated project: web only (Next.js, no API)", () => {
     const loop = JSON.parse(full.get(".ai/sdlc.json")!.content) as Json;
     expect(loop.runtime.local.provides).toEqual(["backend", "web"]);
     expect(loop.integrity.guarded).toEqual([".ai/contract/"]);
+  });
+});
+
+describe("generated project: Nuxt", () => {
+  const full = generate({ web: { framework: "nuxt" } });
+  const only = generate({ web: { framework: "nuxt" }, backend: { enabled: false }, database: { type: "none" } });
+  const textOf = (files: GeneratedFile[]) => (path: string) => byPath(files).get(path)!.content;
+  const fullText = textOf(full.files);
+  const onlyText = textOf(only.files);
+  const sdlcOf = (files: GeneratedFile[]) => JSON.parse(textOf(files)(".ai/sdlc.json")) as Json;
+
+  it("generates the Nuxt app, and nothing of Next.js", () => {
+    const paths = full.files.map((f) => f.path);
+    for (const path of ["web/nuxt.config.ts", "web/app/app.vue", "web/app/pages/index.vue", "web/app/components/HelloCard.vue", "web/vitest.config.ts", "web/Dockerfile"]) {
+      expect(paths, path).toContain(path);
+    }
+    expect(paths.filter((p) => p.startsWith("web/src/") || p === "web/next.config.mjs" || p === "web/vitest.config.mts")).toEqual([]);
+    expect(paths).toContain(".ai/rules/web-nuxt.md");
+    expect(paths).not.toContain(".ai/rules/web-nextjs.md");
+    expect(fullText("web/package.json")).not.toMatch(/"next"|eslint-config-next|"react"/);
+  });
+
+  it("nothing outside the Next.js pack talks about Next.js", () => {
+    for (const f of [...full.files, ...only.files]) {
+      expect(f.content, f.path).not.toMatch(/Next\.js|next build|NEXT_TELEMETRY|web-nextjs/);
+    }
+  });
+
+  it("with an API the page asks its own route, which calls the backend through the typed client", () => {
+    const paths = full.files.map((f) => f.path);
+    for (const path of ["web/server/utils/api.ts", "web/server/api/hello.get.ts", "web/server/__tests__/api.test.ts", "web/server/__tests__/hello.get.test.ts"]) {
+      expect(paths, path).toContain(path);
+    }
+    expect(paths).not.toContain("web/app/utils/greeting.ts");
+    expect(fullText("web/app/pages/index.vue")).toContain('useFetch("/api/hello"');
+    expect(fullText("web/app/pages/index.vue")).not.toMatch(/API_URL|fetchHello/);
+    expect(fullText("web/server/api/hello.get.ts")).toContain("fetchHello()");
+    expect(fullText("web/server/utils/api.ts")).toContain("process.env.API_URL");
+    expect(fullText("web/server/utils/api.ts")).toContain("http://localhost:8000");
+  });
+
+  it("the backend address is a runtime variable: never in the build configuration or the image's build stage", () => {
+    expect(fullText("web/nuxt.config.ts")).not.toMatch(/API_URL|runtimeConfig/);
+    const dockerfile = fullText("web/Dockerfile");
+    expect(dockerfile).not.toMatch(/ENV[^\n]*API_URL|ARG[^\n]*API_URL/);
+    expect(dockerfile).toContain("API_URL is read at request time");
+  });
+
+  it("on its own the page renders its own greeting, with no API client or route", () => {
+    const paths = only.files.map((f) => f.path);
+    expect(paths.filter((p) => p.startsWith("backend/") || p.startsWith("web/server/"))).toEqual([]);
+    expect(paths).toContain("web/app/utils/greeting.ts");
+    expect(paths).toContain("web/app/__tests__/greeting.test.ts");
+    expect(onlyText("web/app/pages/index.vue")).toContain("greeting(");
+    expect(onlyText("web/app/pages/index.vue")).not.toMatch(/useFetch|API_URL/);
+    expect(onlyText("web/Dockerfile")).not.toContain("API_URL");
+    expect(onlyText(".ai/rules/web-nuxt.md")).not.toContain("API_URL");
+    expect(onlyText(".ai/prompts/spec.md")).toContain("`.ai/rules/web-nuxt.md`");
+    expect(onlyText(".ai/skills/implement-feature/SKILL.md")).toContain("`.ai/rules/web-nuxt.md`");
+    expect(only.files.filter((f) => f.path.startsWith("web/")).map((f) => f.path).sort()).toEqual(
+      [
+        "web/.dockerignore", "web/Dockerfile", "web/app/__tests__/HelloCard.test.ts", "web/app/__tests__/greeting.test.ts", "web/app/__tests__/index.test.ts",
+        "web/app/app.vue", "web/app/assets/css/main.css", "web/app/components/HelloCard.vue", "web/app/pages/index.vue", "web/app/utils/greeting.ts",
+        "web/eslint.config.mjs", "web/nuxt.config.ts", "web/package.json", "web/public/robots.txt", "web/tsconfig.json", "web/vitest.config.ts",
+      ].sort(),
+    );
+  });
+
+  it("the gates say what they run, and the production build runs without telemetry", () => {
+    const gates = sdlcOf(full.files).gates as Json[];
+    const gate = (id: string) => gates.find((g) => g.id === id)!;
+    expect(gate("web.types").label).toBe("Web type check (vue-tsc)");
+    expect(gate("web.build").label).toBe("Web production build (nuxt build)");
+    expect(gate("web.build").env).toEqual({ NUXT_TELEMETRY_DISABLED: "1" });
+    for (const id of ["web.lint", "web.types", "web.unit", "web.build"]) expect(gate(id).cwd, id).toBe("web");
+    const scripts = JSON.parse(fullText("web/package.json")).scripts as Record<string, string>;
+    expect(gate("web.lint").cmd).toBe("npm run lint");
+    expect(scripts.lint).toContain("eslint --max-warnings 0");
+    expect(scripts["test:coverage"]).toContain("--coverage");
+  });
+
+  it("the loop starts the built server on the configured port, on loopback, with the backend's address", () => {
+    const patched = generate({ web: { framework: "nuxt", port: 9300 } });
+    const service = (sdlcOf(patched.files).runtime.local.services as Json[]).find((s) => s.name === "web")!;
+    expect(service.cmd).toBe("npm run start");
+    expect(service.env).toEqual({ API_URL: "http://127.0.0.1:8000", NUXT_TELEMETRY_DISABLED: "1", NITRO_PORT: "9300", NITRO_HOST: "127.0.0.1" });
+    expect(service.healthUrl).toBe("http://127.0.0.1:9300/");
+    expect(JSON.parse(textOf(patched.files)("web/package.json")).scripts.start).toBe("node .output/server/index.mjs");
+    expect(textOf(patched.files)("web/package.json")).toContain('"dev": "nuxt dev --port 9300"');
+  });
+
+  it("the image serves the build output on port 3000 as a non-root user, whatever host port is configured", () => {
+    const dockerfile = fullText("web/Dockerfile");
+    expect(dockerfile).toContain("NITRO_PORT=3000");
+    expect(dockerfile).toContain("NITRO_HOST=0.0.0.0");
+    expect(dockerfile).toContain("USER app");
+    expect(dockerfile).toContain('CMD ["node", "server/index.mjs"]');
+    expect(dockerfile).toMatch(/FROM node:22-alpine AS runtime/);
+    const compose = parse(fullText("docker-compose.yml")) as Json;
+    expect(compose.services.web.ports).toEqual(["${WEB_PORT:-3000}:3000"]);
+    expect(generate({ web: { framework: "nuxt", nodeVersion: "24" } }).files.find((f) => f.path === "web/Dockerfile")!.content).toContain("FROM node:24-alpine AS runtime");
+  });
+
+  it("the build folders are ignored by git and skipped by the secret scan", () => {
+    expect(fullText(".gitignore")).toMatch(/^\.nuxt\/$/m);
+    expect(fullText(".gitignore")).toMatch(/^\.output\/$/m);
+    expect(fullText("scripts/sdlc.py")).toMatch(/SECRET_SKIP_DIRS = \{[^}]*"\.output"/);
+    expect(fullText("web/.dockerignore")).toMatch(/^\.output$/m);
+  });
+
+  it("the documentation describes the app as Nuxt", () => {
+    expect(fullText("README.md")).toContain("Nuxt 4 (Vue 3, TypeScript) page that renders the greeting fetched from the API at request time; Vitest + ESLint + `vue-tsc` preconfigured.");
+    expect(onlyText("README.md")).toContain("Nuxt 4 (Vue 3, TypeScript) page that greets the visitor");
+    expect(fullText("AGENTS.md")).toContain("Nuxt app (Node 22, TypeScript)");
+    expect(onlyText(".ai/specs/FEAT-000-hello-world/prd.md")).toContain("the Nuxt app renders the page itself");
+  });
+
+  it("the Next.js project is unchanged by Nuxt being available", () => {
+    const next = generate({});
+    expect(next.config.web.framework).toBe("nextjs");
+    const text = textOf(next.files);
+    expect(text(".ai/rules/web-nextjs.md")).toContain("Next.js App Router");
+    expect(text("README.md")).toContain("Next.js (App Router, TypeScript) page that renders the greeting");
+    expect((sdlcOf(next.files).gates as Json[]).find((g) => g.id === "web.build")).toMatchObject({
+      label: "Web production build (next build)",
+      env: { NEXT_TELEMETRY_DISABLED: "1" },
+    });
+    const service = (sdlcOf(next.files).runtime.local.services as Json[]).find((s) => s.name === "web")!;
+    expect(service.cmd).toBe("npm run start -- --port 3000 --hostname 127.0.0.1");
+    expect(service.env).toEqual({ API_URL: "http://127.0.0.1:8000", NEXT_TELEMETRY_DISABLED: "1" });
   });
 });
 

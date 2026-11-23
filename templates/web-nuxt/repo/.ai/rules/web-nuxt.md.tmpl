@@ -1,0 +1,49 @@
+# Rule: web (Nuxt 4, Vue 3 `<script setup>`, TypeScript), in `<%webDir%>/`
+
+## Layout
+```
+app/pages/          routes (one file per route), rendered on the server for each request
+app/components/     presentational components: props in, markup out, no data fetching
+app/utils/          pure helpers, auto-imported
+app/assets/css/     global styles
+app/__tests__/      Vitest specs for everything under app/
+<%#hasBackend%>
+server/api/         HTTP routes the page asks (`hello.get.ts` is `GET /api/hello`)
+server/utils/       typed API client (mirrors .ai/contract/openapi.json), auto-imported by server code
+<%/hasBackend%>
+<%^hasBackend%>
+server/             HTTP routes (`server/api/<name>.get.ts`) and server-only helpers (`server/utils/`), when the app needs them
+<%/hasBackend%>
+server/__tests__/   Vitest specs for everything under server/
+```
+
+## Conventions
+- TypeScript `strict` (+ `noUncheckedIndexedAccess`), `<script setup lang="ts">` everywhere. No `any`; narrow `unknown` with type guards at the boundary.
+<%#hasBackend%>
+- All backend access goes through `server/utils/api.ts`, called only from `server/api/*` routes. Pages and components never call the backend, and never `fetch` it: they use `useFetch("/api/...")`. Responses are validated against the contract shape before use.
+- `API_URL` is a RUNTIME variable (read on the server for each request). Never bake environment-specific URLs into the build (not in `nuxt.config.ts`, not in `runtimeConfig` defaults): one image runs in every environment.
+<%/hasBackend%>
+<%^hasBackend%>
+- This app has no separate backend. Server-side work lives in `server/api/<name>.get.ts` routes and calls plain functions from `server/utils/`. Pages and components never call `fetch` directly: they use `useFetch("/api/...")`.
+- Treat everything that comes in (query strings, request bodies, cookies) as `unknown` and validate it at the boundary before use.
+- Configuration is read from environment variables at request time, never baked into the build: one image runs in every environment.
+<%/hasBackend%>
+- Every data-driven view models all its states explicitly: loading, empty, error, success. Errors are shown with `role="alert"`, never swallowed.
+- Keep pages thin: a page fetches and decides which component to show; components only render. Put logic in `app/utils/` as plain functions.
+- Accessibility: semantic elements, labelled controls, visible focus, sufficient contrast. Don't convey state by colour alone.
+- Lint with `eslint --max-warnings 0` (`@nuxt/eslint`, flat config in `eslint.config.mjs`); fix the code instead of adding `eslint-disable`.
+- `.nuxt/` and `.output/` are generated: never edit or commit them. `npm run lint` and `npm run type-check` regenerate `.nuxt/` first.
+
+## Tests (Vitest in a Nuxt environment, coverage floor <%coverageWeb%>%)
+- Test behaviour through the rendered output (`mountSuspended`, then `get("h1")` / `[role=alert]`), not implementation details.
+<%#hasBackend%>
+- The page asks `/api/hello`: replace that route with `registerEndpoint("/api/hello", ...)` and call `clearNuxtData()` between specs. Cover the success and the error state.
+- Server code is plain TypeScript: import it with a relative path and pass a fake `fetch` into the client. Cover each state of each component and each error path of `server/utils/api.ts`.
+
+## Contract
+When the backend contract changes, update `server/utils/api.ts` types and tests in the same PR.
+<%/hasBackend%>
+<%^hasBackend%>
+- Pass the address to a page with `mountSuspended(Page, { route: "/?name=Ada" })`.
+- Test pure logic in `app/utils/` directly, without rendering. Cover each state of each component and each rejected input.
+<%/hasBackend%>

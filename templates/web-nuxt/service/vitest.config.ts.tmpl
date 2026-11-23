@@ -1,0 +1,21 @@
+import { defineVitestConfig } from "@nuxt/test-utils/config";
+
+export default defineVitestConfig({
+  test: {
+    // Specs run inside a Nuxt app (auto-imports, composables and `useFetch` all work), in happy-dom.
+    environment: "nuxt",
+    include: ["app/**/*.test.ts", "server/**/*.test.ts"],
+    coverage: {
+      provider: "v8",
+      include: ["app/**/*.{ts,vue}", "server/**/*.ts"],
+      exclude: ["**/*.test.ts", "app/app.vue"],
+      // Enforced, not advisory (see .ai/rules/testing.md). Never lower these to get green.
+      thresholds: {
+        statements: <%coverageWeb%>,
+        branches: <%coverageWeb%>,
+        functions: <%coverageWeb%>,
+        lines: <%coverageWeb%>,
+      },
+    },
+  },
+});

@@ -1,0 +1,60 @@
+<%#hasBackend%>
+import { mountSuspended, registerEndpoint } from "@nuxt/test-utils/runtime";
+import { beforeEach, describe, expect, it } from "vitest";
+import HomePage from "~/pages/index.vue";
+
+// The page asks its own server route; here that route is replaced, so no backend is needed.
+const hello = (reply: () => unknown) => registerEndpoint("/api/hello", reply);
+
+beforeEach(() => {
+  clearNuxtData();
+});
+
+describe("HomePage", () => {
+  it("renders the greeting fetched from the backend", async () => {
+    hello(() => ({ message: "Hello, World!" }));
+
+    const page = await mountSuspended(HomePage);
+
+    expect(page.get("h1").text()).toBe("Hello, World!");
+  });
+
+  it("renders the error state instead of crashing when the backend is down", async () => {
+    hello(() => {
+      throw createError({ statusCode: 502, statusMessage: "Backend responded with 503" });
+    });
+
+    const page = await mountSuspended(HomePage);
+
+    expect(page.get("[role=alert]").text()).toContain("Backend responded with 503");
+  });
+});
+<%/hasBackend%>
+<%^hasBackend%>
+import { mountSuspended } from "@nuxt/test-utils/runtime";
+import { describe, expect, it } from "vitest";
+import HomePage from "~/pages/index.vue";
+
+async function heading(address: string) {
+  const page = await mountSuspended(HomePage, { route: address });
+  return page.get("h1").text();
+}
+
+describe("HomePage", () => {
+  it("greets the world when the address has no name", async () => {
+    expect(await heading("/")).toBe("Hello, World!");
+  });
+
+  it("greets the name in the address", async () => {
+    expect(await heading("/?name=Ada")).toBe("Hello, Ada!");
+  });
+
+  it("uses the first name when the address repeats the parameter", async () => {
+    expect(await heading("/?name=Ada&name=Grace")).toBe("Hello, Ada!");
+  });
+
+  it("ignores a name that is too long", async () => {
+    expect(await heading(`/?name=${"a".repeat(51)}`)).toBe("Hello, World!");
+  });
+});
+<%/hasBackend%>

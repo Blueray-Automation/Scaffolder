@@ -1,0 +1,27 @@
+<%#hasBackend%>
+<script setup lang="ts">
+// Rendered on the server for every request: the greeting comes from the live backend (through
+// server/api/hello.get.ts and the typed client in server/utils/api.ts), never from build time.
+const { data, error } = await useFetch("/api/hello", { key: "hello" });
+</script>
+
+<template>
+  <HelloCard v-if="data" state="success" :message="data.message" />
+  <HelloCard v-else state="error" :detail="error?.statusMessage ?? 'Unknown error'" />
+</template>
+<%/hasBackend%>
+<%^hasBackend%>
+<script setup lang="ts">
+// Rendered on the server for every request: the greeting depends on the ?name= in the address.
+const route = useRoute();
+
+const message = computed(() => {
+  const name = route.query.name;
+  return greeting(Array.isArray(name) ? name[0] : name);
+});
+</script>
+
+<template>
+  <HelloCard :message="message" />
+</template>
+<%/hasBackend%>

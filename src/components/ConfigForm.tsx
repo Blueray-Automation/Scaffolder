@@ -20,9 +20,9 @@ const TRIGGERS: Array<{ id: DeployTrigger; label: string }> = [
 
 const GATE_LABELS: Array<[keyof ScaffolderConfig["sdlc"]["gates"], string, string]> = [
   ["lint", "Lint & format", "ruff, eslint"],
-  ["types", "Type check", "mypy, tsc"],
+  ["types", "Type check", "mypy, tsc, vue-tsc"],
   ["unit", "Unit tests + coverage floor", "pytest, vitest"],
-  ["build", "Production build", "next build, compose validation"],
+  ["build", "Production build", "next build or nuxt build, compose validation"],
   ["contract", "API contract drift", "OpenAPI snapshot"],
   ["facts", "Facts: PRD vs running system", "acceptance.json"],
   ["security", "Security scans", "secrets, pip-audit, npm audit"],

@@ -152,7 +152,7 @@ One-time setup for publishing: enable *Wikis* in the repository settings and cre
 
 | Area | Contents |
 |---|---|
-| **Hello world** | FastAPI service (`/health`, `/ready`, `/api/v1/hello`), Next.js page that renders the greeting from the API at request time, typed settings, strict mypy/ruff/eslint, pytest and Vitest with enforced coverage floors |
+| **Hello world** | FastAPI service (`/health`, `/ready`, `/api/v1/hello`), Next.js page (or Nuxt 4, with `--set web.framework=nuxt`) that renders the greeting from the API at request time, typed settings, strict mypy/ruff/eslint, pytest and Vitest with enforced coverage floors |
 | **AI operating system** (`.ai/`) | `rules/` (conventions), `skills/` (agent-neutral playbooks: write-prd, define-contract, implement-feature, write-tests, verify-loop, fix-failing-gate, review-change, release-and-deploy, write-fact-checks), `prompts/` (prd / implement / heal), `specs/` (FEAT-000 worked example + template), `contract/` (OpenAPI snapshot) |
 | **Verification loop** (`scripts/sdlc`) | stdlib-only Python: `implement` (spec to verified code via an agent), `sync` (dependencies), gates, **facts** (PRD acceptance criteria vs the *running* system), evidence reports, healing loop with budget, no-progress detection and an integrity guard that stops agents from editing the gates or specs |
 | **CI/CD** | `ci.yml` (per-component jobs + facts job, evidence artifact), `cd.yml` (CI gate → build images **once** → GHCR → staged environments → post-deploy facts), pluggable deploy targets, PR template, Dependabot |
@@ -198,8 +198,9 @@ scripts/e2e-generated.ts       proof that generated projects work (below)
 ```
 
 **Add a stack:** create `templates/<pack>/{service,repo}/`, add a `Pack` entry in `src/engine/generate.ts`, contribute its
-gates in `gates.ts`, and flip `available: true` in `capabilities.ts`. The test matrix and `npm run e2e` then hold it to the
-same standard.
+gates in `gates.ts`, and flip `available: true` in `capabilities.ts`. A web framework also gets an entry in
+`src/engine/webStacks.ts` (gate labels, build environment, how the facts stage starts it). The test matrix and `npm run e2e`
+then hold it to the same standard.
 
 ## Verification of Scaffolder itself
 
@@ -208,9 +209,9 @@ npm run lint && npm run type-check && npm test && npm run build
 npm run e2e       # slow, needs network, python3 >= 3.12 and node >= 22 on PATH
 ```
 
-- `npm test`: matrix of 12 configurations, each checked for unresolved template tags, valid JSON/YAML, valid shell/Python
+- `npm test`: matrix of 16 configurations, each checked for unresolved template tags, valid JSON/YAML, valid shell/Python
   syntax, CI-equals-local gate commands, PRD traceability, compose/CD/deploy consistency; plus validation and renderer tests.
-- `npm run e2e`: generates real projects (default, backend-only without a database, custom directories), installs them,
+- `npm run e2e`: generates real projects (default, backend-only without a database, custom directories, Nuxt in place of Next.js), installs them,
   runs every gate, runs the facts against real processes and, when a Docker daemon is running, against the docker compose stack built from the generated Dockerfiles,
   then exercises the loop: heals a regression via a scripted agent, hands over to a human, stops on no progress, stops when
   an agent tampers with the spec or gate config, rejects a criterion without a check, catches a committed secret.
@@ -219,7 +220,7 @@ npm run e2e       # slow, needs network, python3 >= 3.12 and node >= 22 on PATH
 ## Limits (as of this version)
 
 - Windows support was written without a Windows machine: its platform-specific logic is unit-tested by simulation, and `npm run smoke` on `windows-latest` in CI is the real check. The full `npm run e2e` (bash-based fake tools, Docker) is for macOS and Linux. Deploying from a Windows machine needs Git for Windows' bash or WSL (the generated `cd.yml` deploys from Linux).
-- One full vertical slice: **FastAPI + Next.js (App Router) + PostgreSQL + GitHub Actions + GHCR**. Other stacks are planned.
+- One full vertical slice: **FastAPI + Next.js (App Router) + PostgreSQL + GitHub Actions + GHCR**, with **Nuxt 4** (Vue 3) available as the web framework in place of Next.js. Other stacks are planned.
 - Adopting an existing repository: detection covers Node and Python projects and Makefiles (anything else goes in `gates.add`). It is tested on in-memory repositories and the generated runner is driven in throwaway git repositories (baseline, ratchet, secrets, `implement`, integrity), and `onboard` was run for real with the `claude` agent on scratch clones of this repository (its drafts passed the checks, and a planted false claim in `CLAUDE.md` was reported as a conflict). Not tested: a third-party repository, the other agent CLIs, or Windows. Creating a Python virtual environment and installing with pnpm, yarn, bun, Poetry or uv are generated and unit-tested, never executed. The baseline is per gate (no coverage or test-count ratchet yet) and there is no web UI for it yet.
 - `spec` drafts are only as good as the document and the AI that reads it: the tool validates their form, a human must review their meaning. Scanned PDFs have no text to read.
 - Agent presets: the whole pipeline around the agent (document reading included) is tested with a scripted agent. The `claude`, `codex`, `gemini`, `copilot` and `cursor` presets follow each tool's documented

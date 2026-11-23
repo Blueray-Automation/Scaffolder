@@ -1,0 +1,28 @@
+import { mountSuspended } from "@nuxt/test-utils/runtime";
+import { describe, expect, it } from "vitest";
+import HelloCard from "~/components/HelloCard.vue";
+
+describe("HelloCard", () => {
+<%#hasBackend%>
+  it("shows the greeting in the success state", async () => {
+    const card = await mountSuspended(HelloCard, { props: { state: "success", message: "Hello, World!" } });
+
+    expect(card.get("h1").text()).toBe("Hello, World!");
+    expect(card.find("[role=alert]").exists()).toBe(false);
+  });
+
+  it("announces the failure in the error state", async () => {
+    const card = await mountSuspended(HelloCard, { props: { state: "error", detail: "Backend responded with 503" } });
+
+    expect(card.get("[role=alert]").text()).toContain("Backend unavailable");
+    expect(card.get("[role=alert]").text()).toContain("Backend responded with 503");
+  });
+<%/hasBackend%>
+<%^hasBackend%>
+  it("shows the message as the page heading", async () => {
+    const card = await mountSuspended(HelloCard, { props: { message: "Hello, World!" } });
+
+    expect(card.get("h1").text()).toBe("Hello, World!");
+  });
+<%/hasBackend%>
+});

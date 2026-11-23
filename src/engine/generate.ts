@@ -39,9 +39,23 @@ const root = () => "";
 
 /** Files that only make sense next to a backend API (paths inside the pack, without .tmpl). */
 const CONTRACT_FILES = [".ai/rules/contract.md", ".ai/skills/define-contract/SKILL.md"];
-const API_CLIENT_FILES = ["src/lib/api.ts", "src/__tests__/api.test.ts"];
+const NEXTJS_API_CLIENT_FILES = ["src/lib/api.ts", "src/__tests__/api.test.ts"];
 /** The web app's own greeting logic, used instead of the API client when there is no backend. */
-const STANDALONE_WEB_FILES = ["src/lib/greeting.ts", "src/__tests__/greeting.test.ts"];
+const NEXTJS_STANDALONE_FILES = ["src/lib/greeting.ts", "src/__tests__/greeting.test.ts"];
+const NUXT_API_CLIENT_FILES = ["server/utils/api.ts", "server/api/hello.get.ts", "server/__tests__/api.test.ts", "server/__tests__/hello.get.test.ts"];
+const NUXT_STANDALONE_FILES = ["app/utils/greeting.ts", "app/__tests__/greeting.test.ts"];
+
+/** The include filter every web pack shares: no Docker files without Docker, and an API client only next to a backend. */
+function webInclude(apiClientFiles: string[], standaloneFiles: string[]): Pack["include"] {
+  return (rel, c) => {
+    const base = rel.split("/").pop() ?? rel;
+    if (!c.docker.enabled && (base === "Dockerfile" || base === ".dockerignore")) return false;
+    // With a backend the page shows what the API says (a typed client); on its own it has nothing to call.
+    if (c.backend.enabled && standaloneFiles.includes(rel)) return false;
+    if (!c.backend.enabled && apiClientFiles.includes(rel)) return false;
+    return true;
+  };
+}
 
 /**
  * Stack packs. A new language/framework is a new entry here plus a template
@@ -80,14 +94,17 @@ const PACKS: Pack[] = [
       { from: "service/", to: (c) => c.layout.webDir },
       { from: "repo/", to: root },
     ],
-    include: (rel, c) => {
-      const base = rel.split("/").pop() ?? rel;
-      if (!c.docker.enabled && (base === "Dockerfile" || base === ".dockerignore")) return false;
-      // With a backend the page shows what the API says (a typed client); on its own it has nothing to call.
-      if (c.backend.enabled && STANDALONE_WEB_FILES.includes(rel)) return false;
-      if (!c.backend.enabled && API_CLIENT_FILES.includes(rel)) return false;
-      return true;
-    },
+    include: webInclude(NEXTJS_API_CLIENT_FILES, NEXTJS_STANDALONE_FILES),
+  },
+  {
+    id: "web-nuxt",
+    dir: "web-nuxt",
+    enabled: (c) => c.web.enabled && c.web.framework === "nuxt",
+    mounts: [
+      { from: "service/", to: (c) => c.layout.webDir },
+      { from: "repo/", to: root },
+    ],
+    include: webInclude(NUXT_API_CLIENT_FILES, NUXT_STANDALONE_FILES),
   },
   {
     id: "github",

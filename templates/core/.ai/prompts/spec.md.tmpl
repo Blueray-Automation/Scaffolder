@@ -25,7 +25,7 @@ Follow `.ai/rules/prd.md` and the playbook `.ai/skills/write-prd/SKILL.md`. `.ai
   - Include the unhappy paths the document implies: validation errors, not found, unauthorized, boundaries (0, 1, max, max+1), empty states.
   - Quote numbers, limits, status codes and wording **exactly as the document states them**.
   - **Never invent requirements.** If a criterion cannot be made testable without filling a gap, use the repository's conventions
-    (<%#hasBackend%>`.ai/rules/contract.md`<%/hasBackend%><%^hasBackend%>`.ai/rules/web-nextjs.md`<%/hasBackend%>) and record the gap in the last section as a line starting with `ASSUMPTION:`.
+    (<%#hasBackend%>`.ai/rules/contract.md`<%/hasBackend%><%^hasBackend%>`<%webRuleFile%>`<%/hasBackend%>) and record the gap in the last section as a line starting with `ASSUMPTION:`.
   - Requirements that cannot be verified through HTTP, commands or files (visual design, performance targets, process, policy) do **not** become
     criteria: list them under "Out of scope / not machine-verifiable" with their source.
 - Finish with a section **Assumptions & open questions**: every assumption, ambiguity or question for the document's author, one per line. Nothing is silently decided.

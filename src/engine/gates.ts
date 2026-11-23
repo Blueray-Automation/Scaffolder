@@ -1,4 +1,5 @@
 import type { ScaffolderConfig } from "./config";
+import { webStack } from "./webStacks";
 
 /**
  * Gates are the unit of verification. They are defined ONCE here and emitted
@@ -177,7 +178,7 @@ export function buildGates(cfg: ScaffolderConfig): Gate[] {
     if (g.types) {
       gates.push({
         id: "web.types",
-        label: "Web type check (tsc)",
+        label: webStack(cfg).labels.types,
         stage: "static",
         component: "web",
         cwd: webDir,
@@ -201,14 +202,14 @@ export function buildGates(cfg: ScaffolderConfig): Gate[] {
     if (g.build) {
       gates.push({
         id: "web.build",
-        label: "Web production build (next build)",
+        label: webStack(cfg).labels.build,
         stage: "build",
         component: "web",
         cwd: webDir,
         cmd: "npm run build",
         required: true,
         timeoutSeconds: 900,
-        env: { NEXT_TELEMETRY_DISABLED: "1" },
+        env: webStack(cfg).env,
       });
     }
     if (g.security) {

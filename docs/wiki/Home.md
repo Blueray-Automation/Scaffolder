@@ -28,7 +28,7 @@ then lets an AI agent (or you) heal failures until everything is green.
 
 | Area | Contents |
 |---|---|
-| Hello world | FastAPI service (`/health`, `/ready`, `/api/v1/hello`) and a Next.js page that shows the greeting from the API |
+| Hello world | FastAPI service (`/health`, `/ready`, `/api/v1/hello`) and a Next.js (or Nuxt) page that shows the greeting from the API |
 | Quality gates | ruff, mypy, eslint, tsc, pytest and Vitest with enforced coverage floors, API contract drift check, secret scan |
 | AI operating system | `AGENTS.md`, rules, skills, prompts and a worked PRD example, tool-neutral |
 | Verification loop | `./scripts/sdlc`: gates, facts against the running system, evidence reports, a healing loop with an integrity guard |

@@ -1,0 +1,42 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../utils/api";
+
+// Nitro makes these globals for server code; the route is loaded here with stand-ins for them.
+const fetchHello = vi.fn();
+
+beforeEach(() => {
+  vi.stubGlobal("defineEventHandler", (handler: unknown) => handler);
+  vi.stubGlobal("createError", (input: object) => Object.assign(new Error("http error"), input));
+  vi.stubGlobal("fetchHello", fetchHello);
+  vi.stubGlobal("ApiError", ApiError);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.resetModules();
+  fetchHello.mockReset();
+});
+
+async function route(): Promise<() => Promise<unknown>> {
+  return (await import("../api/hello.get")).default as unknown as () => Promise<unknown>;
+}
+
+describe("GET /api/hello", () => {
+  it("returns what the backend said", async () => {
+    fetchHello.mockResolvedValue({ message: "Hello, World!" });
+
+    expect(await (await route())()).toEqual({ message: "Hello, World!" });
+  });
+
+  it("answers 502 with the reason when the backend fails", async () => {
+    fetchHello.mockRejectedValue(new ApiError(503, "Backend responded with 503"));
+
+    await expect((await route())()).rejects.toMatchObject({ statusCode: 502, statusMessage: "Backend responded with 503" });
+  });
+
+  it("answers 502 without internals when the backend cannot be reached", async () => {
+    fetchHello.mockRejectedValue(new TypeError("fetch failed: connect ECONNREFUSED 10.0.0.7:8000"));
+
+    await expect((await route())()).rejects.toMatchObject({ statusCode: 502, statusMessage: "Backend unreachable" });
+  });
+});

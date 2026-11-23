@@ -57,7 +57,7 @@ export const CAPABILITIES = {
       { id: "nextjs", label: "Next.js 16 (App Router)", available: true, versions: ["24", "22"] },
       { id: "react", label: "React + Vite", available: false, versions: ["24", "22"] },
       { id: "vue", label: "Vue 3 + Vite", available: false, versions: ["24", "22"] },
-      { id: "nuxt", label: "Nuxt", available: false, versions: ["24", "22"] },
+      { id: "nuxt", label: "Nuxt 4 (Vue 3)", available: true, versions: ["24", "22"] },
     ] as VersionedOption[],
   },
   mobile: {

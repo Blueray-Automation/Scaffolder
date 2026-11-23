@@ -37,14 +37,17 @@ describe("start-from presets", () => {
     }
   });
 
-  it("Next.js on its own generates; presets without a pack are blocked by the validator, never generated as stubs", () => {
-    expect(presetProblems(preset("nextjs"))).toEqual([]);
-    const result = generateProject(applyPreset(defaultConfig(), preset("nextjs")));
-    expect(result.issues.filter((i) => i.level === "error")).toEqual([]);
-    expect(result.files.some((f) => f.path.startsWith("web/"))).toBe(true);
-    expect(result.files.some((f) => f.path.startsWith("backend/"))).toBe(false);
+  it("Next.js and Nuxt on their own generate; presets without a pack are blocked by the validator, never generated as stubs", () => {
+    for (const [id, marker] of [["nextjs", "web/next.config.mjs"], ["nuxt", "web/nuxt.config.ts"]]) {
+      expect(presetProblems(preset(id)), id).toEqual([]);
+      const result = generateProject(applyPreset(defaultConfig(), preset(id)));
+      expect(result.issues.filter((i) => i.level === "error"), id).toEqual([]);
+      expect(result.files.some((f) => f.path === marker), id).toBe(true);
+      expect(result.files.some((f) => f.path.startsWith("web/")), id).toBe(true);
+      expect(result.files.some((f) => f.path.startsWith("backend/")), id).toBe(false);
+    }
 
-    for (const id of ["nuxt", "flutter", "android", "ios"]) {
+    for (const id of ["flutter", "android", "ios"]) {
       expect(presetProblems(preset(id)).length, id).toBeGreaterThan(0);
     }
   });

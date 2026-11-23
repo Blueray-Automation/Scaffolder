@@ -1,0 +1,44 @@
+/** Typed client for the backend contract (.ai/contract/openapi.json). Keep it in sync with the API. */
+
+export interface Hello {
+  message: string;
+}
+
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+/** Resolved at request time so one image runs in every environment (API_URL is a runtime variable). */
+export function apiBaseUrl(): string {
+  return process.env.API_URL ?? "http://localhost:<%backendPort%>";
+}
+
+function isHello(value: unknown): value is Hello {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { message?: unknown }).message === "string"
+  );
+}
+
+export async function fetchHello(name?: string, fetchImpl: typeof fetch = fetch): Promise<Hello> {
+  const url = new URL("/api/v1/hello", apiBaseUrl());
+  if (name) url.searchParams.set("name", name);
+
+  const response = await fetchImpl(url);
+  if (!response.ok) {
+    throw new ApiError(response.status, `Backend responded with ${response.status}`);
+  }
+
+  const body: unknown = await response.json();
+  if (!isHello(body)) {
+    throw new ApiError(502, "Backend returned an unexpected response shape");
+  }
+  return body;
+}

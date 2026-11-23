@@ -1,5 +1,6 @@
 import { AGENT_PRESETS, DESKTOP_APPS } from "./capabilities";
 import { agentCommand, type ScaffolderConfig } from "./config";
+import { webStack } from "./webStacks";
 import { buildGates, NPM_CI, NPM_INSTALL, setupSteps, STAGE_ORDER, venvDirs } from "./gates";
 
 interface LocalService {
@@ -85,11 +86,12 @@ export function buildSdlcConfig(cfg: ScaffolderConfig): Record<string, unknown> 
   if (cfg.web.enabled) {
     targets.web = webUrl;
     dockerProvides.push("web");
+    const start = webStack(cfg).start(cfg.web.port);
     localServices.push({
       name: "web",
       cwd: cfg.layout.webDir,
-      cmd: `npm run start -- --port ${cfg.web.port} --hostname 127.0.0.1`,
-      env: { ...(cfg.backend.enabled ? { API_URL: backendUrl } : {}), NEXT_TELEMETRY_DISABLED: "1" },
+      cmd: start.cmd,
+      env: { ...(cfg.backend.enabled ? { API_URL: backendUrl } : {}), ...webStack(cfg).env, ...start.env },
       pathPrepend: [],
       healthUrl: `${webUrl}/`,
       startTimeoutSeconds: 90,

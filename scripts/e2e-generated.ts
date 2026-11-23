@@ -25,6 +25,8 @@ const SCENARIOS: Record<string, Json> = {
   default: {},
   "backend-only-no-db": { web: { enabled: false }, database: { type: "none" } },
   "custom-dirs": { layout: { backendDir: "services/api", webDir: "apps/web" } },
+  // The same stack with Nuxt in place of Next.js: its build, its server, and the page asking the backend through its own route.
+  "nuxt-fullstack": { web: { framework: "nuxt" } },
 };
 
 const { values } = parseArgs({

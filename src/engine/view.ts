@@ -1,4 +1,5 @@
 import { agentCommand, type ScaffolderConfig } from "./config";
+import { webStack } from "./webStacks";
 import { buildGates, OPENAPI_SNAPSHOT, relativeFrom, setupSteps, STAGE_ORDER } from "./gates";
 
 function titleCase(slug: string): string {
@@ -81,6 +82,10 @@ export function buildView(cfg: ScaffolderConfig) {
     webDir: cfg.layout.webDir,
     backendPort: cfg.backend.port,
     webPort: cfg.web.port,
+    webName: webStack(cfg).name,
+    webDescription: webStack(cfg).description,
+    webTypeTool: webStack(cfg).typeTool,
+    webRuleFile: `.ai/rules/${webStack(cfg).ruleFile}`,
     pythonVersion: cfg.backend.version,
     pythonTarget: `py${cfg.backend.version.replace(".", "")}`,
     nodeVersion: cfg.web.nodeVersion,

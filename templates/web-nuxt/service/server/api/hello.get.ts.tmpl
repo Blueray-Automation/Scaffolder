@@ -1,0 +1,11 @@
+// The page asks this route, never the backend: the backend's address and its response shape stay on the server.
+export default defineEventHandler(async () => {
+  try {
+    return await fetchHello();
+  } catch (error) {
+    throw createError({
+      statusCode: 502,
+      statusMessage: error instanceof ApiError ? error.message : "Backend unreachable",
+    });
+  }
+});

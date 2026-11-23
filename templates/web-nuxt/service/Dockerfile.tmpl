@@ -1,0 +1,27 @@
+FROM node:<%nodeVersion%>-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json* ./
+# Scripts are skipped here (the `postinstall` step needs the source); `npm run build` prepares everything it needs.
+RUN if [ -f package-lock.json ]; then npm ci --ignore-scripts --no-audit --no-fund; else npm install --ignore-scripts --no-audit --no-fund; fi
+
+FROM node:<%nodeVersion%>-alpine AS build
+WORKDIR /app
+ENV NUXT_TELEMETRY_DISABLED=1
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN npm run build
+
+FROM node:<%nodeVersion%>-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production NUXT_TELEMETRY_DISABLED=1 NITRO_HOST=0.0.0.0 NITRO_PORT=3000
+RUN addgroup -S app && adduser -S app -G app
+# The build output is self-contained (the server is bundled with the few packages it needs): the project's node_modules stay behind.
+COPY --from=build --chown=app:app /app/.output ./
+USER app
+EXPOSE 3000
+HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=5 \
+  CMD node -e "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+<%#hasBackend%>
+# API_URL is read at request time: set it per environment, no rebuild needed.
+<%/hasBackend%>
+CMD ["node", "server/index.mjs"]

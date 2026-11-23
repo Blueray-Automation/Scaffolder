@@ -12,9 +12,12 @@ under **Start from**, adjust anything in the form, and press **Download `<name>.
 The **Config** button saves `scaffolder.config.yaml` so you can regenerate the same project later.
 
 The starting points are tabs (arrow keys move between them, Enter chooses). Switching tabs changes only the stack and keeps
-your other settings. Available today: **Full-stack**, **API + database**, **API only** and **Next.js** (a web app on its own,
-with no separate API). **Nuxt**, **Flutter**, **Android** and **iOS** are marked *soon*: they have no pack yet, so they
+your other settings. Available today: **Full-stack**, **API + database**, **API only**, **Next.js** and **Nuxt** (each a web app
+on its own, with no separate API). **Flutter**, **Android** and **iOS** are marked *soon*: they have no pack yet, so they
 cannot be chosen rather than being generated as broken stubs.
+
+Full-stack uses Next.js. To put Nuxt in front of the API instead, keep **Full-stack** and change **Web app → Framework** to Nuxt
+(on the CLI: `--set web.framework=nuxt`).
 
 **CLI:**
 
