@@ -28,16 +28,27 @@ const escapeHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace
 const decodeEntities = (s) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
 const stripTags = (html) => decodeEntities(html.replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim();
 
-// Which pages exist, in the order the wiki's sidebar lists them (README first).
+// Which pages exist, in the order the wiki's sidebar lists them (README first). A bold line in the sidebar (`**Start**`)
+// starts a group: the pages under it belong to that group, and the app's navigation shows the group's name above them.
+// Pages listed before the first group (Home) belong to no group.
 const sidebar = readFileSync(join(wikiDir, "_Sidebar.md"), "utf8");
-const nav = [...sidebar.matchAll(/\[([^\]]+)\]\(([^)\s]+)\)/g)].map((m) => ({ label: m[1], slug: m[2] }));
+const nav = [];
+let group = "";
+for (const line of sidebar.split("\n")) {
+  const heading = line.match(/^\*\*(.+)\*\*\s*$/);
+  if (heading) {
+    group = heading[1];
+    continue;
+  }
+  for (const m of line.matchAll(/\[([^\]]+)\]\(([^)\s]+)\)/g)) nav.push({ label: m[1], slug: m[2], group });
+}
 for (const f of readdirSync(wikiDir).filter((f) => f.endsWith(".md") && f !== "_Sidebar.md")) {
   const slug = f.replace(/\.md$/, "");
-  if (!nav.some((n) => n.slug === slug)) nav.push({ label: slug.replace(/-/g, " "), slug });
+  if (!nav.some((n) => n.slug === slug)) nav.push({ label: slug.replace(/-/g, " "), slug, group: "More" });
 }
 const sources = [
-  { slug: "README", label: "README: the whole picture", file: join(repo, "README.md"), kind: "readme" },
-  ...nav.map((n) => ({ slug: n.slug, label: n.label, file: join(wikiDir, `${n.slug}.md`), kind: "wiki" })),
+  { slug: "README", label: "README: overview", group: "", file: join(repo, "README.md"), kind: "readme" },
+  ...nav.map((n) => ({ slug: n.slug, label: n.label, group: n.group, file: join(wikiDir, `${n.slug}.md`), kind: "wiki" })),
 ];
 const slugs = new Set(sources.map((s) => s.slug));
 
@@ -111,9 +122,9 @@ mkdirSync(join(repo, "src"), { recursive: true });
 out(
   "docs.generated.ts",
   `export interface DocHeading {\n  id: string;\n  text: string;\n  level: number;\n}\n\n` +
-    `export interface DocPage {\n  slug: string;\n  label: string;\n  title: string;\n  kind: "readme" | "wiki";\n  html: string;\n  headings: DocHeading[];\n}\n\n` +
+    `export interface DocPage {\n  slug: string;\n  label: string;\n  /** The sidebar group the page is listed under; empty for the pages above the first group. */\n  group: string;\n  title: string;\n  kind: "readme" | "wiki";\n  html: string;\n  headings: DocHeading[];\n}\n\n` +
     `export const DOC_PAGES: DocPage[] = ${JSON.stringify(
-      pages.map(({ slug, label, title, kind, html, headings }) => ({ slug, label, title, kind, html, headings })),
+      pages.map(({ slug, label, group, title, kind, html, headings }) => ({ slug, label, group, title, kind, html, headings })),
       null,
       1,
     )};\n`,
@@ -122,11 +133,12 @@ out(
 out(
   "docsIndex.generated.ts",
   `import type { DocHeading } from "./docs.generated";\n\n` +
-    `export interface DocIndexEntry {\n  slug: string;\n  label: string;\n  title: string;\n  kind: "readme" | "wiki";\n  headings: DocHeading[];\n  /** The page as plain text, for the search. */\n  text: string;\n}\n\n` +
+    `export interface DocIndexEntry {\n  slug: string;\n  label: string;\n  group: string;\n  title: string;\n  kind: "readme" | "wiki";\n  headings: DocHeading[];\n  /** The page as plain text, for the search. */\n  text: string;\n}\n\n` +
     `export const DOC_INDEX: DocIndexEntry[] = ${JSON.stringify(
-      pages.map(({ slug, label, title, kind, html, headings }) => ({
+      pages.map(({ slug, label, group, title, kind, html, headings }) => ({
         slug,
         label,
+        group,
         title,
         kind,
         headings,

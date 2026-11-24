@@ -1,12 +1,25 @@
-**Scaffolder**
-
 - [Home](Home)
-- [Getting Started](Getting-Started)
+
+**Start**
+
 - [Setup by Operating System](Setup-by-Operating-System)
-- [Adopt an Existing Project](Adopt-an-Existing-Project)
-- [Design and the UI](Design-and-the-UI)
+- [Getting Started](Getting-Started)
+- [Stacks and Options](Stacks-and-Options)
+
+**Build**
+
 - [Tutorial: Add a Login API](Tutorial-Add-a-Login-API)
-- [The Verification Loop](The-Verification-Loop)
+- [Design and the UI](Design-and-the-UI)
+- [Adopt an Existing Project](Adopt-an-Existing-Project)
 - [Using a Desktop App](Desktop-Apps)
-- [Troubleshooting](Troubleshooting)
+
+**Understand**
+
+- [The Verification Loop](The-Verification-Loop)
 - [Reference: login code](Reference-Login-Implementation)
+- [Status and Limits](Status-and-Limits)
+
+**Help**
+
+- [Troubleshooting](Troubleshooting)
+- [Contributing and Releasing](Contributing-and-Releasing)

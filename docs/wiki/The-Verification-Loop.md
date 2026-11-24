@@ -34,6 +34,8 @@ They run in stages: `static -> unit -> build -> contract -> facts -> security`. 
 
 ## Facts
 
+Passing unit tests proves the code does what its tests say, not that the requirements hold. A **fact** is a check of one acceptance criterion against the *running* system, so a requirement with no check cannot be called done.
+
 Each feature folder under `.ai/specs/` has:
 
 - `prd.md`: acceptance criteria, one per line: `- **AC-001** Given ... when ... then ...`

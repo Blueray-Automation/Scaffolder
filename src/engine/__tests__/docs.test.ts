@@ -48,7 +48,22 @@ function outsideFences(markdown: string): string {
 describe("wiki pages (docs/wiki)", () => {
   it("has the expected pages", () => {
     expect([...pages.keys()].sort()).toEqual(
-      ["Adopt-an-Existing-Project", "Design-and-the-UI", "Desktop-Apps", "Getting-Started", "Home", "Reference-Login-Implementation", "Setup-by-Operating-System", "The-Verification-Loop", "Troubleshooting", "Tutorial-Add-a-Login-API", "_Sidebar"].sort(),
+      [
+        "Adopt-an-Existing-Project",
+        "Contributing-and-Releasing",
+        "Design-and-the-UI",
+        "Desktop-Apps",
+        "Getting-Started",
+        "Home",
+        "Reference-Login-Implementation",
+        "Setup-by-Operating-System",
+        "Stacks-and-Options",
+        "Status-and-Limits",
+        "The-Verification-Loop",
+        "Troubleshooting",
+        "Tutorial-Add-a-Login-API",
+        "_Sidebar",
+      ].sort(),
     );
   });
 
@@ -69,6 +84,43 @@ describe("wiki pages (docs/wiki)", () => {
       if (name === "_Sidebar") continue;
       expect(sidebar, `sidebar is missing ${name}`).toContain(`](${name})`);
     }
+  });
+
+  it("groups the sidebar, lists each page once, and puts Home first", () => {
+    const sidebar = pages.get("_Sidebar")!;
+    const links = [...sidebar.matchAll(/\]\(([^)\s]+)\)/g)].map((m) => m[1]!);
+    expect(links[0]).toBe("Home");
+    expect(new Set(links).size, "a page is listed twice").toBe(links.length);
+    const groups = [...sidebar.matchAll(/^\*\*(.+)\*\*\s*$/gm)].map((m) => m[1]);
+    expect(groups).toEqual(["Start", "Build", "Understand", "Help"]);
+  });
+
+  it("lets a reader reach every page from Home, so no page is a dead end", () => {
+    const home = pages.get("Home")!;
+    for (const name of pages.keys()) {
+      if (name === "Home" || name === "_Sidebar") continue;
+      expect(home, `Home does not point to ${name}`).toContain(`](${name})`);
+    }
+  });
+
+  it("keeps the README a front door: short, pointing to a page for each topic", () => {
+    const readme = readFileSync(join(WIKI_DIR, "..", "..", "README.md"), "utf8");
+    expect(readme.split("\n").length, "the README grew past a front door: move the detail to a wiki page").toBeLessThanOrEqual(130);
+    for (const name of pages.keys()) {
+      // every topic is one click from the README; the tutorial's code listing is reached from the tutorial itself
+      if (["Home", "_Sidebar", "Reference-Login-Implementation"].includes(name)) continue;
+      expect(readme, `the README does not point to ${name}`).toContain(`docs/wiki/${name}.md`);
+    }
+  });
+
+  it("covers the design layer where a reader looks for it", () => {
+    const readme = readFileSync(join(WIKI_DIR, "..", "..", "README.md"), "utf8");
+    expect(readme).toContain("Design is a contract too");
+    expect(readme).toContain("./scripts/sdlc design check");
+    expect(pages.get("Home")).toContain("](Design-and-the-UI)");
+    expect(pages.get("Design-and-the-UI")).toContain("## In five minutes");
+    expect(pages.get("Stacks-and-Options")).toContain("design.enforce");
+    expect(pages.get("Status-and-Limits")).toContain("The Figma import has not been run against Figma");
   });
 
   it("only mentions ./scripts/sdlc commands that exist", () => {

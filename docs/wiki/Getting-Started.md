@@ -11,18 +11,8 @@ From a downloaded zip to a verified, running hello world, on macOS, Ubuntu or Wi
 under **Start from**, adjust anything in the form, and press **Download `<name>.zip`**.
 The **Config** button saves `scaffolder.config.yaml` so you can regenerate the same project later.
 
-The starting points are tabs (arrow keys move between them, Enter chooses). Switching tabs changes only the stack and keeps
-your other settings. Available today: **Full-stack**, **API + database**, **API only**, **Next.js** and **Nuxt** (each a web app
-on its own, with no separate API) and **Flutter** (a mobile app on its own). **Android** and **iOS** (native) are marked *soon*:
-they have no pack yet, so they cannot be chosen rather than being generated as broken stubs.
-
-Full-stack uses Next.js. To put Nuxt in front of the API instead, keep **Full-stack** and change **Web app → Framework** to Nuxt
-(on the CLI: `--set web.framework=nuxt`).
-
-To add a **Flutter** app to a stack that has a backend, tick **Mobile app** in the form (on the CLI: `--set mobile.enabled=true`). The app then
-shows the greeting it gets from the API, and the spec has one more check that runs the app's own client against the running backend.
-A Flutter app needs the Flutter SDK installed (see the table below); its `android/` and `ios/` folders are not generated, and
-`mobile/README.md` in the project says how to create them.
+The starting points are tabs under **Start from** (full-stack, API only, a web app on its own, Flutter and more); switching tabs changes only the stack and keeps your other settings.
+[Stacks and Options](Stacks-and-Options) lists them, how to add Nuxt or a Flutter app, and what each one generates. A Flutter app also needs the Flutter SDK, which `./scripts/sdlc doctor` checks for.
 
 **CLI:**
 

@@ -48,12 +48,24 @@ describe("the documentation inside the app", () => {
     const readme = readFileSync(join(REPO, "README.md"), "utf8");
     const page = DOC_PAGES.find((p) => p.slug === "README")!;
     // a few sentences from the middle and the end of the README must be in the rendered page
-    for (const phrase of ["Adopt an existing project", "Publishing the CLI", "Limits (as of this version)", "Why \"facts\" and not just tests"]) {
+    for (const phrase of ["Where to go next", "Design is a contract too", "What a generated project contains", "Status and Limits"]) {
       expect(readme).toContain(phrase);
       expect(text(page.html), phrase).toContain(phrase.replace(/\\"/g, '"'));
     }
     const adopt = DOC_PAGES.find((p) => p.slug === "Adopt-an-Existing-Project")!;
     expect(text(adopt.html)).toContain("Let an agent describe the repository");
+  });
+
+  it("groups the pages the way the wiki's sidebar does, README and Home first", () => {
+    expect(DOC_PAGES.slice(0, 2).map((p) => [p.slug, p.group])).toEqual([["README", ""], ["Home", ""]]);
+    const groups = [...new Set(DOC_PAGES.map((p) => p.group))];
+    expect(groups).toEqual(["", "Start", "Build", "Understand", "Help"]);
+    // a group is one run of pages: the navigation prints each group's name once
+    const runs = DOC_PAGES.filter((p, i) => i === 0 || DOC_PAGES[i - 1]!.group !== p.group).map((p) => p.group);
+    expect(runs).toEqual(groups);
+    expect(DOC_INDEX.map((p) => p.group)).toEqual(DOC_PAGES.map((p) => p.group));
+    expect(DOC_PAGES.find((p) => p.slug === "Status-and-Limits")?.group).toBe("Understand");
+    expect(DOC_PAGES.find((p) => p.slug === "Design-and-the-UI")?.group).toBe("Build");
   });
 
   it("links only to pages and headings that exist, and opens outside links safely", () => {

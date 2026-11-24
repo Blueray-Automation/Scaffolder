@@ -7,6 +7,21 @@ Scaffolder treats the design the way it treats the API: as a **contract**, commi
 > looks like in every state, and a gate fails when a screen cheats. It does **not** compare pixels with your Figma frame: whether the result looks like the design is a review,
 > helped by reference images and screenshots in the pull request.
 
+## In five minutes
+
+In a generated project that has a web or Flutter screen:
+
+```bash
+./scripts/sdlc design import mockups.pdf --feature FEAT-001   # 1. bring the design in: a PDF, an image or a Figma link
+```
+
+```bash
+./scripts/sdlc design sync     # 2. after you write the design's values in .ai/design/tokens.json, regenerate the stylesheet or Dart file
+./scripts/sdlc design check    # 3. the gate: tokens valid, generated files current, nothing hard-coded
+```
+
+Then write the PRD's **UI & design** section, build the screen from the tokens, and put a screenshot of each state next to its reference image in the pull request. The sections below explain each step; read what you need, in any order.
+
 ## The three layers
 
 | Layer | What it is | Who checks it |
@@ -125,8 +140,5 @@ design:
 
 ## How this was checked
 
-The generators for the web (CSS) and Flutter (Dart) output were run with the generated projects' own `./scripts/sdlc design` and compared byte for byte with the ones the scaffolder writes;
-every kind of hard-coded value above is a test that must fail the gate, and the values it must not flag are tests too. A generated Flutter app was analysed (`flutter analyze --fatal-infos`), formatted and tested with the real SDK.
-`npm run e2e` generated a Next.js, a Nuxt and a Flutter-only project, installed them and ran every gate and the facts, with a screen that cheats, an edited generated file and a changed token each failing the gate and `design sync` repairing them; the Nuxt run also built and ran its Docker images with the tokens in them.
-Import: images, and a PDF rendered by the real poppler (`pdftoppm`), were run for real, as were the checks that refuse a bad file or a missing renderer. **The Figma import was run against a stand-in server written from Figma's documentation, not against Figma itself**: the field names and the rate-limit headers follow the documented API, but nobody has yet run it with a real token and file, so expect to meet a difference the first time.
-Not run: the Next.js project's Docker image build (image pulls hung on the machine used), Windows, the generated GitHub workflow on GitHub, and any real Figma export.
+**The Figma import was run against a stand-in server written from Figma's documentation, not against Figma itself**, so expect to meet a difference the first time you use a real token and file.
+Everything else, and what was and was not run, is in [Status and Limits](Status-and-Limits#the-design-contract).
