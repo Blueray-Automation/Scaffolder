@@ -300,6 +300,20 @@ export function buildGates(cfg: ScaffolderConfig): Gate[] {
     });
   }
 
+  // Static like a linter: the tokens file is valid, what is generated from it is current, and no screen hard-codes a design value.
+  if (cfg.design.enforce && (cfg.web.enabled || cfg.mobile.enabled) && g.lint) {
+    gates.push({
+      id: "repo.design",
+      label: "Design tokens in sync, no hard-coded design values",
+      stage: "static",
+      component: "repo",
+      cwd: ".",
+      cmd: "python3 scripts/sdlc.py design check",
+      required: true,
+      timeoutSeconds: 120,
+    });
+  }
+
   if (g.security) {
     gates.push({
       id: "repo.secrets",

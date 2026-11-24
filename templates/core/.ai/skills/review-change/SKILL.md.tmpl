@@ -15,6 +15,9 @@ Run `git diff <%defaultBranch%>...HEAD` and answer each question with evidence.
 <%^hasBackend%>
 3. **Views**: every state of each changed view (loading, empty, error, success) shown and tested? Labels, focus and contrast still fine?
 <%/hasBackend%>
+<%#hasDesign%>
+   Design (`.ai/rules/design.md`): does each state match its reference image in the PRD's `design/` folder? Any value that is not a token (`design:allow` in the diff)? Any token added to `.ai/design/tokens.json`, and does the PRD's UI & design section list it?
+<%/hasDesign%>
 4. **Security** (`.ai/rules/security.md`): input validated at the boundary? Any secret, token, personal data in code/logs/tests? Auth checked server-side?
 5. **Operability**: new env vars in `.env.example` and compose? Health/readiness still honest? Logs useful and free of personal data?
 6. **Hygiene**: no dead code, debug prints, commented-out code, unrelated edits; Conventional Commit messages.

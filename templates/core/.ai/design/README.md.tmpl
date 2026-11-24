@@ -1,0 +1,89 @@
+# Design
+
+The look of this project is one committed file: [`tokens.json`](tokens.json). It names every colour (light and dark), space, radius and
+type size the screens use. Screens are built from those names, never from literal values, the way clients are built from
+`.ai/contract/openapi.json` instead of from guesses about the API.
+
+## Where the design lives
+
+<%#hasDesignUrl%>
+- <%designToolName%>: <%designUrl%>
+<%/hasDesignUrl%>
+<%^hasDesignUrl%>
+- No design file is linked yet. When there is one (<%designToolName%>), put its link here and in `scaffolder.config.yaml` (`design.url`).
+<%/hasDesignUrl%>
+- Per feature, the PRD's **UI & design** section says which frame is being built, and its reference images sit next to the PRD in
+  `.ai/specs/FEAT-xxx-<slug>/design/`.
+
+## Bringing a design in
+
+A design arrives as a PDF, a picture or a Figma link. `design import` turns each into reference images the agent is shown, saved with a record
+(`references.json`: what each file is, where it came from, its size and checksum) that `design check` verifies, so a reference cannot change unnoticed.
+
+```bash
+./<%sdlcDir%>/sdlc design import mockups.pdf --feature FEAT-001            # every page (up to 20) becomes a picture, plus the text in the PDF
+./<%sdlcDir%>/sdlc design import login.png signup.png --feature FEAT-001   # PNG, JPEG, WebP or GIF, up to 15 MB each
+export FIGMA_TOKEN=...                                                     # a personal access token, scope file_content:read; PowerShell: $env:FIGMA_TOKEN = "..."
+./<%sdlcDir%>/sdlc design import "https://www.figma.com/design/<key>/<name>?node-id=1-2" --feature FEAT-001
+./<%sdlcDir%>/sdlc design import brand-guide.pdf --project                  # a style guide for the whole project: .ai/design/references/
+```
+
+- **Where**: `--feature FEAT-001` saves in that feature's `design/` folder (next to its PRD, read-only while an agent heals); `--project` saves in `.ai/design/references/`.
+- **PDF**: pages are rendered with poppler's `pdftoppm` (macOS: `brew install poppler`; Ubuntu: `sudo apt install poppler-utils`; Windows: `scoop install poppler` or `choco install poppler`). Without it, macOS can render the first page only, at 72 dpi. `--pages 3-5` and `--dpi 200` choose pages and sharpness. The text found in the PDF is saved as a `.txt`.
+- **Figma**: the link's frame (or the frames of a page or section) is exported as a PNG, with its text in reading order (`.txt`) and a census of the colours, type sizes, radii and spacing it uses, to help you write the tokens. A link without a frame lists the frames to choose from. The token is read only from the `FIGMA_TOKEN` environment variable and is sent to Figma only. `--variables` also proposes tokens from the file's variables (Enterprise plans only) in `.ai/design/tokens.proposed.json`, which nothing reads until you rename its tokens to this project's and save it as `tokens.json`.
+- **What it does not do**: it does not read the design's meaning. The tokens and the PRD's **UI & design** section are still written, or drafted and reviewed, by a person: colours measured from a picture are approximate, and the census is a starting point.
+
+## The files
+
+| File | What it is | Edit it? |
+|---|---|---|
+| `.ai/design/tokens.json` | The design, as tokens. The source of everything below. | **Yes**: by hand or exported from your design tool, in the same change as the screens that need it |
+<%#hasWeb%>
+| `<%webTokensFile%>` | The same tokens as CSS variables (`--color-accent`, `--space-md`, ...). | No: generated |
+<%/hasWeb%>
+<%#hasMobile%>
+| `<%mobileTokensFile%>` | The same tokens as Dart constants (`Tokens.light.accent`, `Tokens.spaceMd`, ...). | No: generated |
+<%/hasMobile%>
+
+```bash
+./<%sdlcDir%>/sdlc design sync     # rewrite the generated files from tokens.json
+./<%sdlcDir%>/sdlc design check    # what the gate runs: tokens valid, generated files current, no hard-coded values
+```
+
+## The tokens file
+
+It follows the shape the Design Tokens Community Group uses: a token is `{ "$value": ... }`, a group holds tokens, and `$type` on a group
+applies to everything inside it. Names use lowercase letters, digits and dashes.
+
+| `$type` | Value | Becomes |
+|---|---|---|
+| `color` | `#rrggbb` or `#rrggbbaa`. A dark-theme value goes in `"$extensions": { "scaffolder": { "dark": "#..." } }` | <%#hasWeb%>CSS `--color-bg`<%/hasWeb%><%#hasMobile%><%#hasWeb%>; <%/hasWeb%>Dart `Tokens.light.bg` and `Tokens.dark.bg`<%/hasMobile%> |
+| `dimension` | a number and `px`, `rem` or `em`: `"1.5rem"` | <%#hasWeb%>CSS `--space-lg`<%/hasWeb%><%#hasMobile%><%#hasWeb%>; <%/hasWeb%>Dart `Tokens.spaceLg` (`rem` is 16 logical pixels; `em` values stay on the web)<%/hasMobile%> |
+| `fontWeight` | `100` to `900` | <%#hasWeb%>CSS `--font-weight-semibold`<%/hasWeb%><%#hasMobile%><%#hasWeb%>; <%/hasWeb%>Dart `Tokens.fontWeightSemibold`<%/hasMobile%> |
+| `fontFamily` | a font stack | <%#hasWeb%>CSS `--font-family-base`<%/hasWeb%><%#hasMobile%><%#hasWeb%>; <%/hasWeb%>not generated for Dart (the app uses the platform font)<%/hasMobile%> |
+
+The names in `color` (`accent`, `bg`, `border`, `card`, `danger`, `fg`, `muted`) are required: the themes use them. Add your own groups and tokens freely:
+`size.sidebar`, `color.success`, `space.2xl`.
+
+Bringing the design in from <%designToolName%>: export its variables or styles as design tokens (for Figma, a plugin such as Tokens Studio can write this
+shape), save the result as `tokens.json`, then run `./<%sdlcDir%>/sdlc design sync`. The check reads the same file, so nothing else changes.
+
+## What the check proves, and what it does not
+
+<%#designEnforced%>
+`design check` runs as the `repo.design` gate, locally and in CI. It fails when:
+<%/designEnforced%>
+<%^designEnforced%>
+`design check` is not a gate in this project (`design.enforce` is off); run it by hand. It reports when:
+<%/designEnforced%>
+
+- `tokens.json` is invalid (a bad colour, a missing required colour, two tokens with one name).
+- A generated file is not what the tokens produce (someone edited it, or the tokens changed without a sync).
+- A screen hard-codes a colour (a hex value, `rgb(...)`, a colour name), or a length for spacing, radius or font size.
+<%#hasWeb%>
+- A stylesheet uses `var(--something)` that no token or stylesheet defines.
+<%/hasWeb%>
+
+It does **not** prove the screen looks like the design. It proves the screen is made from the design's values and states. Whether the layout and the
+result match the frame is a review: compare the running screen with the reference image in the PRD's `design/` folder (the skill `implement-ui` says how).
+A value that is deliberately not a token takes `design:allow: <why>` in a comment on its line.

@@ -1,0 +1,41 @@
+---
+name: implement-ui
+description: Build or change a screen so that it matches the design: from the PRD's UI & design section and the design tokens, with every state, then compare it with the reference. Use for any change a person can see.
+---
+
+# Implement a screen from its design
+
+**Goal**: a screen made of the design's own values, in every state, that a reviewer can hold next to the design and find the same.
+
+## Before you code
+1. Read the feature's `prd.md`, **UI & design** section: the frame, the states of each screen, the components to reuse, the tokens it needs and the exact copy. Look at its reference images in `.ai/specs/FEAT-xxx-<slug>/design/` (`references.json` says what each is). Open each image and really look at it; a `.txt` beside it is the exact text of the design.
+   If the section is missing, vague about a state or at odds with the tokens: stop and ask. Do not guess a design. There are no pictures yet? A person brings them in with `./<%sdlcDir%>/sdlc design import` (a PDF, an image or a Figma link); you cannot, and you must not invent them.
+2. Read `.ai/design/tokens.json` (and `.ai/rules/design.md`). List which tokens the screen uses. Note any it needs that do not exist.
+3. Look through the existing components<%#hasWeb%> in `<%webDir%>`<%/hasWeb%><%#hasMobile%> and `<%mobileDir%>/lib/ui`<%/hasMobile%>. Reuse; add a component only for something that is new.
+
+## Build
+4. **Tokens first.** A missing token is added to `.ai/design/tokens.json`, then `./<%sdlcDir%>/sdlc design sync`. Never a literal value in the screen.
+5. **One state at a time, test first.** Loading, empty, error, success: write the test that renders the state and asserts what the user sees (by role or label, not by class name), then the markup.
+<%#hasWeb%>
+   Web: components are presentational (props in, markup out) and take their look from `var(--...)`.
+<%/hasWeb%>
+<%#hasMobile%>
+   Mobile: widgets read the theme and `Tokens`; the spec's named widget tests prove each state.
+<%/hasMobile%>
+6. **Accessibility**: real headings, buttons and labelled controls, visible focus, an error announced (<%#hasWeb%>`role="alert"`<%/hasWeb%><%#hasMobile%><%#hasWeb%> / <%/hasWeb%>`Semantics(liveRegion: true)`<%/hasMobile%>), nothing conveyed by colour alone.
+7. **Copy** is exactly the PRD's copy.
+
+## Check
+8. `./<%sdlcDir%>/sdlc design check`, then `./<%sdlcDir%>/sdlc gates`. A hard-coded value is the gate's most common failure: the message names the file and line.
+9. **Compare with the design.** Run the app (`./<%sdlcDir%>/sdlc up`, or the dev server in `<%#hasWeb%><%webDir%><%/hasWeb%><%^hasWeb%><%mobileDir%><%/hasWeb%>`) and look at each state next to the reference image: layout, order, spacing rhythm, type scale, colour, copy.
+   List every difference you find in the PR description, even ones you decide to leave. Put a screenshot of each state in the PR (the PR template asks).
+10. `./<%sdlcDir%>/sdlc verify` exits 0.
+
+## Done when
+Every state the PRD lists exists and is tested, the screen uses only tokens, the gates are green, and the PR shows each state next to its reference with the differences listed.
+
+## Pitfalls
+- "Just this once" literal value. It becomes the new normal; add the token.
+- A token invented for one screen. Reuse, or ask.
+- Only the happy state built. Errors and empty states are where screens break.
+- Matching the screenshot with a hard-coded size. If the design needs a size, it is a token.

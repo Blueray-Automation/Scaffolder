@@ -48,7 +48,7 @@ function outsideFences(markdown: string): string {
 describe("wiki pages (docs/wiki)", () => {
   it("has the expected pages", () => {
     expect([...pages.keys()].sort()).toEqual(
-      ["Adopt-an-Existing-Project", "Desktop-Apps", "Getting-Started", "Home", "Reference-Login-Implementation", "Setup-by-Operating-System", "The-Verification-Loop", "Troubleshooting", "Tutorial-Add-a-Login-API", "_Sidebar"].sort(),
+      ["Adopt-an-Existing-Project", "Design-and-the-UI", "Desktop-Apps", "Getting-Started", "Home", "Reference-Login-Implementation", "Setup-by-Operating-System", "The-Verification-Loop", "Troubleshooting", "Tutorial-Add-a-Login-API", "_Sidebar"].sort(),
     );
   });
 

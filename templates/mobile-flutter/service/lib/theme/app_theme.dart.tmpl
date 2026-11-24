@@ -1,0 +1,33 @@
+import 'package:material_ui/material_ui.dart';
+
+import 'tokens.dart';
+
+/// The app's theme for one brightness, built only from the design tokens: change `.ai/design/tokens.json` and run
+/// `./<%sdlcDir%>/sdlc design sync` to restyle the app, never a colour or a size here.
+ThemeData buildTheme(Brightness brightness) {
+  final colors = brightness == Brightness.dark ? Tokens.dark : Tokens.light;
+  final scheme =
+      ColorScheme.fromSeed(
+        seedColor: colors.accent,
+        brightness: brightness,
+      ).copyWith(
+        primary: colors.accent,
+        error: colors.danger,
+        surface: colors.card,
+        onSurface: colors.fg,
+        onSurfaceVariant: colors.muted,
+        outline: colors.border,
+      );
+  return ThemeData(
+    colorScheme: scheme,
+    scaffoldBackgroundColor: colors.bg,
+    cardTheme: CardThemeData(
+      color: colors.card,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(Tokens.radiusLg),
+        side: BorderSide(color: colors.border),
+      ),
+    ),
+  );
+}

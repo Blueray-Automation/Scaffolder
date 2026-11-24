@@ -2,7 +2,7 @@
 
 ## Layout
 ```
-src/app/            routes (server components by default), layout, globals.css
+src/app/            routes (server components by default), layout, globals.css, tokens.css (generated)
 src/components/     presentational components: props in, JSX out, no data fetching
 <%#hasBackend%>
 src/lib/            typed API client (mirrors .ai/contract/openapi.json), helpers
@@ -26,6 +26,7 @@ src/__tests__/      Vitest + Testing Library specs
 <%/hasBackend%>
 - Every data-driven view models all its states explicitly: loading, empty, error, success. Errors are shown with `role="alert"`, never swallowed.
 - Prefer server components for data; add `"use client"` only for interactivity, and keep it as low in the tree as possible.
+- Styling: every colour, space, radius and size is a design token, written `var(--color-accent)`, `var(--space-md)`, ... Never a literal value. `src/app/tokens.css` is generated from `.ai/design/tokens.json` (`./<%sdlcDir%>/sdlc design sync`): never edit it. Rule: `.ai/rules/design.md`.
 - Accessibility: semantic elements, labelled controls, visible focus, sufficient contrast. Don't convey state by colour alone.
 - Lint with `eslint --max-warnings 0` (flat config, `eslint-config-next`); fix the code instead of adding `eslint-disable`. React Compiler rules apply: no JSX construction inside `try/catch` (compute props in the `try`, render outside it).
 

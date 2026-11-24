@@ -32,10 +32,20 @@ None: all endpoints are public and read-only.
 ## 5. Contract impact
 New endpoints `GET /health`, `GET /ready`, `GET /api/v1/hello`. No migrations. Error payload for validation failures is FastAPI's standard `422` body.
 
-## 6. Out of scope
+<%#designEnforced%>
+## 6. UI & design
+- **Design source**: <%#hasDesignUrl%>`<%designUrl%>`<%/hasDesignUrl%><%^hasDesignUrl%>none: there is no design file yet, so the screen follows the default look in `.ai/design/tokens.json`<%/hasDesignUrl%>.
+- **Screens & states**: <%#hasWeb%>the web page is one centred card (the project name, the greeting as its heading, a caption)<%#hasMobile%>; the mobile screen is the same card<%/hasMobile%><%/hasWeb%><%^hasWeb%>the mobile screen is one centred card (the greeting as its heading)<%/hasWeb%><%#hasBackend%>. While the greeting loads the card shows a progress indicator<%#hasWeb%> (mobile)<%/hasWeb%>, and when the backend cannot be reached it shows the reason as an error that is announced to assistive technology<%/hasBackend%><%^hasBackend%>, above a name field<%/hasBackend%>.
+- **Components**: `HelloCard`, the only one.
+- **Tokens**: none new. The card takes its colours, spacing, radius and type size from `.ai/design/tokens.json`.
+- **Copy**: the greeting is `Hello, <name>!`<%#hasBackend%>; the error heading is `Backend unavailable`<%/hasBackend%>.
+- **Responsive & accessibility**: <%#hasWeb%>the card is at most the `size.content` token wide and shrinks to fit a narrow screen; <%/hasWeb%>the greeting is a real heading and the colour tokens keep their contrast in the light and the dark theme.
+
+<%/designEnforced%>
+## <%prdOutOfScopeNo%>. Out of scope
 Authentication, persistence of greetings, localization.
 
-## 7. Verification map
+## <%prdVerificationNo%>. Verification map
 See `acceptance.json`. AC-001 to AC-004 are proven against the running service; AC-006 by a file check plus the contract gate<%#hasWeb%>; AC-007 by an HTTP check on the web app (which proves the web-to-backend wiring)<%/hasWeb%><%#hasMobile%>; AC-008 by running the mobile app's own API client against the live backend (which proves the mobile-to-backend wiring)<%/hasMobile%>.
 <%/hasBackend%>
 <%^hasBackend%>
@@ -64,9 +74,19 @@ None: <%#hasWeb%>the page<%#hasMobile%> and the screen are<%/hasMobile%><%^hasMo
 ## 5. Contract impact
 None. This project has no separate API: <%#hasWeb%>the <%webName%> app renders the page itself<%#hasMobile%> and the <%mobileName%> app computes the greeting itself<%/hasMobile%><%/hasWeb%><%^hasWeb%>the <%mobileName%> app computes the greeting itself<%/hasWeb%>.
 
-## 6. Out of scope
+<%#designEnforced%>
+## 6. UI & design
+- **Design source**: <%#hasDesignUrl%>`<%designUrl%>`<%/hasDesignUrl%><%^hasDesignUrl%>none: there is no design file yet, so the screen follows the default look in `.ai/design/tokens.json`<%/hasDesignUrl%>.
+- **Screens & states**: <%#hasWeb%>the web page is one centred card (the project name, the greeting as its heading, a caption)<%#hasMobile%>; the mobile screen is the same card<%/hasMobile%><%/hasWeb%><%^hasWeb%>the mobile screen is one centred card (the greeting as its heading)<%/hasWeb%><%#hasBackend%>. While the greeting loads the card shows a progress indicator<%#hasWeb%> (mobile)<%/hasWeb%>, and when the backend cannot be reached it shows the reason as an error that is announced to assistive technology<%/hasBackend%><%^hasBackend%>, above a name field<%/hasBackend%>.
+- **Components**: `HelloCard`, the only one.
+- **Tokens**: none new. The card takes its colours, spacing, radius and type size from `.ai/design/tokens.json`.
+- **Copy**: the greeting is `Hello, <name>!`<%#hasBackend%>; the error heading is `Backend unavailable`<%/hasBackend%>.
+- **Responsive & accessibility**: <%#hasWeb%>the card is at most the `size.content` token wide and shrinks to fit a narrow screen; <%/hasWeb%>the greeting is a real heading and the colour tokens keep their contrast in the light and the dark theme.
+
+<%/designEnforced%>
+## <%prdOutOfScopeNo%>. Out of scope
 Authentication, persistence, localization, and any API or database.
 
-## 7. Verification map
+## <%prdVerificationNo%>. Verification map
 See `acceptance.json`. <%#hasWeb%><%^hasMobile%>All three criteria are proven by HTTP checks against the running web app.<%/hasMobile%><%#hasMobile%>The web criteria (AC-001 to AC-003) are proven by HTTP checks against the running web app; the mobile ones (<%mobileAc1%> to <%mobileAc3%>) by running the app's named widget tests (`flutter test --plain-name`).<%/hasMobile%><%/hasWeb%><%^hasWeb%>All three criteria are proven by running the app's named widget tests (`flutter test --plain-name "<%mobileAc1%>"`), so a name that matches no test fails the check.<%/hasWeb%>
 <%/hasBackend%>

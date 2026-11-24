@@ -10,6 +10,9 @@
 <%#hasBackend%>
   contract/        committed API contract snapshot (openapi.json)
 <%/hasBackend%>
+<%#hasDesign%>
+  design/          the design tokens (tokens.json) every screen is built from, and how they work (README.md)
+<%/hasDesign%>
   evidence/        run output: logs, results.json, report.md  (gitignored; CI uploads it)
 ```
 
@@ -37,7 +40,7 @@ verify -> green? -> done (exit 0)
          verify again
 ```
 
-Integrity (`sdlc.json` -> `integrity`): `protected` files can never change during the loop, `protectedWhileHealing` (the specs) cannot change while healing<%#hasBackend%>, `guarded` files (the contract) may change but the change is reported for review<%/hasBackend%>.
+Integrity (`sdlc.json` -> `integrity`): `protected` files can never change during the loop, `protectedWhileHealing` (the specs) cannot change while healing<%#hasBackend%>, `guarded` files (the contract<%#hasDesign%> and the design tokens<%/hasDesign%>) may change but the change is reported for review<%/hasBackend%><%^hasBackend%><%#hasDesign%>, `guarded` files (the design tokens) may change but the change is reported for review<%/hasDesign%><%/hasBackend%>.
 
 ## Configure
 

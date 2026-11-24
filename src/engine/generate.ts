@@ -2,6 +2,7 @@ import { stringify } from "yaml";
 import { buildCdWorkflow, buildCiWorkflow } from "./ci";
 import { buildCompose, buildEnvExample } from "./compose";
 import { hasErrors, resolveConfig, validateConfig, type Issue, type ScaffolderConfig } from "./config";
+import { designFiles } from "./design";
 import { renderTemplate } from "./render";
 import { buildSdlcConfig } from "./sdlcConfig";
 import { TEMPLATE_FILES } from "./templates.generated";
@@ -44,6 +45,8 @@ const root = () => "";
 
 /** Files that only make sense next to a backend API (paths inside the pack, without .tmpl). */
 const CONTRACT_FILES = [".ai/rules/contract.md", ".ai/skills/define-contract/SKILL.md"];
+/** Files that only make sense with a screen to style (paths inside the core pack, without .tmpl). */
+const DESIGN_FILES = [".ai/rules/design.md", ".ai/skills/implement-ui/SKILL.md", ".ai/design/README.md"];
 const NEXTJS_API_CLIENT_FILES = ["src/lib/api.ts", "src/__tests__/api.test.ts"];
 /** The web app's own greeting logic, used instead of the API client when there is no backend. */
 const NEXTJS_STANDALONE_FILES = ["src/lib/greeting.ts", "src/__tests__/greeting.test.ts"];
@@ -73,7 +76,7 @@ const PACKS: Pack[] = [
     enabled: () => true,
     mounts: [{ from: "", to: root }],
     // Without a backend there is no API, so no contract to define or guard.
-    include: (rel, c) => c.backend.enabled || !CONTRACT_FILES.includes(rel),
+    include: (rel, c) => (c.backend.enabled || !CONTRACT_FILES.includes(rel)) && (c.web.enabled || c.mobile.enabled || !DESIGN_FILES.includes(rel)),
   },
   {
     id: "backend-python-fastapi",
@@ -203,6 +206,7 @@ export function generateProject(input: unknown = {}): GenerateResult {
   const add = (path: string, content: string) => files.push({ path, content, executable: isExecutable(path) });
   add("scaffolder.config.yaml", configToYaml(config));
   add(".ai/sdlc.json", JSON.stringify(buildSdlcConfig(config), null, 2) + "\n");
+  for (const f of designFiles(config)) add(f.path, f.content);
   if (config.docker.enabled) add("docker-compose.yml", buildCompose(config));
   add(".env.example", buildEnvExample(config));
   if (config.ci.provider === "github-actions") {

@@ -104,6 +104,12 @@ export const CAPABILITIES = {
     { id: "local", label: "Local processes", available: true, hint: "No Docker; DB-dependent checks are skipped." },
     { id: "none", label: "None", available: true, hint: "Skip runtime fact probes." },
   ] as Option[],
+  designTool: [
+    { id: "none", label: "None yet", available: true, hint: "Tokens live in .ai/design/tokens.json; write them by hand or import them later." },
+    { id: "figma", label: "Figma", available: true, hint: "Export the file's variables (or Tokens Studio's JSON) to .ai/design/tokens.json." },
+    { id: "penpot", label: "Penpot", available: true, hint: "Export the design tokens to .ai/design/tokens.json." },
+    { id: "other", label: "Another tool or a style guide", available: true },
+  ] as Option[],
   license: [
     { id: "MIT", label: "MIT", available: true },
     { id: "UNLICENSED", label: "Proprietary", available: true },

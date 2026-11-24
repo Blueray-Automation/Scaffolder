@@ -141,6 +141,7 @@ Step-by-step guides live in [`docs/wiki/`](docs/wiki/Home.md), are readable insi
 - **Setup by Operating System**: install the tools on macOS, Ubuntu or Windows
 - **Getting Started**: from a downloaded zip to a verified, running hello world
 - **Tutorial: Add a Login API**: change a generated project the way it is meant to be changed (PRD, checks, tests, code, proof), with the complete verified code
+- **Design and the UI**: design tokens, importing a design (PDF, image or Figma link), the PRD's UI & design section and the gate against hard-coded values
 - **The Verification Loop** and **Troubleshooting** (every entry was hit for real)
 
 The pages are reviewed in pull requests like code, and `npm test` checks every internal link, anchor and `./scripts/sdlc` command they mention.

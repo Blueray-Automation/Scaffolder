@@ -93,7 +93,7 @@ VERIFIED  20 passed, 0 failed, 1 warnings, 0 skipped
 
 | Stage | What it proves |
 |---|---|
-| static | lint, formatting and type checks pass |
+| static | lint, formatting and type checks pass; no screen hard-codes a colour, space, radius or font size (`repo.design`, see [Design and the UI](Design-and-the-UI)) |
 | unit | tests pass and coverage meets the floor (80% backend, 70% web by default) |
 | build | the web app builds; `docker-compose.yml` is valid |
 | contract | the API still matches the committed snapshot `.ai/contract/openapi.json` |

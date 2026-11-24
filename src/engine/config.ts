@@ -14,6 +14,7 @@ export type RegistryType = "ghcr" | "dockerhub" | "none";
 export type DeployTarget = "none" | "ssh-compose" | "kubernetes";
 export type RuntimeMode = "docker" | "local" | "none";
 export type DeployTrigger = "push-default-branch" | "tag" | "manual";
+export type DesignTool = "none" | "figma" | "penpot" | "other";
 export type AgentPreset =
   | "claude"
   | "codex"
@@ -76,6 +77,18 @@ export interface ScaffolderConfig {
   cache: { type: CacheType };
   auth: { type: AuthType };
   docker: { enabled: boolean };
+  /**
+   * The design contract. A project with a screen (web or mobile) always gets design tokens, committed in
+   * `.ai/design/tokens.json`, that the shipped screens are styled from. `enforce` makes verification fail when a screen
+   * hard-codes a design value, and when a PRD has no UI & design section.
+   */
+  design: {
+    enforce: boolean;
+    /** Where the design is made. Only changes what the generated docs and PRD template say. */
+    tool: DesignTool;
+    /** Link to the design file (a Figma file, a Penpot project, a style guide). Empty = none yet. */
+    url: string;
+  };
   ci: {
     provider: CiProvider;
     defaultBranch: string;
@@ -141,6 +154,7 @@ export function defaultConfig(): ScaffolderConfig {
     cache: { type: "none" },
     auth: { type: "none" },
     docker: { enabled: true },
+    design: { enforce: true, tool: "none", url: "" },
     ci: { provider: "github-actions", defaultBranch: "main" },
     cd: {
       enabled: true,
@@ -209,6 +223,9 @@ export function resolveConfig(input: unknown = {}): ScaffolderConfig {
     merged.cd.enabled = false;
     if (merged.sdlc.runtime === "docker") merged.sdlc.runtime = "none";
   }
+  // Design is about screens: a backend on its own has none, so there is nothing to enforce (and the generated
+  // scaffolder.config.yaml says so).
+  if (!merged.web.enabled && !merged.mobile.enabled) merged.design.enforce = false;
   return merged;
 }
 
@@ -326,6 +343,19 @@ export function validateConfig(cfg: ScaffolderConfig): Issue[] {
     } else {
       seen.set(port, path);
     }
+  }
+
+  if (!findOption(CAPABILITIES.designTool, cfg.design.tool)) {
+    err("design.tool", `Unknown design tool "${cfg.design.tool}". Choose one of: ${CAPABILITIES.designTool.map((t) => t.id).join(", ")}.`);
+  }
+  if (cfg.design.url !== "") {
+    let ok = false;
+    try {
+      ok = /^https?:$/.test(new URL(cfg.design.url).protocol);
+    } catch {
+      ok = false;
+    }
+    if (!ok) err("design.url", "Must be an http(s) link to the design file, or empty.");
   }
 
   // Docker / CI / CD coupling

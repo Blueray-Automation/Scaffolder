@@ -1,11 +1,12 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'theme/app_theme.dart';
 import 'ui/hello_page.dart';
 
 const String appTitle = '<%title%>';
-const Color _seed = Color(0xFF3F51B5);
 
-/// The application: a themed [MaterialApp] (light and dark, following the device) around the first screen.
+/// The application: a [MaterialApp] themed from the design tokens (light and dark, following the device) around the
+/// first screen.
 class HelloApp extends StatelessWidget {
   const HelloApp({super.key});
 
@@ -13,13 +14,8 @@ class HelloApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: appTitle,
-      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: _seed)),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: _seed,
-          brightness: Brightness.dark,
-        ),
-      ),
+      theme: buildTheme(Brightness.light),
+      darkTheme: buildTheme(Brightness.dark),
       home: const HelloPage(title: appTitle),
     );
   }

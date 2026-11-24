@@ -1,4 +1,6 @@
+import { CAPABILITIES, findOption } from "./capabilities";
 import { agentCommand, type ScaffolderConfig } from "./config";
+import { TOKENS_PATH } from "./design";
 import { mobileStack } from "./mobileStacks";
 import { webStack } from "./webStacks";
 import { buildGates, OPENAPI_SNAPSHOT, relativeFrom, setupSteps, STAGE_ORDER } from "./gates";
@@ -25,6 +27,8 @@ export function buildView(cfg: ScaffolderConfig) {
   const hasDocker = cfg.docker.enabled;
   const hasCi = cfg.ci.provider !== "none";
   const hasCd = cfg.cd.enabled;
+  const hasDesign = hasWeb || hasMobile;
+  const designTool = cfg.design.tool;
 
   const db = {
     type: cfg.database.type,
@@ -100,6 +104,21 @@ export function buildView(cfg: ScaffolderConfig) {
     /** A mobile app that talks to the backend (and so has an API client), and one that stands alone. */
     hasMobileApi: hasMobile && hasBackend,
     mobileOnly: hasMobile && !hasBackend && !hasWeb,
+    /** Design tokens (and the rule and skill about them): every project with a screen. */
+    hasDesign,
+    /** The gate that fails on a hard-coded design value, and the PRD's UI & design section (section 6, which moves the ones after it down). */
+    designEnforced: hasDesign && cfg.design.enforce,
+    hasDesignUrl: cfg.design.url !== "",
+    designUrl: cfg.design.url,
+    /** "Figma", or "your design tool" when none is named. */
+    designToolName: designTool === "none" || designTool === "other" ? "your design tool" : (findOption(CAPABILITIES.designTool, designTool)?.label ?? "your design tool"),
+    designToolFigma: designTool === "figma",
+    designToolPenpot: designTool === "penpot",
+    tokensPath: TOKENS_PATH,
+    webTokensFile: `${cfg.layout.webDir}/${webStack(cfg).design.tokensCss}`,
+    mobileTokensFile: `${cfg.layout.mobileDir}/${mobileStack(cfg).design.tokensFile}`,
+    prdOutOfScopeNo: hasDesign && cfg.design.enforce ? 7 : 6,
+    prdVerificationNo: hasDesign && cfg.design.enforce ? 8 : 7,
     hasSecurity: cfg.sdlc.gates.security,
     hasContract: hasBackend && cfg.sdlc.gates.contract,
     hasFacts: cfg.sdlc.gates.facts,

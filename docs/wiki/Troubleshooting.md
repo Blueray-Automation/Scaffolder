@@ -119,6 +119,21 @@ The API changed. If the PRD says it should have, regenerate the snapshot and rev
 Remove it, and rotate it if it was real. For a deliberate fake in application code add `# sdlc:allow-secret` to that line.
 Files under `tests/` and `.ai/specs/` are exempt from the keyword heuristic (fake credentials are normal there), but real key formats (cloud keys, tokens, private keys) are caught everywhere.
 
+### `repo.design` fails: "a colour is hard-coded" or "a length is hard-coded"
+A screen uses a literal value instead of a design token. The message names the file and line. Use the token (`var(--color-accent)`, `var(--space-md)`; in Flutter `Tokens.spaceMd` and the theme's colours). If the design needs a value the tokens do not have, add a token to `.ai/design/tokens.json` and run `./scripts/sdlc design sync`; do not add a one-off token for one screen. A value that is deliberately not a token takes a `design:allow: <why>` comment on its line.
+
+### `repo.design` fails: "is not what .ai/design/tokens.json produces"
+A generated file (`tokens.css`, `tokens.dart`) was edited, or the tokens changed without a sync. Run `./scripts/sdlc design sync` and commit the result. Never edit a generated file.
+
+### `design import` says "no PDF renderer found"
+A PDF is turned into pictures by poppler's `pdftoppm`. Install it (macOS `brew install poppler`, Ubuntu `sudo apt install poppler-utils`, Windows `scoop install poppler` or `choco install poppler`), or export the pages as PNG images and import those. `./scripts/sdlc doctor` shows which renderer it found.
+
+### `design import` for a Figma link fails
+`FIGMA_TOKEN` must be set in the environment (a personal access token from Figma > Settings > Security, scope `file_content:read`). A 403 means the token is expired, lacks that scope or cannot see the file; a 404, that the link's file does not exist for this token; a 429, that Figma is rate-limiting it (the message says for how long). A link with no `node-id` lists the frames: copy a frame's link (right click, Copy link) and import that.
+
+### The spec fails: "prd.md has no 'UI & design' section"
+Every PRD in a project with a screen needs the section. Add `## 6. UI & design` with the frame, every state, the components, any new tokens and the copy, or the single line `No UI change.` when the feature has no screen. Turn the requirement off with `design.enforce: false` in `scaffolder.config.yaml`.
+
 ### `npm audit` shows a warning
 That gate is advisory on purpose. It reports vulnerabilities in transitive dependencies, some of which have no patched release yet. Look at the list, but it won't block you.
 

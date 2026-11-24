@@ -5,7 +5,7 @@
 app/pages/          routes (one file per route), rendered on the server for each request
 app/components/     presentational components: props in, markup out, no data fetching
 app/utils/          pure helpers, auto-imported
-app/assets/css/     global styles
+app/assets/css/     global styles, tokens.css (generated)
 app/__tests__/      Vitest specs for everything under app/
 <%#hasBackend%>
 server/api/         HTTP routes the page asks (`hello.get.ts` is `GET /api/hello`)
@@ -30,6 +30,7 @@ server/__tests__/   Vitest specs for everything under server/
 <%/hasBackend%>
 - Every data-driven view models all its states explicitly: loading, empty, error, success. Errors are shown with `role="alert"`, never swallowed.
 - Keep pages thin: a page fetches and decides which component to show; components only render. Put logic in `app/utils/` as plain functions.
+- Styling: every colour, space, radius and size is a design token, written `var(--color-accent)`, `var(--space-md)`, ... Never a literal value. `app/assets/css/tokens.css` is generated from `.ai/design/tokens.json` (`./<%sdlcDir%>/sdlc design sync`): never edit it. Rule: `.ai/rules/design.md`.
 - Accessibility: semantic elements, labelled controls, visible focus, sufficient contrast. Don't convey state by colour alone.
 - Lint with `eslint --max-warnings 0` (`@nuxt/eslint`, flat config in `eslint.config.mjs`); fix the code instead of adding `eslint-disable`.
 - `.nuxt/` and `.output/` are generated: never edit or commit them. `npm run lint` and `npm run type-check` regenerate `.nuxt/` first.

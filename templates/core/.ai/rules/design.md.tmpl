@@ -1,0 +1,29 @@
+# Rule: design
+
+The design is a contract, like the API. `.ai/design/tokens.json` names every colour, space, radius and type size; screens use the names, never values.
+How the tokens work and how to import them: `.ai/design/README.md`.
+
+## Rules
+1. **No literal design values in a screen.** No hex or `rgb()` colour, no colour name, no pixel or `rem` length for spacing, radius or font size.
+<%#hasWeb%>
+   Web: `var(--color-accent)`, `var(--space-md)`, `var(--radius-lg)`, `var(--font-size-xl)` (the variables in `<%webTokensFile%>`).
+<%/hasWeb%>
+<%#hasMobile%>
+   Mobile: the theme's colours (`Theme.of(context).colorScheme`, built from the tokens in `lib/theme/app_theme.dart`) and `Tokens.spaceMd`, `Tokens.radiusLg`, `Tokens.fontSizeXl` (`<%mobileTokensFile%>`).
+<%/hasMobile%>
+2. **Need a value the tokens do not have?** Add a token to `.ai/design/tokens.json` in the same change, list it under **Tokens** in the PRD's UI & design section, and run `./<%sdlcDir%>/sdlc design sync`. Do not add a one-off token for one screen (`color.button-hover-2`): reuse a token, or ask.
+3. **Never edit a generated file** (`<%#hasWeb%>`<%webTokensFile%>`<%/hasWeb%><%#hasMobile%><%#hasWeb%> or <%/hasWeb%>`<%mobileTokensFile%>`<%/hasMobile%>). Change the tokens and sync.
+4. **Build from the PRD's UI & design section.** It names the frame, the states of each screen, the components to reuse and the exact copy. If it contradicts the tokens or leaves a state undefined, stop and ask: do not guess a design.
+5. **Reuse before adding.** Look through the existing components before writing a new one; a new component takes its values from tokens like every other.
+6. **Every screen shows every state**: loading, empty, error and success (a state the PRD marks not applicable may be left out). An error is announced to assistive technology and never shown by colour alone.
+7. **Accessible by default.** Real headings, buttons and labels; visible focus; text and controls keep their contrast in light and dark (the colour tokens are chosen for it: do not tint them in a screen).
+
+## How it is checked
+<%#designEnforced%>
+- Gate `repo.design` (`./<%sdlcDir%>/sdlc design check`): tokens valid, generated files current, no hard-coded design value, no undefined variable. A value that is deliberately not a token carries `design:allow: <why>` in a comment on its line, and a reviewer reads each one.
+- Facts: the PRD must have a UI & design section (`No UI change.` is a complete one), or the spec fails.
+<%/designEnforced%>
+<%^designEnforced%>
+- Not enforced in this project (`design.enforce` is off): run `./<%sdlcDir%>/sdlc design check` yourself before opening a PR.
+<%/designEnforced%>
+- Review: `tokens.json` is guarded, so every change to it is listed in the evidence report. A reviewer compares the running screen with the reference image of the design. Skill: `.ai/skills/implement-ui/`.

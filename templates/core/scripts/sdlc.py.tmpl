@@ -20,6 +20,7 @@ Standard library only (Python 3.9+). Configured by .ai/sdlc.json; see .ai/README
   new       create an empty feature spec from the template, by NAME (new user-login); for a document use `spec`
   deploy    deploy an image tag to an environment, then verify facts there
   secrets   scan the working tree for committed secrets
+  design    check (or `design sync`: regenerate) the files built from the design tokens in .ai/design/tokens.json; `design import` brings in a design (PDF, image, Figma link)
   up|down   start/stop the runtime used by facts
   report    print the latest evidence report
 
@@ -686,6 +687,7 @@ class Runtime:
 
 
 AC_LINE = re.compile(r"^\s*[-*]\s+\*\*(AC-\d+)\*\*\s*(.*)$", re.M)
+UI_SECTION = re.compile(r"^#{2,3}[ \t]+(?:[0-9]+\.[ \t]*)?UI[ \t]*(?:&|and)[ \t]*design\b", re.I | re.M)
 
 
 def load_specs(cfg: dict) -> list:
@@ -699,6 +701,8 @@ def load_specs(cfg: dict) -> list:
             spec["acs"] = {m.group(1): m.group(2).strip() for m in AC_LINE.finditer(prd.read_text(encoding="utf-8"))}
             if "TODO(prd)" in prd.read_text(encoding="utf-8"):
                 spec["errors"].append("prd.md still contains TODO(prd) placeholders: the PRD is not finished")
+            if (cfg.get("design") or {}).get("enforce") and not UI_SECTION.search(prd.read_text(encoding="utf-8")):
+                spec["errors"].append("prd.md has no 'UI & design' section: add it (write 'No UI change.' under it when the feature has no screen)")
         else:
             spec["errors"].append("prd.md is missing")
         if acc.exists():
@@ -2591,6 +2595,7 @@ def cmd_implement(cfg: dict, args: argparse.Namespace) -> int:
         "protected": ", ".join(f"`{p}`" for p in integ["protected"] + integ["protectedWhileHealing"]),
         "questionsFile": rel(questions),
         "context": listing(".ai/context/*.md"),
+        "designReferences": design_references_text(spec_dir) if cfg.get("design") else "",
     })
     for path, state in context_state(cfg):
         if state == "draft":
@@ -2876,6 +2881,10 @@ def cmd_doctor(cfg: dict, args: argparse.Namespace) -> int:
     if apps:
         say(f"  {ok('ok  ')}  {'desktop apps':12} you can drive: {', '.join(apps)}   (the tool opens one and waits for you; see ./<%sdlcDir%>/sdlc agent)")
     say(f"  {ok('ok  ')}  {'pdf reader':12} {pdf_reader_name()}   (for `spec`; .docx, .md and .txt need nothing)")
+    if cfg.get("design"):
+        renderer = pdf_render_tool()
+        say(f"  {ok('ok  ') if renderer else warn('note')}  {'design':12} PDF pages: " + (renderer[0] if renderer else "no renderer (macOS: brew install poppler; Ubuntu: sudo apt install poppler-utils)")
+            + "; Figma links: " + ("FIGMA_TOKEN is set" if os.environ.get("FIGMA_TOKEN") else "FIGMA_TOKEN is not set") + "   (for `design import`; images need nothing)")
     say("")
     say(ok("toolchain ready") if not bad_count else bad(f"{bad_count} required tool(s) missing"))
     return EXIT_OK if not bad_count else EXIT_FAIL
@@ -3144,6 +3153,924 @@ def cmd_report(cfg: dict, args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+# --------------------------------------------------------------------------- design
+#
+# The design contract. .ai/design/tokens.json is the source of every colour, space, radius and type size; the stylesheet
+# (web) or Dart file (mobile) of each component is GENERATED from it by `design sync`. `design check` is the gate: the
+# tokens are valid, what is generated is current, no screen hard-codes a design value, and no stylesheet uses a variable
+# that nothing defines. The generators mirror src/engine/design.ts of the scaffolder, which writes the first files; its
+# tests run both on the same tokens and require the same bytes, so change one only together with the other.
+
+DESIGN_TYPES = ("color", "dimension", "fontFamily", "fontWeight")
+DESIGN_REQUIRED_COLORS = ("accent", "bg", "border", "card", "danger", "fg", "muted")
+DESIGN_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+DESIGN_HEX = re.compile(r"#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})")
+DESIGN_DIMENSION = re.compile(r"(-?[0-9]+(?:\.[0-9]+)?)(px|rem|em)")
+DESIGN_CSS_HEADER = "/* GENERATED from .ai/design/tokens.json by `./<%sdlcDir%>/sdlc design sync`. Do not edit: change the tokens, then sync. */"
+DESIGN_DART_HEADER = "\n".join([
+    "// GENERATED from .ai/design/tokens.json by `./<%sdlcDir%>/sdlc design sync`.",
+    "// Do not edit: change the tokens, then sync. Not formatted on purpose (the formatter skips what is between the markers).",
+    "// dart format off",
+])
+DART_RESERVED = set((
+    "abstract as assert async await break case catch class const continue covariant default deferred do dynamic else enum export "
+    "extends extension external factory false final finally for get if implements import in interface is late library mixin new "
+    "null of on operator part required rethrow return sealed set static super switch this throw true try typedef var void while with yield"
+).split(" "))
+
+
+def design_value(kind: str, raw, label: str, problems: list):
+    if kind == "color":
+        if isinstance(raw, str) and DESIGN_HEX.fullmatch(raw):
+            return raw.lower()
+        problems.append(f"{label}: a colour is written #rrggbb or #rrggbbaa")
+    elif kind == "dimension":
+        if isinstance(raw, str) and DESIGN_DIMENSION.fullmatch(raw):
+            return raw
+        problems.append(f'{label}: a dimension is a number and a unit (px, rem or em), such as "1.5rem"')
+    elif kind == "fontFamily":
+        if isinstance(raw, str) and raw.strip() and not re.search(r"[;{}\r\n]|/\*", raw):
+            return raw.strip()
+        problems.append(f"{label}: a font family is a non-empty font stack on one line")
+    else:
+        n = None
+        if isinstance(raw, bool):
+            n = None
+        elif isinstance(raw, int):
+            n = raw
+        elif isinstance(raw, float) and raw.is_integer():
+            n = int(raw)
+        elif isinstance(raw, str) and re.fullmatch(r"[0-9]+", raw):
+            n = int(raw)
+        if n is not None and 100 <= n <= 900 and n % 100 == 0:
+            return str(n)
+        problems.append(f"{label}: a font weight is 100, 200, ... 900")
+    return None
+
+
+def design_in_dart(token: dict) -> bool:
+    """The mobile app has no `em` (it is relative to a font size that is not known here), so such a dimension stays on the web."""
+    return token["type"] != "dimension" or DESIGN_DIMENSION.fullmatch(token["value"]).group(2) != "em"
+
+
+def design_css_name(path: list) -> str:
+    return "--" + "-".join(path)
+
+
+def design_camel(parts: list) -> str:
+    words = "-".join(parts).split("-")
+    return "".join(w if i == 0 else w[:1].upper() + w[1:] for i, w in enumerate(words))
+
+
+def design_dart_name(token: dict) -> str:
+    return design_camel(token["path"][1:] if token["type"] == "color" else token["path"])
+
+
+def design_read(tree) -> tuple:
+    """Validate a tokens file and flatten it into tokens in the canonical order: (tokens, problems)."""
+    tokens: list = []
+    problems: list = []
+    if not isinstance(tree, dict):
+        return tokens, ["the file must hold one JSON object"]
+
+    def walk(node, path: list, inherited) -> None:
+        here = ".".join(path)
+        if not isinstance(node, dict):
+            problems.append(f"{here}: expected a group or a token")
+            return
+        kind = node.get("$type", inherited)
+        if "$value" in node:
+            if any(not k.startswith("$") for k in node):
+                problems.append(f"{here}: a token cannot also hold other tokens")
+                return
+            if kind not in DESIGN_TYPES:
+                problems.append(f"{here}: needs a $type of {', '.join(DESIGN_TYPES)}")
+                return
+            value = design_value(kind, node["$value"], here, problems)
+            dark = None
+            ext = node.get("$extensions")
+            ext = ext.get("scaffolder") if isinstance(ext, dict) else None
+            ext = ext if isinstance(ext, dict) else {}
+            if "dark" in ext:
+                if kind != "color":
+                    problems.append(f"{here}: only a colour has a dark value")
+                else:
+                    dark = design_value("color", ext["dark"], f"{here} (dark)", problems)
+            if value is not None:
+                tokens.append({"path": path, "type": kind, "value": value, "dark": dark})
+            return
+        for key, child in node.items():
+            if key.startswith("$"):
+                continue
+            if not DESIGN_NAME.fullmatch(key):
+                problems.append(f"{here + '.' if here else ''}{key}: names use lowercase letters, digits and dashes")
+                continue
+            walk(child, path + [key], kind)
+
+    walk(tree, [], None)
+    tokens.sort(key=lambda t: t["path"])
+    css: dict = {}
+    dart: dict = {}
+    for t in tokens:
+        here = ".".join(t["path"])
+        name = design_css_name(t["path"])
+        if name in css:
+            problems.append(f"{here}: becomes {name}, which {css[name]} already is")
+        css[name] = here
+        if design_in_dart(t) and t["type"] != "fontFamily":
+            key = ("color:" if t["type"] == "color" else "") + design_dart_name(t)
+            if key in dart:
+                problems.append(f"{here}: becomes the Dart name {design_dart_name(t)}, which {dart[key]} already is")
+            dart[key] = here
+            if t["type"] == "color" and design_dart_name(t) in DART_RESERVED:
+                problems.append(f"{here}: {design_dart_name(t)} is a Dart reserved word")
+    for name in DESIGN_REQUIRED_COLORS:
+        if not any(t["type"] == "color" and ".".join(t["path"]) == f"color.{name}" for t in tokens):
+            problems.append(f"color.{name}: required (the themes use it)")
+    return tokens, problems
+
+
+def design_render_css(tokens: list) -> str:
+    lines = [DESIGN_CSS_HEADER, ":root {"] + [f"  {design_css_name(t['path'])}: {t['value']};" for t in tokens] + ["}"]
+    dark = [t for t in tokens if t["dark"] is not None and t["dark"] != t["value"]]
+    if dark:
+        lines += ["", "@media (prefers-color-scheme: dark) {", "  :root {"]
+        lines += [f"    {design_css_name(t['path'])}: {t['dark']};" for t in dark]
+        lines += ["  }", "}"]
+    return "\n".join(lines) + "\n"
+
+
+def design_scaled(amount: str, factor: int) -> str:
+    """`amount` times `factor` as a short decimal, with integer arithmetic so every language prints the same digits."""
+    m = re.fullmatch(r"(-?)([0-9]+)(?:\.([0-9]+))?", amount)
+    sign, frac = m.group(1), m.group(3) or ""
+    digits = str(int(m.group(2) + frac) * factor).rjust(len(frac) + 1, "0")
+    whole = digits[:-len(frac)] if frac else digits
+    rest = digits[-len(frac):].rstrip("0") if frac else ""
+    out = whole + ("." + rest if rest else "")
+    return "0" if out == "0" else sign + out
+
+
+def design_dart_dimension(value: str) -> str:
+    m = DESIGN_DIMENSION.fullmatch(value)
+    return design_scaled(m.group(1), 16 if m.group(2) == "rem" else 1)
+
+
+def design_dart_colour(hex_value: str) -> str:
+    h = hex_value[1:].upper()
+    return "0x" + ("FF" if len(h) == 6 else h[6:]) + h[:6]
+
+
+def design_render_dart(tokens: list) -> str:
+    colours = [t for t in tokens if t["type"] == "color"]
+    numbers = [t for t in tokens if t["type"] == "dimension" and design_in_dart(t)]
+    weights = [t for t in tokens if t["type"] == "fontWeight"]
+
+    def block(name: str, pick) -> list:
+        return [f"  static const TokenColors {name} = TokenColors("] + [
+            f"    {design_dart_name(t)}: Color({design_dart_colour(pick(t))})," for t in colours] + ["  );"]
+
+    lines = [DESIGN_DART_HEADER, "import 'dart:ui' show Color, FontWeight;", "", "/// The colours of one theme.", "class TokenColors {", "  const TokenColors({"]
+    lines += [f"    required this.{design_dart_name(t)}," for t in colours]
+    lines += ["  });", ""] + [f"  final Color {design_dart_name(t)};" for t in colours] + ["}", ""]
+    lines += ["/// Every design token the app can use, by name.", "abstract final class Tokens {"]
+    lines += block("light", lambda t: t["value"]) + [""] + block("dark", lambda t: t["dark"] or t["value"])
+    lines += ([""] if numbers else []) + [f"  static const double {design_dart_name(t)} = {design_dart_dimension(t['value'])};" for t in numbers]
+    lines += ([""] if weights else []) + [f"  static const FontWeight {design_dart_name(t)} = FontWeight.w{t['value']};" for t in weights]
+    lines += ["}", "// dart format on"]
+    return "\n".join(lines) + "\n"
+
+
+def design_render(target: str, tokens: list) -> str:
+    return design_render_css(tokens) if target == "css" else design_render_dart(tokens)
+
+
+def design_load(design: dict) -> tuple:
+    path = ROOT / design["tokens"]
+    try:
+        tree = json.loads(path.read_text(encoding="utf-8"))
+    except OSError:
+        return [], [f"{design['tokens']} is missing"]
+    except ValueError as e:
+        return [], [f"{design['tokens']} is not valid JSON: {e}"]
+    return design_read(tree)
+
+
+def design_on_disk(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    except OSError:
+        return None
+
+
+# What counts as a hard-coded design value. A line (or, for Dart, a statement) carrying `design:allow` is skipped: say why next to it.
+DESIGN_SKIP_PARTS = {"node_modules", ".next", ".nuxt", ".output", ".dart_tool", "__tests__", "__mocks__", "test", "tests", "build", "coverage"}
+DESIGN_SKIP_NAME = re.compile(r"\.(?:test|spec)\.[A-Za-z]+")
+DESIGN_HEX_USE = re.compile(r"(?<![\w&/.])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})(?!\w)")
+DESIGN_COLOR_FN = re.compile(r"(?<![\w.-])(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(\s*(?!var\()")
+DESIGN_NAMED_COLOR = re.compile(
+    r"(?<![\w-])(?:color|background-color|border(?:-(?:top|right|bottom|left))?-color|outline-color|fill|stroke|caret-color)"
+    r"\s*:\s*([A-Za-z]+)\b(?!\s*\()")
+DESIGN_NAMED_OK = {"inherit", "initial", "unset", "revert", "transparent", "currentcolor", "none", "auto", "normal"}
+DESIGN_PROP = (
+    r"(?:margin|padding|gap|row-gap|column-gap|font-size|border-radius|border-(?:top|bottom)-(?:left|right)-radius"
+    r"|rowGap|columnGap|fontSize|borderRadius|border(?:Top|Bottom)(?:Left|Right)Radius)"
+    r"(?:-(?:top|right|bottom|left|inline|block|start|end)|(?:Top|Right|Bottom|Left|Inline|Block))*")
+DESIGN_RAW_LENGTH = re.compile(
+    r"(?<![\w-])" + DESIGN_PROP + r"\s*:\s*[^;{}]*?(?<![\w.#-])(?!0+(?:\.0+)?(?:px|rem|em|pt)\b)-?[0-9]*\.?[0-9]+(?:px|rem|em|pt)\b")
+DESIGN_VAR_USE = re.compile(r"var\(\s*(--[A-Za-z0-9_-]+)")
+DESIGN_VAR_DECL = re.compile(r"(?<![\w-])(--[A-Za-z0-9_-]+)\s*:")
+DART_NUM = r"(?<![\w.$])(?!0+(?:\.0+)?(?![\w.]))[0-9]+(?:\.[0-9]+)?(?![\w.])"
+DART_COLOR = re.compile(r"\bColor\(\s*0x|\bColor\.from(?:ARGB|RGBO)\(|\bColors\.(?!transparent\b)[A-Za-z]\w*")
+DART_SPACING = [
+    (re.compile(r"EdgeInsets\.[A-Za-z]+\(([^()]*)\)"), "spacing"),
+    (re.compile(r"SizedBox(?:\.[A-Za-z]+)?\([^()]*?\b(?:width|height|dimension)\s*:\s*([^,()]*)"), "spacing"),
+    (re.compile(r"(?:Border)?Radius\.circular\(([^()]*)\)"), "radius"),
+    (re.compile(r"\bfontSize\s*:\s*([^,()\n]+)"), "type size"),
+]
+DESIGN_HINT = {"spacing": "a space token", "radius": "a radius token", "type size": "a font-size token"}
+
+
+def design_files(scan: dict) -> list:
+    root = ROOT / scan["root"]
+    found = []
+    for p in sorted(root.rglob("*")) if root.is_dir() else []:
+        parts = set(p.relative_to(ROOT).parts)
+        if p.is_file() and p.suffix in scan["extensions"] and not (parts & DESIGN_SKIP_PARTS) and not DESIGN_SKIP_NAME.search(p.name):
+            found.append(p)
+    return found
+
+
+def design_scan_web(path: Path, text: str, declared: set, used: list) -> list:
+    problems = []
+    in_style = path.suffix == ".css"
+    for n, raw in enumerate(text.splitlines(), 1):
+        if path.suffix == ".vue":
+            if "<style" in raw:
+                in_style = True
+            if "</style>" in raw:
+                in_style = False
+        declared.update(DESIGN_VAR_DECL.findall(raw))
+        line = re.sub(r"/\*.*?\*/", "", raw)
+        if "design:allow" in raw:
+            continue
+        where = f"{rel(path)}:{n}"
+        for m in DESIGN_HEX_USE.finditer(line):
+            problems.append(f"{where}: the colour {m.group(0)} is hard-coded: use a colour token, var(--color-...)")
+        for m in DESIGN_COLOR_FN.finditer(line):
+            problems.append(f"{where}: a colour function ({m.group(0).strip()}) is hard-coded: use a colour token, var(--color-...)")
+        if in_style:
+            for m in DESIGN_NAMED_COLOR.finditer(line):
+                if m.group(1).lower() not in DESIGN_NAMED_OK:
+                    problems.append(f"{where}: the colour name {m.group(1)} is hard-coded: use a colour token, var(--color-...)")
+        for m in DESIGN_RAW_LENGTH.finditer(line):
+            problems.append(f"{where}: a length is hard-coded in `{m.group(0).strip()}`: use a space, radius or font-size token")
+        used.extend((where, v) for v in DESIGN_VAR_USE.findall(line))
+    return problems
+
+
+def design_scan_dart(path: Path, text: str) -> list:
+    problems = []
+
+    def at(pos: int) -> tuple:
+        n = text.count("\n", 0, pos) + 1
+        return n, text.split("\n")[n - 1]
+
+    for m in DART_COLOR.finditer(text):
+        n, line = at(m.start())
+        if "design:allow" not in line:
+            problems.append(f"{rel(path)}:{n}: a colour is hard-coded ({m.group(0).strip()}): use the theme's colours, which come from the tokens")
+    for rx, what in DART_SPACING:
+        for m in rx.finditer(text):
+            n, line = at(m.start())
+            if "design:allow" not in line and "design:allow" not in m.group(0) and re.search(DART_NUM, m.group(1)):
+                problems.append(f"{rel(path)}:{n}: a {what} is hard-coded in `{' '.join(m.group(0).split())}`: use {DESIGN_HINT[what]} from Tokens")
+    return problems
+
+
+def design_check(design: dict, tokens: list) -> tuple:
+    """Everything the gate checks: (problems, how many files were read)."""
+    problems: list = []
+    for out in design["outputs"]:
+        expected = design_render(out["target"], tokens)
+        actual = design_on_disk(ROOT / out["path"])
+        if actual is None:
+            problems.append(f"{out['path']} is missing: run ./<%sdlcDir%>/sdlc design sync")
+        elif actual != expected:
+            problems.append(f"{out['path']} is not what {design['tokens']} produces: run ./<%sdlcDir%>/sdlc design sync (and never edit a generated file)")
+    skip = {out["path"] for out in design["outputs"]}
+    declared = {design_css_name(t["path"]) for t in tokens}
+    used: list = []
+    read = 0
+    for scan in design["scan"]:
+        for path in design_files(scan):
+            if rel(path) in skip:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            read += 1
+            problems += design_scan_web(path, text, declared, used) if scan["kind"] == "web" else design_scan_dart(path, text)
+    for where, name in used:
+        if name not in declared:
+            problems.append(f"{where}: var({name}) is not defined by any token: add the token to {design['tokens']}, or use one that exists")
+    return problems, read
+
+
+# --------------------------------------------------------------------------- design import
+#
+# A design arrives as a picture (PNG, JPEG, WebP, GIF), a PDF or a Figma link. `design import` turns each into reference
+# images plus a manifest (references.json: what each file is, where it came from, its size and sha256), so that an agent builds
+# from the pictures, the text that is IN the design is copied instead of retyped, and no reference changes unnoticed.
+# Nothing here reads a design's meaning: the tokens and the PRD's UI & design section stay a person's (or a reviewed agent's) work.
+
+REF_MANIFEST = "references.json"
+REF_PROJECT_DIR = ".ai/design/references"
+REF_MAX_BYTES = 15 * 1024 * 1024
+REF_MAX_PAGES = 20
+REF_MAX_FRAMES = 20
+FIGMA_DEFAULT_API = "https://api.figma.com"
+FIGMA_MAX_RESPONSE = 40 * 1024 * 1024
+FIGMA_FRAME_TYPES = ("FRAME", "COMPONENT", "COMPONENT_SET", "INSTANCE", "GROUP")
+FIGMA_URL = re.compile(r"https://(?:www\.)?figma\.com/(?:design|file|proto|board|make|slides)/([A-Za-z0-9]+)(?:/branch/([A-Za-z0-9]+))?(?:/|$|\?)")
+FIGMA_NODE = re.compile(r"[A-Za-z0-9:;_-]{1,80}")
+
+
+def image_info(data: bytes):
+    """(format, width, height) of a PNG, JPEG, WebP or GIF, read from its header; None for anything else."""
+    found = None
+    if data[:8] == b"\x89PNG\r\n\x1a\n" and len(data) >= 24 and data[12:16] == b"IHDR":
+        found = ("png", int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big"))
+    elif data[:6] in (b"GIF87a", b"GIF89a") and len(data) >= 10:
+        found = ("gif", int.from_bytes(data[6:8], "little"), int.from_bytes(data[8:10], "little"))
+    elif data[:3] == b"\xff\xd8\xff":
+        i = 2
+        while i + 9 < len(data):
+            if data[i] != 0xFF:
+                i += 1
+                continue
+            marker = data[i + 1]
+            if marker == 0xFF:
+                i += 1
+            elif marker in (0x01, 0xD8) or 0xD0 <= marker <= 0xD7:
+                i += 2
+            elif marker == 0xD9:
+                break
+            elif 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                found = ("jpeg", int.from_bytes(data[i + 7:i + 9], "big"), int.from_bytes(data[i + 5:i + 7], "big"))
+                break
+            else:
+                i += 2 + int.from_bytes(data[i + 2:i + 4], "big")
+    elif data[:4] == b"RIFF" and data[8:12] == b"WEBP" and len(data) >= 30:
+        kind = data[12:16]
+        if kind == b"VP8X":
+            found = ("webp", 1 + int.from_bytes(data[24:27], "little"), 1 + int.from_bytes(data[27:30], "little"))
+        elif kind == b"VP8 ":
+            found = ("webp", int.from_bytes(data[26:28], "little") & 0x3FFF, int.from_bytes(data[28:30], "little") & 0x3FFF)
+        elif kind == b"VP8L":
+            bits = int.from_bytes(data[21:25], "little")
+            found = ("webp", 1 + (bits & 0x3FFF), 1 + ((bits >> 14) & 0x3FFF))
+    return found if found and found[1] > 0 and found[2] > 0 else None
+
+
+def ref_slug(text: str, fallback: str = "design") -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:60].strip("-") or fallback
+
+
+def ref_load(directory: Path) -> dict:
+    try:
+        data = json.loads((directory / REF_MANIFEST).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = None
+    if not isinstance(data, dict) or not isinstance(data.get("references"), list):
+        data = {"version": 1, "references": []}
+    return data
+
+
+def ref_save(directory: Path, manifest: dict) -> None:
+    manifest["references"].sort(key=lambda r: r["file"])
+    directory.mkdir(parents=True, exist_ok=True)
+    with open(directory / REF_MANIFEST, "w", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+
+
+def ref_forget(directory: Path, manifest: dict, source: str) -> None:
+    """Drop what an earlier import of the same source wrote (a re-import must not leave pages that are gone)."""
+    for r in [r for r in manifest["references"] if r.get("source") == source]:
+        with contextlib.suppress(OSError):
+            (directory / r["file"]).unlink()
+    manifest["references"] = [r for r in manifest["references"] if r.get("source") != source]
+
+
+def ref_put(directory: Path, manifest: dict, file: str, data: bytes, entry: dict) -> dict:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / file).write_bytes(data)
+    full = {"file": file, **entry, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+    manifest["references"] = [r for r in manifest["references"] if r.get("file") != file] + [full]
+    return full
+
+
+def ref_describe(r: dict) -> str:
+    size = f"{r['width']}x{r['height']}" if r.get("width") else f"{r.get('bytes', 0)} bytes"
+    kinds = {"image": "image", "pdf-page": f"page {r.get('page')} of {r.get('source')}", "figma-frame": f"Figma frame \"{(r.get('figma') or {}).get('name', '')}\"",
+             "text": f"the text of {r.get('of', 'the design')}"}
+    return f"{kinds.get(r.get('kind'), r.get('kind', 'file'))}, {size}"
+
+
+def design_references_text(spec_dir: Path) -> str:
+    """What the agent is told about the design pictures of a feature (and the project's style guide)."""
+    lines: list = []
+    for label, directory in (("this feature", spec_dir / "design"), ("the project's style guide", ROOT / REF_PROJECT_DIR)):
+        for r in ref_load(directory)["references"]:
+            if isinstance(r, dict) and r.get("file"):
+                lines.append(f"- `{rel(directory / r['file'])}` ({label}): {ref_describe(r)}")
+                census = r.get("census") or {}
+                if census.get("colors"):
+                    lines.append("  colours used, by how often: " + ", ".join(f"{v} x{n}" for v, n in census["colors"][:8]))
+                if census.get("fontSizes"):
+                    lines.append("  type sizes used: " + ", ".join(f"{v} x{n}" for v, n in census["fontSizes"][:6]))
+    if not lines:
+        return "None imported: the PRD's UI & design section is the only brief for the screens (`./<%sdlcDir%>/sdlc design import` adds pictures)."
+    return ("Pictures of the design. Open every image and look at it, build the screens to match it, and say in your final message what still differs "
+            "(or that you cannot view images). A `.txt` file is the exact text found in the design: copy from it, do not retype.\n" + "\n".join(lines))
+
+
+def image_import(path: Path, directory: Path, manifest: dict, name: str) -> list:
+    try:
+        data = path.read_bytes()
+    except OSError as e:
+        die(f"cannot read {path}: {e}", EXIT_FAIL)
+    if len(data) > REF_MAX_BYTES:
+        die(f"{path.name} is {len(data) // (1024 * 1024)} MB: the limit is {REF_MAX_BYTES // (1024 * 1024)} MB (export it smaller)", EXIT_FAIL)
+    info = image_info(data)
+    if info is None:
+        die(f"{path.name} is not a PNG, JPEG, WebP or GIF image", EXIT_FAIL)
+    ref_forget(directory, manifest, path.name)
+    file = f"{name or ref_slug(path.stem)}.{'jpg' if info[0] == 'jpeg' else info[0]}"
+    return [ref_put(directory, manifest, file, data, {"kind": "image", "source": path.name, "width": info[1], "height": info[2]})]
+
+
+def pdf_render_tool():
+    path = shutil.which("pdftoppm")
+    if path:
+        return "pdftoppm", path
+    path = shutil.which("sips") if sys.platform == "darwin" else None
+    return ("sips", path) if path else None
+
+
+def pdf_pages(spec: str) -> tuple:
+    m = re.fullmatch(r"([0-9]+)(?:-([0-9]+))?", spec or "")
+    first = int(m.group(1)) if m else 0
+    last = int(m.group(2) or m.group(1)) if m else 0
+    if not m or first < 1 or last < first:
+        die(f"--pages is a page or a range such as 3 or 2-5, not {spec!r}", EXIT_USAGE)
+    if last - first + 1 > REF_MAX_PAGES:
+        die(f"at most {REF_MAX_PAGES} pages at a time: use --pages {first}-{first + REF_MAX_PAGES - 1}, then the next range", EXIT_USAGE)
+    return first, last
+
+
+def pdf_design_text(path: Path) -> tuple:
+    """The text of a design PDF: (text, how) or (None, ""). Short copy is normal here, so the bar is lower than for a requirements document."""
+    for how, fn in (("pdftotext", pdf_text_poppler), ("pypdf", pdf_text_pypdf), ("mutool", pdf_text_mutool)):
+        text = fn(path)
+        if text and re.search(r"[A-Za-z0-9]{2,}", text):
+            return re.sub(r"\n{3,}", "\n\n", text.replace("\f", "\n")).strip(), how
+    return None, ""
+
+
+def pdf_import(path: Path, directory: Path, manifest: dict, name: str, pages: str, dpi: int) -> list:
+    if not 72 <= dpi <= 300:
+        die("--dpi is between 72 and 300", EXIT_USAGE)
+    first, last = pdf_pages(pages or f"1-{REF_MAX_PAGES}")
+    tool = pdf_render_tool()
+    if tool is None:
+        die("no PDF renderer found. Install poppler (macOS: brew install poppler; Ubuntu: sudo apt install poppler-utils; Windows: scoop install poppler "
+            "or choco install poppler), then run this again. Or export the pages as PNG images and import those.", EXIT_FAIL)
+    import tempfile
+    base = name or ref_slug(path.stem)
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp)
+        if tool[0] == "pdftoppm":
+            cmd = [tool[1], "-png", "-r", str(dpi), "-f", str(first), "-l", str(last), str(path), str(out / "page")]
+        else:
+            if pages and (first, last) != (1, 1):
+                die("without poppler only the first page can be rendered (macOS sips, at 72 dpi). Install poppler (brew install poppler) for other pages.", EXIT_FAIL)
+            say(warn("  note: rendering with macOS sips: the first page only, at 72 dpi. Install poppler (brew install poppler) for every page and a sharper picture."))
+            cmd = [tool[1], "-s", "format", "png", str(path), "--out", str(out / "page-1.png")]
+        try:
+            done = subprocess.run(cmd, capture_output=True, timeout=240)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            die(f"the PDF renderer {tool[0]} did not run: {e}", EXIT_FAIL)
+        if done.returncode != 0:
+            die(f"{tool[0]} could not render {path.name} (is it protected or damaged?): {(done.stderr or done.stdout).decode('utf-8', 'replace').strip()[-300:]}", EXIT_FAIL)
+        rendered = sorted((int(m.group(1)), p) for p in out.glob("page-*.png") for m in [re.fullmatch(r"page-([0-9]+)\.png", p.name)] if m)
+        if not rendered:
+            die(f"{tool[0]} produced no pages: does {path.name} have page {first}?", EXIT_FAIL)
+        ref_forget(directory, manifest, path.name)
+        made = []
+        for number, png in rendered:
+            data = png.read_bytes()
+            info = image_info(data)
+            if info is None or len(data) > REF_MAX_BYTES:
+                die(f"page {number} of {path.name} did not render to a usable image (try a lower --dpi)", EXIT_FAIL)
+            made.append(ref_put(directory, manifest, f"{base}-p{number}.png", data, {"kind": "pdf-page", "source": path.name, "page": number, "width": info[1], "height": info[2], "dpi": dpi if tool[0] == "pdftoppm" else 72}))
+    text, how = pdf_design_text(path)
+    if text:
+        made.append(ref_put(directory, manifest, f"{base}.txt", (text + "\n").encode("utf-8"), {"kind": "text", "source": path.name, "of": path.name, "extractedWith": how}))
+    if len(rendered) == last - first + 1 and last - first + 1 == REF_MAX_PAGES and not pages:
+        say(warn(f"  note: stopped at {REF_MAX_PAGES} pages. Import the rest with --pages {last + 1}-{last + REF_MAX_PAGES}."))
+    return made
+
+
+class FigmaError(Exception):
+    def __init__(self, code: int, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def figma_api_base() -> str:
+    override = os.environ.get("SDLC_FIGMA_API", "")
+    # Only a loopback address may stand in for Figma (the tests' fake server): a token is never sent to anywhere else.
+    return override if re.fullmatch(r"http://(?:127\.0\.0\.1|localhost):[0-9]+", override) else FIGMA_DEFAULT_API
+
+
+def figma_fetch(url: str, token, limit: int) -> bytes:
+    headers = {"User-Agent": "sdlc-design-import"}
+    if token:
+        headers["X-Figma-Token"] = token
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60) as resp:
+            data = resp.read(limit + 1)
+    except urllib.error.HTTPError as e:
+        h = e.headers
+        if e.code == 429:
+            wait = h.get("Retry-After", "?")
+            raise FigmaError(429, f"Figma is rate-limiting this token (429): try again in {wait} seconds. Plan {h.get('X-Figma-Plan-Tier', '?')}, seat limit {h.get('X-Figma-Rate-Limit-Type', '?')}"
+                             + (f". Upgrade: {h.get('X-Figma-Upgrade-Link')}" if h.get("X-Figma-Upgrade-Link") else "") + ". An import makes two requests; a view-only seat gets very few per month.") from None
+        if e.code == 403:
+            raise FigmaError(403, "Figma refused the token (403): it may be expired, lack the file_content:read scope, or have no access to this file") from None
+        if e.code == 404:
+            raise FigmaError(404, "Figma has no such file (404), or this token cannot see it") from None
+        raise FigmaError(e.code, f"Figma answered HTTP {e.code}") from None
+    except (urllib.error.URLError, OSError) as e:
+        raise FigmaError(0, f"could not reach Figma: {getattr(e, 'reason', e)}") from None
+    if len(data) > limit:
+        raise FigmaError(0, f"the answer is larger than {limit // (1024 * 1024)} MB: link a single frame instead of a whole page")
+    return data
+
+
+def figma_get(path: str, token: str) -> dict:
+    try:
+        data = json.loads(figma_fetch(figma_api_base() + path, token, FIGMA_MAX_RESPONSE).decode("utf-8"))
+    except ValueError:
+        raise FigmaError(0, "Figma's answer was not JSON") from None
+    if not isinstance(data, dict):
+        raise FigmaError(0, "Figma's answer was not what the API documents")
+    return data
+
+
+def figma_parse(url: str) -> tuple:
+    """(file key, node ids in the API's form 1:2, whichever form the link or --node uses)."""
+    m = FIGMA_URL.match(url)
+    if not m:
+        die("that is not a Figma file link (https://www.figma.com/design/<key>/<name>?node-id=...)", EXIT_USAGE)
+    ids = []
+    for value in urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("node-id", []):
+        ids.append(figma_node_id(value))
+    return m.group(2) or m.group(1), ids
+
+
+def figma_node_id(value: str) -> str:
+    value = urllib.parse.unquote(value).strip()
+    value = value.replace("-", ":") if re.fullmatch(r"[0-9]+-[0-9]+", value) else value
+    if not FIGMA_NODE.fullmatch(value):
+        die(f"{value!r} is not a Figma node id (1:2, or 1-2 as it appears in a link)", EXIT_USAGE)
+    return value
+
+
+def figma_hex(color: dict, opacity: float):
+    try:
+        alpha = float(color.get("a", 1)) * opacity
+        rgb = [max(0, min(255, round(float(color[k]) * 255))) for k in "rgb"]
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return None
+    out = "#" + "".join(f"{v:02x}" for v in rgb)
+    return out if alpha >= 0.995 else out + f"{max(0, min(255, round(alpha * 255))):02x}"
+
+
+def figma_number(value):
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return int(f) if f == int(f) else round(f, 2)
+
+
+def figma_census(root: dict) -> tuple:
+    """(texts in reading order, what the frame uses: colours, type sizes, weights, families, radii and spacing, by count)."""
+    texts: list = []
+    counts: dict = {k: {} for k in ("colors", "fontSizes", "fontWeights", "fontFamilies", "radii", "spacing")}
+
+    def bump(kind: str, value) -> None:
+        if value is not None and value != 0 and value != "":
+            counts[kind][value] = counts[kind].get(value, 0) + 1
+
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, dict) or node.get("visible") is False:
+            continue
+        for key in ("fills", "strokes"):
+            for paint in node.get(key) or []:
+                if isinstance(paint, dict) and paint.get("type") == "SOLID" and paint.get("visible", True) is not False:
+                    try:
+                        bump("colors", figma_hex(paint.get("color") or {}, float(paint.get("opacity", 1))))
+                    except (TypeError, ValueError):
+                        pass
+        if node.get("type") == "TEXT" and isinstance(node.get("characters"), str):
+            box = node.get("absoluteBoundingBox") or {}
+            texts.append((round((figma_number(box.get("y")) or 0) / 12), figma_number(box.get("x")) or 0, " ".join(node["characters"].split())))
+            style = node.get("style") or {}
+            bump("fontSizes", figma_number(style.get("fontSize")))
+            bump("fontWeights", figma_number(style.get("fontWeight")))
+            bump("fontFamilies", style.get("fontFamily") if isinstance(style.get("fontFamily"), str) else None)
+        radii = node.get("rectangleCornerRadii") if isinstance(node.get("rectangleCornerRadii"), list) else [node.get("cornerRadius")]
+        for r in radii:
+            bump("radii", figma_number(r))
+        if node.get("layoutMode") in ("HORIZONTAL", "VERTICAL"):
+            bump("spacing", figma_number(node.get("itemSpacing")))
+        for side in ("paddingLeft", "paddingRight", "paddingTop", "paddingBottom"):
+            bump("spacing", figma_number(node.get(side)))
+        stack.extend(reversed([c for c in node.get("children") or [] if isinstance(c, dict)]))
+    ordered = [t[2] for t in sorted(texts, key=lambda t: (t[0], t[1])) if t[2]]
+    census = {}
+    for kind, seen in counts.items():
+        top = sorted(seen.items(), key=lambda kv: (-kv[1], str(kv[0])))[:12]
+        if top:
+            census[kind] = [[value, n] for value, n in top]
+    return ordered, census
+
+
+def figma_targets(docs: dict, ids: list) -> list:
+    """The nodes to export: every requested frame, and the frames of a requested page or section."""
+    out: list = []
+    for nid in ids:
+        node = (docs.get(nid) or {}).get("document") if isinstance(docs.get(nid), dict) else None
+        if not isinstance(node, dict):
+            die(f"Figma has no node {nid} in this file, or this token cannot see it", EXIT_FAIL)
+        if node.get("type") in ("CANVAS", "SECTION"):
+            out += [c for c in node.get("children") or [] if isinstance(c, dict) and c.get("type") in FIGMA_FRAME_TYPES and c.get("id")]
+        elif node.get("id"):
+            out.append(node)
+    return out
+
+
+def figma_listing(key: str, token: str) -> None:
+    data = figma_get(f"/v1/files/{urllib.parse.quote(key)}?depth=2", token)
+    say(f"This link names no frame. The frames of {data.get('name', 'the file')}:")
+    shown = 0
+    for page in (data.get("document") or {}).get("children") or []:
+        for node in page.get("children") or []:
+            if node.get("type") in FIGMA_FRAME_TYPES + ("SECTION",) and shown < 60:
+                say(f"  {page.get('name', '?')} / {node.get('name', '?')}   --node {node.get('id')}")
+                shown += 1
+    say("Copy a frame's link in Figma (right click the frame, Copy link) and import that, or repeat --node for several frames.")
+
+
+def figma_tokens(meta: dict) -> tuple:
+    """A proposal of tokens from Figma variables (Enterprise plans): (tree, number of variables that were kept)."""
+    variables = meta.get("variables") or {}
+    collections = meta.get("variableCollections") or {}
+
+    def resolve(var: dict, mode: str, depth: int = 0):
+        value = (var.get("valuesByMode") or {}).get(mode)
+        if isinstance(value, dict) and value.get("type") == "VARIABLE_ALIAS" and depth < 8:
+            target = variables.get(value.get("id"))
+            if not isinstance(target, dict):
+                return None
+            tmode = mode if mode in (target.get("valuesByMode") or {}) else (collections.get(target.get("variableCollectionId")) or {}).get("defaultModeId")
+            return resolve(target, tmode, depth + 1)
+        return value
+
+    tree: dict = {"$description": "PROPOSED from Figma variables by `design import`. Rename the groups and tokens to this project's names (see .ai/design/README.md), check each unit, "
+                                  "then save as tokens.json and run sync. Nothing reads this file."}
+    kept = 0
+    for var in sorted((v for v in variables.values() if isinstance(v, dict)), key=lambda v: str(v.get("name"))):
+        coll = collections.get(var.get("variableCollectionId")) or {}
+        default = coll.get("defaultModeId")
+        dark = next((m.get("modeId") for m in coll.get("modes") or [] if m.get("modeId") != default and re.search("dark", str(m.get("name")), re.I)), None)
+        value = resolve(var, default)
+        token = None
+        if var.get("resolvedType") == "COLOR" and isinstance(value, dict):
+            light = figma_hex(value, 1.0)
+            if light:
+                token = {"$type": "color", "$value": light}
+                other = figma_hex(resolve(var, dark) or {}, 1.0) if dark else None
+                if other and other != light:
+                    token["$extensions"] = {"scaffolder": {"dark": other}}
+        elif var.get("resolvedType") == "FLOAT" and figma_number(value) is not None:
+            token = {"$type": "dimension", "$value": f"{figma_number(value)}px", "$description": "a Figma number: check that px is its unit"}
+        if token is None:
+            continue
+        path = [ref_slug(coll.get("name", ""), "variables")] + [ref_slug(p, "x") for p in str(var.get("name", "")).split("/") if p.strip()]
+        node = tree
+        for part in path[:-1]:
+            node = node.setdefault(part, {})
+            if "$value" in node:
+                break
+        else:
+            if path[-1] not in node:
+                node[path[-1]] = token
+                kept += 1
+    return tree, kept
+
+
+def figma_import(url: str, directory: Path, manifest: dict, name: str, nodes: list, scale: float, variables: bool) -> list:
+    key, ids = figma_parse(url)
+    ids = ids + [figma_node_id(n) for n in nodes if figma_node_id(n) not in ids]
+    token = os.environ.get("FIGMA_TOKEN", "").strip()
+    if not token:
+        die("a Figma link needs a personal access token in the FIGMA_TOKEN environment variable (never in a file): Figma > Settings > Security > Personal access tokens, "
+            "scope file_content:read (add file_variables:read only for --variables on an Enterprise plan). Then:  export FIGMA_TOKEN=...   (PowerShell: $env:FIGMA_TOKEN = \"...\")", EXIT_USAGE)
+    if not 0.5 <= scale <= 4:
+        die("--scale is between 0.5 and 4", EXIT_USAGE)
+    quoted = urllib.parse.quote(key)
+    try:
+        if not ids:
+            figma_listing(key, token)
+            sys.exit(EXIT_HUMAN)
+        listed = urllib.parse.quote(",".join(ids), safe=",:;")
+        doc = figma_get(f"/v1/files/{quoted}/nodes?ids={listed}", token)
+        targets = figma_targets(doc.get("nodes") or {}, ids)[:REF_MAX_FRAMES]
+        if not targets:
+            die("there is no frame to export in what the link points at", EXIT_FAIL)
+        wanted = urllib.parse.quote(",".join(t["id"] for t in targets), safe=",:;")
+        images = figma_get(f"/v1/images/{quoted}?ids={wanted}&format=png&scale={scale:g}", token)
+        if images.get("err"):
+            die(f"Figma could not render the frames: {images['err']}", EXIT_FAIL)
+        urls = images.get("images") if isinstance(images.get("images"), dict) else {}
+        made: list = []
+        base = figma_api_base()
+        for node in targets:
+            nid = node["id"]
+            frame = str(node.get("name") or "frame")
+            stem = (name if name and len(targets) == 1 else (f"{name}-" if name else "") + ref_slug(frame, "frame") + "-" + nid.replace(":", "-").replace(";", "-"))
+            source = f"https://www.figma.com/design/{key}?node-id={nid.replace(':', '-')}"
+            address = urls.get(nid)
+            if not address:
+                say(warn(f"  skipped {frame!r} ({nid}): Figma could not render it (hidden or empty?)"))
+                continue
+            if not (address.startswith("https://") or (base != FIGMA_DEFAULT_API and address.startswith(base + "/"))):
+                die(f"Figma gave an image address that is not https, so it was not fetched ({frame!r})", EXIT_FAIL)
+            try:
+                data = figma_fetch(address, None, REF_MAX_BYTES)
+            except FigmaError as e:
+                die(f"could not download the image of {frame!r}: {e}", EXIT_FAIL)
+            info = image_info(data)
+            if info is None:
+                die(f"what Figma returned for {frame!r} is not an image", EXIT_FAIL)
+            texts, census = figma_census(node)
+            ref_forget(directory, manifest, source)
+            entry = {"kind": "figma-frame", "source": source, "width": info[1], "height": info[2],
+                     "figma": {"fileKey": key, "nodeId": nid, "name": frame, "fileName": doc.get("name"), "lastModified": doc.get("lastModified"), "scale": scale}}
+            if census:
+                entry["census"] = census
+            made.append(ref_put(directory, manifest, f"{stem}.png", data, entry))
+            if texts:
+                made.append(ref_put(directory, manifest, f"{stem}.txt", ("\n".join(texts) + "\n").encode("utf-8"),
+                                    {"kind": "text", "source": source, "of": f"{stem}.png"}))
+        if variables:
+            try:
+                meta = figma_get(f"/v1/files/{quoted}/variables/local", token).get("meta") or {}
+                tree, kept = figma_tokens(meta)
+                proposal = ROOT / ".ai" / "design" / "tokens.proposed.json"
+                proposal.parent.mkdir(parents=True, exist_ok=True)
+                with open(proposal, "w", encoding="utf-8", newline="\n") as f:
+                    f.write(json.dumps(tree, indent=2, ensure_ascii=False) + "\n")
+                say(ok(f"  {kept} variable(s) proposed in {rel(proposal)}: rename them to this project's names (required colours: {', '.join(DESIGN_REQUIRED_COLORS)}), save as tokens.json, then sync"))
+            except FigmaError as e:
+                say(warn(f"  variables skipped: {e}" + (" (the Variables API is for Enterprise plans)" if e.code in (403, 404) else "")))
+        return made
+    except FigmaError as e:
+        die(str(e).replace(token, "***"), EXIT_FAIL)
+
+
+def design_import(cfg: dict, args: argparse.Namespace) -> int:
+    sources = list(getattr(args, "source", None) or [])
+    if not sources:
+        die("name what to import: an image (.png .jpg .webp .gif), a .pdf, or a Figma link", EXIT_USAGE)
+    if args.feature and args.project:
+        die("choose --feature or --project, not both", EXIT_USAGE)
+    if args.feature:
+        spec = find_spec(cfg, args.feature)
+        if spec is None:
+            die(f"no feature {args.feature!r}: create it first (./<%sdlcDir%>/sdlc new <slug>) and use its id, such as FEAT-001", EXIT_USAGE)
+        directory = spec / "design"
+    elif args.project:
+        directory = ROOT / REF_PROJECT_DIR
+    else:
+        die("say where the references belong: --feature FEAT-001 (the screens of one feature) or --project (the style guide)", EXIT_USAGE)
+    if args.name and len(sources) > 1:
+        die("--name names one import: leave it out when importing several", EXIT_USAGE)
+    if args.name and ref_slug(args.name, "") != args.name:
+        die("--name is lowercase letters, digits and dashes", EXIT_USAGE)
+    manifest = ref_load(directory)
+    made: list = []
+    for source in sources:
+        if re.match(r"https?://", source):
+            made += figma_import(source, directory, manifest, args.name or "", args.node or [], args.scale, args.variables)
+            continue
+        path = Path(source).expanduser()
+        if not path.is_file():
+            die(f"{source} is not a file (and not a Figma link)", EXIT_USAGE)
+        if path.suffix.lower() == ".pdf":
+            made += pdf_import(path, directory, manifest, args.name or "", args.pages or "", args.dpi)
+        else:
+            made += image_import(path, directory, manifest, args.name or "")
+    ref_save(directory, manifest)
+    if not made:
+        say(warn("nothing was imported"))
+        return EXIT_FAIL
+    say(ok(f"imported {len(made)} file(s) into {rel(directory)}:"))
+    for r in made:
+        say(f"  {r['file']}   {ref_describe(r)}")
+        census = r.get("census") or {}
+        if census.get("colors"):
+            say(dim("    colours: " + ", ".join(f"{v} x{n}" for v, n in census["colors"][:8])))
+        if census.get("fontSizes"):
+            say(dim("    type sizes: " + ", ".join(f"{v} x{n}" for v, n in census["fontSizes"][:6])))
+    if args.feature:
+        say("Next: write the PRD's UI & design section from these (skill .ai/skills/implement-ui); `./<%sdlcDir%>/sdlc implement` shows them to the agent.")
+    else:
+        say("Next: derive the design tokens from these into .ai/design/tokens.json, then ./<%sdlcDir%>/sdlc design sync.")
+    return EXIT_OK
+
+
+def design_check_references(cfg: dict) -> list:
+    """Every reference a manifest lists exists and is byte for byte what was imported."""
+    problems: list = []
+    specs = ROOT / cfg.get("facts", {}).get("specsDir", ".ai/specs")
+    for directory in [ROOT / REF_PROJECT_DIR] + [d / "design" for d in sorted(specs.glob("FEAT-*"))]:
+        manifest = directory / REF_MANIFEST
+        if not manifest.exists():
+            continue
+        try:
+            listed = json.loads(manifest.read_text(encoding="utf-8")).get("references", [])
+        except (OSError, ValueError, AttributeError):
+            problems.append(f"{rel(manifest)} is not valid JSON: import the design again")
+            continue
+        for r in listed if isinstance(listed, list) else []:
+            file = r.get("file") if isinstance(r, dict) else None
+            if not isinstance(file, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", file):
+                problems.append(f"{rel(manifest)} lists a file with an unusable name")
+                continue
+            if not (directory / file).is_file():
+                problems.append(f"{rel(directory / file)} is listed in references.json but missing: import the design again")
+            elif hashlib.sha256((directory / file).read_bytes()).hexdigest() != r.get("sha256"):
+                problems.append(f"{rel(directory / file)} is not what references.json recorded (edited or replaced): import it again so the record matches")
+    return problems
+
+
+def cmd_design(cfg: dict, args: argparse.Namespace) -> int:
+    design = cfg.get("design")
+    if not design:
+        say(dim("This project has no design tokens: it has no screen (no web or mobile component)."))
+        return EXIT_USAGE if args.action == "import" else EXIT_OK
+    if args.action == "import":
+        return design_import(cfg, args)
+    tokens, problems = design_load(design)
+    if problems:
+        say(bad(f"{design['tokens']} is not valid:"))
+        for p in problems:
+            say(f"  - {p}")
+        return EXIT_FAIL
+    if args.action == "sync":
+        for out in design["outputs"]:
+            target = ROOT / out["path"]
+            content = design_render(out["target"], tokens)
+            if design_on_disk(target) == content:
+                say(f"{out['path']}: already in sync")
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with open(target, "w", encoding="utf-8", newline="\n") as f:
+                f.write(content)
+            say(ok(f"{out['path']}: written from {design['tokens']}"))
+        return EXIT_OK
+    found, read = design_check(design, tokens)
+    found += design_check_references(cfg)
+    if found:
+        say(bad(f"{len(found)} design problem(s):"))
+        for p in found[:60]:
+            say(f"  - {p}")
+        if len(found) > 60:
+            say(f"  ... and {len(found) - 60} more")
+        say("Colours, spacing, radius and type sizes come from the tokens in " + design["tokens"] + " (rule: .ai/rules/design.md). Add '/* design:allow: <why> */' to a line only for a value that is deliberately not a token.")
+        return EXIT_FAIL
+    say(ok(f"design: {len(tokens)} tokens valid, {len(design['outputs'])} generated file(s) in sync, {read} source file(s) use only tokens"))
+    return EXIT_OK
+
+
 # --------------------------------------------------------------------------- entry
 
 
@@ -3226,6 +4153,18 @@ def build_parser() -> argparse.ArgumentParser:
     dp.add_argument("--tag")
     sc = sub.add_parser("secrets")
     sc.add_argument("--update-baseline", action="store_true", help="adopted projects: record the secrets that are already here as known")
+    de = sub.add_parser("design")
+    de.add_argument("action", nargs="?", choices=["check", "sync", "import"], default="check",
+                    help="check: the gate (default); sync: write the files generated from the tokens; import: bring in a design (PDF, image or Figma link)")
+    de.add_argument("source", nargs="*", help="import: image files, PDFs or Figma links")
+    de.add_argument("--feature", help="import: the feature whose screens these are (FEAT-001): saved in its design/ folder")
+    de.add_argument("--project", action="store_true", help="import: a style guide for the whole project: saved in .ai/design/references/")
+    de.add_argument("--name", help="import: file name to save as (lowercase letters, digits, dashes)")
+    de.add_argument("--pages", help="import a PDF: a page or range, such as 3 or 2-5 (default: the first 20 pages)")
+    de.add_argument("--dpi", type=int, default=150, help="import a PDF: resolution of the pictures (72 to 300)")
+    de.add_argument("--scale", type=float, default=2, help="import a Figma frame: export scale (0.5 to 4)")
+    de.add_argument("--node", action="append", help="import a Figma link: a frame's node id (1:2), repeatable")
+    de.add_argument("--variables", action="store_true", help="import a Figma link: also propose tokens from its variables (Enterprise plans)")
     sub.add_parser("up")
     sub.add_parser("down")
     sub.add_parser("report")
@@ -3234,7 +4173,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 COMMANDS = {
     "setup": cmd_setup, "doctor": cmd_doctor, "agent": cmd_agent, "gates": cmd_gates, "facts": cmd_facts, "verify": cmd_verify, "loop": cmd_loop,
-    "feature": cmd_feature, "spec": cmd_spec, "implement": cmd_implement, "sync": cmd_sync, "onboard": cmd_onboard, "baseline": cmd_baseline, "new": cmd_new, "deploy": cmd_deploy, "secrets": cmd_secrets, "up": cmd_up, "down": cmd_down, "report": cmd_report,
+    "feature": cmd_feature, "spec": cmd_spec, "implement": cmd_implement, "sync": cmd_sync, "onboard": cmd_onboard, "baseline": cmd_baseline, "new": cmd_new, "deploy": cmd_deploy, "secrets": cmd_secrets, "design": cmd_design, "up": cmd_up, "down": cmd_down, "report": cmd_report,
 }
 
 

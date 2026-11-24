@@ -14,6 +14,9 @@ The report is `.ai/evidence/latest/report.md`. If you cannot run something, say 
 <%#hasBackend%>
 | Contract | Define the API before code | `.ai/skills/define-contract/`, `.ai/rules/contract.md` |
 <%/hasBackend%>
+<%#hasDesign%>
+| Design | Build screens from the design tokens, every state, then compare with the reference | `.ai/skills/implement-ui/`, `.ai/rules/design.md`, `.ai/design/README.md` |
+<%/hasDesign%>
 | Code | Small vertical slices, test first | `.ai/skills/implement-feature/`, `.ai/rules/*` |
 | Test | Run the loop until green | `.ai/skills/verify-loop/`, `.ai/skills/fix-failing-gate/` |
 | Deploy | Tag, let CD promote, verify the live URL | `.ai/skills/release-and-deploy/` |
@@ -34,6 +37,10 @@ Worked example: `.ai/specs/FEAT-000-hello-world/`.
 ./<%sdlcDir%>/sdlc spec requirements.pdf   # an agent drafts prd.md + acceptance.json from a document; you review the draft
 ./<%sdlcDir%>/sdlc implement FEAT-001   # spec in (prd.md + acceptance.json), verified code out; needs an agent
 ./<%sdlcDir%>/sdlc sync       # install dependencies if a manifest (<%manifests%>) changed
+<%#hasDesign%>
+./<%sdlcDir%>/sdlc design sync    # rewrite the generated files from the design tokens (.ai/design/tokens.json)
+./<%sdlcDir%>/sdlc design check   # tokens valid, generated files current, no hard-coded colour, space, radius or font size
+<%/hasDesign%>
 ```
 Single gate while iterating: `./<%sdlcDir%>/sdlc gates --only <id>`. `make help` lists the same commands.
 On Windows (PowerShell or cmd) the launcher is `.\<%sdlcDir%>\sdlc.cmd`; every command and option is the same. Never edit the launchers (`<%sdlcDir%>/sdlc`, `<%sdlcDir%>/sdlc.cmd`, `<%sdlcDir%>/sdlc.py`).
@@ -48,10 +55,10 @@ On Windows (PowerShell or cmd) the launcher is `.\<%sdlcDir%>\sdlc.cmd`; every c
 ## Layout
 ```
 <%#hasBackend%>
-.ai/            rules/ skills/ prompts/ specs/ contract/   <- the AI operating system of this repo
+.ai/            rules/ skills/ prompts/ specs/ contract/<%#hasDesign%> design/<%/hasDesign%>   <- the AI operating system of this repo
 <%/hasBackend%>
 <%^hasBackend%>
-.ai/            rules/ skills/ prompts/ specs/             <- the AI operating system of this repo
+.ai/            rules/ skills/ prompts/ specs/<%#hasDesign%> design/<%/hasDesign%>             <- the AI operating system of this repo
 <%/hasBackend%>
 scripts/        sdlc, sdlc.py                              <- the verification loop (stdlib-only Python)
 <%#hasBackend%>
@@ -79,11 +86,17 @@ docker-compose.yml   full stack, also used by the facts stage
 4. No secrets in the repo (`./<%sdlcDir%>/sdlc secrets` enforces it). Config comes from environment variables; see `.env.example`.
 5. One feature per branch/PR; reference the `FEAT-xxx` id. Conventional Commits (`feat:`, `fix:`, `chore:`).
 6. If the spec is ambiguous or seems wrong, stop and ask. Do not guess requirements.
+<%#hasDesign%>
+7. Never hard-code a colour, space, radius or font size in a screen, and never edit a generated tokens file: use the tokens in `.ai/design/tokens.json` (`.ai/rules/design.md`).
+<%/hasDesign%>
 <%/hasBackend%>
 <%^hasBackend%>
 3. No secrets in the repo (`./<%sdlcDir%>/sdlc secrets` enforces it). Config comes from environment variables; see `.env.example`.
 4. One feature per branch/PR; reference the `FEAT-xxx` id. Conventional Commits (`feat:`, `fix:`, `chore:`).
 5. If the spec is ambiguous or seems wrong, stop and ask. Do not guess requirements.
+<%#hasDesign%>
+6. Never hard-code a colour, space, radius or font size in a screen, and never edit a generated tokens file: use the tokens in `.ai/design/tokens.json` (`.ai/rules/design.md`).
+<%/hasDesign%>
 <%/hasBackend%>
 
 ## When verification fails

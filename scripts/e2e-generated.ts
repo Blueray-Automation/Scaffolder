@@ -16,9 +16,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { strToU8, zipSync } from "fflate";
-import { deepMerge, defaultConfig } from "../src/engine/config";
+import { deepMerge, defaultConfig, type ScaffolderConfig } from "../src/engine/config";
 import { generateProject } from "../src/engine/generate";
 import { OPENAPI_SNAPSHOT, relativeFrom } from "../src/engine/gates";
+import { designPlan } from "../src/engine/design";
 
 type Json = Record<string, any>;
 
@@ -62,6 +63,43 @@ function expectExit(label: string, cwd: string, args: string[], want: number, ex
     log(out.split("\n").slice(-25).map((l) => `      ${l}`).join("\n"));
   }
   return out;
+}
+
+/**
+ * The design contract's negative controls: a screen that hard-codes a value, a generated file somebody edited and a token
+ * somebody changed without syncing must each FAIL the gate, and `design sync` must put the project right again.
+ */
+function designControls(dir: string, cfg: ScaffolderConfig): void {
+  const plan = designPlan(cfg);
+  if (!plan) return;
+  const web = plan.scan[0]?.kind === "web";
+  const output = plan.outputs[0];
+  const scan = plan.scan[0];
+  if (!output || !scan) return bad("a project with a screen has no design plan");
+  const cheat = join(dir, scan.root, web ? "e2e-cheat.css" : "e2e-cheat.dart");
+  writeFileSync(cheat, web ? ".cheat {\n  color: #ff0000;\n  padding: 12px;\n}\n" : "const cheat = EdgeInsets.all(16);\n");
+  const cheated = expectExit("the design gate FAILS for a screen that hard-codes a value", dir, ["gates", "--only", "repo.design"], 1);
+  if (cheated.includes("e2e-cheat") || readFileSync(join(dir, ".ai/evidence/latest/logs/repo.design.log"), "utf8").includes("e2e-cheat")) ok("the failure names the file");
+  else bad("the hard-coded value was not named");
+  rmSync(cheat);
+  expectExit("the design gate passes again without it", dir, ["gates", "--only", "repo.design"], 0);
+
+  const generated = join(dir, output.path);
+  const original = readFileSync(generated, "utf8");
+  writeFileSync(generated, `${original}// edited by hand\n`);
+  expectExit("the design gate FAILS for a generated file somebody edited", dir, ["design", "check"], 1);
+  writeFileSync(generated, original);
+
+  const tokensPath = join(dir, plan.tokens);
+  const tokens = readFileSync(tokensPath, "utf8");
+  writeFileSync(tokensPath, tokens.replace("#4f46e5", "#0ea5e9"));
+  expectExit("the design gate FAILS for a token changed without a sync", dir, ["design", "check"], 1);
+  expectExit("design sync regenerates the files from the tokens", dir, ["design", "sync"], 0);
+  if (readFileSync(generated, "utf8").toLowerCase().includes(web ? "#0ea5e9" : "0xff0ea5e9")) ok("the new colour is in the generated file");
+  else bad("the new colour did not reach the generated file");
+  expectExit("and the gate is green with the new tokens", dir, ["gates", "--only", "repo.design"], 0);
+  writeFileSync(tokensPath, tokens);
+  expectExit("sync back to the original tokens", dir, ["design", "sync"], 0);
 }
 
 function pythonVersion(): string {
@@ -234,6 +272,9 @@ function scenario(name: string, patch: Json): void {
     expectExit("secret scan catches a committed key", dir, ["secrets"], 1);
     rmSync(join(dir, "leak.txt"));
 
+    // --- the design contract ---
+    if (cfg.web.enabled) designControls(dir, cfg);
+
     // --- sdlc implement: spec in, verified code out, with a scripted agent standing in for the AI ---
     implementFromSpec(dir, cfg, git, name);
     specFromDocument(dir, cfg, git, name);
@@ -333,6 +374,9 @@ function mobileOnlyScenario(name: string, cfg: Json, result: ReturnType<typeof g
     expectExit("secret scan catches a committed key", dir, ["secrets"], 1);
     rmSync(join(dir, "leak.txt"));
 
+    // --- the design contract ---
+    designControls(dir, cfg as ScaffolderConfig);
+
     // --- the platform folders: `flutter create` must not break or rewrite what was generated ---
     const shipped = (root: string) =>
       readdirSync(root, { recursive: true, withFileTypes: true })
@@ -382,10 +426,13 @@ Public, read-only.
 ## 5. Contract impact
 New endpoint \`GET /api/v1/slug\`. No migrations.
 
-## 6. Out of scope
+## 6. UI & design
+No UI change.
+
+## 7. Out of scope
 Custom separators, uniqueness, persistence.
 
-## 7. Verification map
+## 8. Verification map
 See acceptance.json.
 `;
 
@@ -648,7 +695,7 @@ function specFromDocument(dir: string, cfg: Json, git: (...a: string[]) => unkno
   writeFileSync(join(work, "notes.xyz"), "not a document");
 
   // what the scripted agent will "write": a valid draft, and an invalid first attempt (AC-002 uncovered, a target that does not exist)
-  const prdDraft = `${SLUG_PRD}\n## 8. Assumptions & open questions\nASSUMPTION: slugs are lower-case.\n`;
+  const prdDraft = `${SLUG_PRD}\n## 9. Assumptions & open questions\nASSUMPTION: slugs are lower-case.\n`;
   const badChecks = [slugChecks[0], { ...slugChecks[2], target: "nowhere" }];
   writeFileSync(join(work, "prd.md"), prdDraft);
   writeFileSync(join(work, "acceptance.json"), SLUG_ACCEPTANCE);

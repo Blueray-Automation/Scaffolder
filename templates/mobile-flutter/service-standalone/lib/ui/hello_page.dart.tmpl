@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../greeting.dart';
+import '../theme/tokens.dart';
 import 'hello_card.dart';
 
 /// The first screen: a greeting for the name typed in the field, `Hello, World!` until there is a usable one.
@@ -28,7 +29,7 @@ class _HelloPageState extends State<HelloPage> {
       appBar: AppBar(title: Text(widget.title)),
       body: Center(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(Tokens.spaceLg),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -37,7 +38,7 @@ class _HelloPageState extends State<HelloPage> {
                 builder: (context, _) =>
                     HelloCard(message: greeting(_name.text)),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: Tokens.spaceLg),
               TextField(
                 controller: _name,
                 decoration: const InputDecoration(labelText: 'Your name'),

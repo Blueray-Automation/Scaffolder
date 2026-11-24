@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../api/hello_client.dart';
+import '../theme/tokens.dart';
 import 'hello_card.dart';
 
 /// The first screen: the greeting the backend returns (see `lib/api/hello_client.dart`), with a loading and an
@@ -36,7 +37,7 @@ class _HelloPageState extends State<HelloPage> {
       appBar: AppBar(title: Text(widget.title)),
       body: Center(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(Tokens.spaceLg),
           child: FutureBuilder<Hello>(
             future: _hello,
             builder: (context, snapshot) {

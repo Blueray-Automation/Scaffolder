@@ -1,5 +1,6 @@
 import { AGENT_PRESETS, DESKTOP_APPS } from "./capabilities";
 import { agentCommand, type ScaffolderConfig } from "./config";
+import { designPlan } from "./design";
 import { mobileStack } from "./mobileStacks";
 import { webStack } from "./webStacks";
 import { buildGates, NPM_CI, NPM_INSTALL, setupSteps, STAGE_ORDER, venvDirs } from "./gates";
@@ -123,7 +124,7 @@ export function buildSdlcConfig(cfg: ScaffolderConfig): Record<string, unknown> 
       // Requirements and checks: frozen while healing (healing fixes code, not the goalposts).
       protectedWhileHealing: [".ai/specs/"],
       // Allowed to change, but every change is listed in the evidence report for review.
-      guarded: cfg.backend.enabled ? [".ai/contract/"] : [],
+      guarded: [...(cfg.backend.enabled ? [".ai/contract/"] : []), ...(cfg.web.enabled || cfg.mobile.enabled ? [".ai/design/"] : [])],
     },
     // Setup commands here are OS-neutral (they must run in sh, cmd.exe and PowerShell alike); CI uses the bash forms.
     // Python steps carry the minimum version and placeholders that `sdlc setup` fills in: {python} is an interpreter it
@@ -166,6 +167,9 @@ export function buildSdlcConfig(cfg: ScaffolderConfig): Record<string, unknown> 
       // true = a skipped check (missing capability) fails verification.
       strictSkips: false,
     },
+    // The design contract: the tokens file, what is generated from it and the folders `design check` scans (absent = no screen).
+    // `enforce` is whether verification fails on a hard-coded value and on a PRD without a UI & design section.
+    ...(designPlan(cfg) ? { design: { enforce: cfg.design.enforce, tool: cfg.design.tool, url: cfg.design.url, ...designPlan(cfg) } } : {}),
     deploy: {
       target: cfg.cd.target,
       script: "scripts/deploy.sh",

@@ -25,6 +25,9 @@ description: Diagnose and fix a failing verification gate or fact check at its r
 <%/hasBackend%>
 | fact check | running system disagrees with the PRD | code; if the CHECK seems wrong, the spec is wrong: stop and report |
 | runtime failed to start | bad env var, port taken, image build error | read `logs/runtime-*.log` |
+<%#hasDesign%>
+| design (`repo.design`) | a literal colour, space, radius or font size in a screen; a generated tokens file out of date | code: use the token (`.ai/rules/design.md`); `./<%sdlcDir%>/sdlc design sync` for a stale generated file. Never `design:allow` or a one-off token to get green |
+<%/hasDesign%>
 | secrets | credential-like string committed | remove it, rotate if real |
 
 ## Never

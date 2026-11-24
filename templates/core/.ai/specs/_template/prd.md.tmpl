@@ -31,8 +31,20 @@ TODO(prd): new or changed screens, inputs and stored data. There is no separate 
 <%/hasWeb%>
 <%/hasBackend%>
 
-## 6. Out of scope
+<%#designEnforced%>
+## 6. UI & design
+TODO(prd): if this feature changes no screen, delete this whole list and write `No UI change.` Otherwise fill in every line.
+
+- **Design source**: <%#hasDesignUrl%>`<%designUrl%>`, and the frame or page this feature is drawn on (name or node id). <%/hasDesignUrl%><%^hasDesignUrl%>TODO(prd): the link to the frame in <%designToolName%>, or "none" if there is no design yet and the screen follows the tokens. <%/hasDesignUrl%>Put reference images (one per state and size) next to this file, in `design/`.
+- **Screens & states**: TODO(prd): each screen, and how it looks and behaves loading, empty, in error and with data.
+- **Components**: TODO(prd): the existing components this reuses, and each new one with what it is for.
+- **Tokens**: TODO(prd): every colour, space, radius and size comes from `.ai/design/tokens.json`. List any NEW token this needs (it is added there in the same change), or "none".
+- **Copy**: TODO(prd): the exact text of headings, buttons, labels, hints and error messages.
+- **Responsive & accessibility**: TODO(prd): <%#hasWeb%>how the layout changes at 375, 768 and 1280 px; <%/hasWeb%>keyboard and screen-reader behaviour; what is announced when something fails.
+
+<%/designEnforced%>
+## <%prdOutOfScopeNo%>. Out of scope
 TODO(prd): what this feature deliberately does not do.
 
-## 7. Verification map
+## <%prdVerificationNo%>. Verification map
 Filled in `acceptance.json`: every AC above must be covered by at least one check.

@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Boxes, GitBranch, Layers, Plus, ShieldCheck, Smartphone, Trash2 } from "lucide-react";
+import { Boxes, GitBranch, Layers, Palette, Plus, ShieldCheck, Smartphone, Trash2 } from "lucide-react";
 import { AGENT_PRESETS, CAPABILITIES, type DeployTrigger, type Issue, type ScaffolderConfig } from "@/engine";
 import { setIn } from "@/lib/utils";
 import { Button, Field, NumberInput, Section, Select, TextInput, Toggle } from "./ui";
@@ -197,6 +197,31 @@ export function ConfigForm({ config, onChange, issues }: Props) {
           </div>
         </details>
       </Section>
+
+      {(config.web.enabled || config.mobile.enabled) && (
+        <Section
+          icon={<Palette className="h-4 w-4" />}
+          title="Design"
+          hint="The look is a contract: design tokens the screens are built from, a UI & design section in every PRD, and a gate against hard-coded values."
+        >
+          <Toggle
+            checked={config.design.enforce}
+            onChange={(v) => set(["design", "enforce"], v)}
+            label="Enforce the design contract"
+            hint="Fails verification when a screen hard-codes a colour, space, radius or font size, or a PRD has no UI & design section. The tokens are generated either way."
+          />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Field label="Design tool" error={err("design.tool")} hint={CAPABILITIES.designTool.find((t) => t.id === config.design.tool)?.hint}>
+              {(id) => <Select id={id} value={config.design.tool} options={CAPABILITIES.designTool} onChange={(v) => set(["design", "tool"], v)} />}
+            </Field>
+            <div className="sm:col-span-2">
+              <Field label="Link to the design file (optional)" error={err("design.url")} hint="A Figma file, a Penpot project or a style guide. It goes into the PRD template and the project's design guide.">
+                {(id) => <TextInput id={id} value={config.design.url} onChange={(v) => set(["design", "url"], v)} placeholder="https://www.figma.com/design/..." spellCheck={false} />}
+              </Field>
+            </div>
+          </div>
+        </Section>
+      )}
 
       <Section
         icon={<ShieldCheck className="h-4 w-4" />}

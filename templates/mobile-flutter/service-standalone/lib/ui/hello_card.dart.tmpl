@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../theme/tokens.dart';
+
 /// The card at the centre of the screen. Presentational only: it is told what to show.
 class HelloCard extends StatelessWidget {
   const HelloCard({required this.message, super.key});
@@ -10,12 +12,13 @@ class HelloCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(Tokens.spaceLg),
         child: Semantics(
           header: true,
           child: Text(
             message,
-            style: Theme.of(context).textTheme.headlineMedium,
+            style: Theme.of(context).textTheme.headlineMedium
+                ?.copyWith(fontSize: Tokens.fontSizeXl),
           ),
         ),
       ),

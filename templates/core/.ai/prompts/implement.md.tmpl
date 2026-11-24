@@ -16,6 +16,12 @@ you work, so follow the steps and rules below and keep going until the work is d
 {{acceptance}}
 ```
 
+<%#hasDesign%>
+### Design references (read-only)
+
+{{designReferences}}
+
+<%/hasDesign%>
 Every `http` check calls the **running** system with exactly that method, path, body and headers and compares the answer with `expect`.
 Study each check and make the implementation satisfy it exactly. A `cmd` check runs one named test: that test must exist and pass.
 
@@ -42,7 +48,11 @@ Study each check and make the implementation satisfy it exactly. A `cmd` check r
 6. **API contract.** If you added or changed HTTP endpoints, update the committed contract with
    `cd <%backendDir%> && python -m app.export_openapi --write <%openapiFromBackend%>` and check that the diff contains only your changes.
 <%/hasBackend%>
-7. **Prove it.** Run `./<%sdlcDir%>/sdlc gates` until it is green (use `--only <gate-id>` while iterating). After you finish, the loop runs the facts
+<%#hasDesign%>
+7. **Design.** If the feature changes anything a person can see, follow `.ai/skills/implement-ui/SKILL.md` and `.ai/rules/design.md`: build from the PRD's UI & design section and
+   its reference images in `{{specDir}}/design/`, use only the design tokens in `.ai/design/tokens.json` (a literal colour, space, radius or font size fails `./<%sdlcDir%>/sdlc design check`),
+   add a token there (then `./<%sdlcDir%>/sdlc design sync`) only when the PRD says the feature needs a new one, and build every state the PRD lists.
+8. **Prove it.**<%/hasDesign%><%^hasDesign%>7. **Prove it.**<%/hasDesign%> Run `./<%sdlcDir%>/sdlc gates` until it is green (use `--only <gate-id>` while iterating). After you finish, the loop runs the facts
    against the running system and sends you any failure to fix.
 
 ## Hard rules

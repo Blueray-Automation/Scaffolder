@@ -44,7 +44,7 @@ Requirements: `python3` (3.9+ for the tooling<%#hasBackend%>, <%pythonVersion%> 
 <%#hasDocker%>
 - **`docker-compose.yml`**: the whole stack with health checks<%#hasDb%> and PostgreSQL <%db.version%><%/hasDb%>; also what the facts stage runs against.
 <%/hasDocker%>
-- **`.ai/`**: rules, skills (agent-neutral playbooks), prompts<%#hasBackend%>, specs and the API contract snapshot<%/hasBackend%><%^hasBackend%> and specs<%/hasBackend%>.
+- **`.ai/`**: rules, skills (agent-neutral playbooks), prompts<%#hasBackend%>, specs and the API contract snapshot<%/hasBackend%><%^hasBackend%> and specs<%/hasBackend%><%#hasDesign%>, and the design tokens<%/hasDesign%>.
 - **`<%sdlcDir%>/sdlc`**: the verification loop (see below).
 <%#hasCi%>
 - **`.github/workflows/`**: `ci.yml`<%#hasCd%> and `cd.yml` (build once, deploy through <%#environments%>`<%name%>` <%/environments%>)<%/hasCd%>.
@@ -95,6 +95,18 @@ Prefer a desktop app to a command-line tool? `./<%sdlcDir%>/sdlc agent claude-de
 FEAT-000 (hello world) is the worked example and is already built, so `implement` has nothing to write for it; `./<%sdlcDir%>/sdlc verify` proves it, and `implement` is for your own features (FEAT-001 onward).
 Add `--dry-run` to see the exact prompt and command without running anything. `./<%sdlcDir%>/sdlc feature FEAT-001` does the same and also ships (`--deploy <env>`).
 
+<%#hasDesign%>
+## Design: the look is a contract too
+
+The look of the project is one committed file, [`.ai/design/tokens.json`](.ai/design/tokens.json): colours (light and dark), spacing, radius and type sizes, by name.
+Screens are built from those names and never from literal values<%#hasWeb%>; the web app reads them as CSS variables (`<%webTokensFile%>`)<%/hasWeb%><%#hasMobile%>; the mobile app reads them as Dart constants (`<%mobileTokensFile%>`)<%/hasMobile%>, both generated from the file.
+
+- **Bring the design in**: <%#hasDesignUrl%>the design is at <%designUrl%>. <%/hasDesignUrl%>Export its variables as design tokens into `.ai/design/tokens.json` (<%designToolName%> or by hand), then `./<%sdlcDir%>/sdlc design sync`.
+- **Say what to build**: every PRD has a **UI & design** section (the frame, every state of each screen, new tokens, exact copy), with reference images in the spec's `design/` folder. The agent builds from it (skill `.ai/skills/implement-ui`).
+- **Check it**: `./<%sdlcDir%>/sdlc design check`<%#designEnforced%> is the `repo.design` gate: it fails on a hard-coded colour, space, radius or font size, on an out-of-date generated file and on a PRD without a UI & design section<%/designEnforced%>.
+  It proves the screen is made of the design's values, not that it looks like the frame: a reviewer compares the PR's screenshots with the references. Details: [`.ai/design/README.md`](.ai/design/README.md).
+
+<%/hasDesign%>
 ## Use it from an AI desktop app (Claude Code, Codex, ...)
 
 You can open this folder in a desktop coding app instead of letting `./<%sdlcDir%>/sdlc` start an agent CLI. What changes is **who is in charge**.

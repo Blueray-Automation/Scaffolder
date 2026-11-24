@@ -26,6 +26,8 @@ export interface MobileStack {
   env: Record<string, string>;
   /** The language SDK each framework release line ships with: `pubspec.yaml` constrains both. */
   languageSdk: Record<string, string>;
+  /** The design contract, relative to the mobile directory: where the generated tokens go, and the folder checked for hard-coded values. */
+  design: { tokensFile: string; sourceDir: string };
   /** Why this project name cannot be the app's package name (the name comes from the project's), or undefined when it can. */
   projectNameProblem: (slug: string) => string | undefined;
 }
@@ -85,6 +87,7 @@ const FLUTTER: MobileStack = {
   // Only 3.50 was run against: 3.47 (Dart 3.13) is not offered, because the formatter's output can differ between Dart releases and the
   // templates are formatted by Dart 3.14. Add a line here only after running the gates and `npm run e2e -- --scenario flutter-only` on it.
   languageSdk: { "3.50": "3.14" },
+  design: { tokensFile: "lib/theme/tokens.dart", sourceDir: "lib" },
   projectNameProblem: (slug) => {
     const name = slug.replace(/-/g, "_");
     if (DART_UNUSABLE_NAMES.has(name)) return `"${name}" is a Dart reserved word, so it cannot be the name of the app's package.`;

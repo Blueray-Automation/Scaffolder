@@ -10,6 +10,9 @@ Draft `{{specDir}}/prd.md` and `{{specDir}}/acceptance.json` from this brief:
 
 ## Requirements
 - Every acceptance criterion is a line `- **AC-001** Given ... When ... Then ...`, observable and testable. Include error, empty and boundary cases.
+<%#designEnforced%>
+- Include a `## 6. UI & design` section (`No UI change.` when the feature has no screen): the frame, every state of each screen, components to reuse, new tokens, exact copy. See `.ai/rules/design.md`.
+<%/designEnforced%>
 - Every AC is covered by at least one check in `acceptance.json` (`covers: ["AC-001"]`). Prefer `http` checks against the running system; use `cmd` checks to tie an AC to a specific test.
 - Remove every `TODO(prd)` marker once the section is real. Do not leave placeholders.
 - Do NOT write implementation code in this step.

@@ -13,7 +13,7 @@ description: Turn a feature request into a testable PRD (acceptance criteria) pl
 3. Enumerate behaviours as acceptance criteria, one line each: `- **AC-001** Given ..., when ..., then ...`.
    - Happy path first, then each validation rule, not-found, unauthorized, empty and boundary case.
    - Observable from outside (HTTP status/body, page content, file/command result). No class or table names.
-4. Fill **Permissions**, **Data & validation**, **Contract impact**, **Out of scope**. Anything you assumed goes into an "Open questions" list at the end instead of being silently decided.
+4. Fill **Permissions**, **Data & validation**, **Contract impact**, <%#designEnforced%>**UI & design** (the frame, every state of every screen, new tokens, exact copy: `No UI change.` if there is no screen; reference images go in the spec folder's `design/`: `./<%sdlcDir%>/sdlc design import <pdf, image or Figma link> --feature FEAT-xxx` puts them there), <%/designEnforced%>**Out of scope**. Anything you assumed goes into an "Open questions" list at the end instead of being silently decided.
 5. Write `acceptance.json`: for every AC at least one check (see the write-fact-checks skill). Prefer `http` against the running system.
 6. Delete every `TODO(prd)` marker. Run `./<%sdlcDir%>/sdlc facts --feature FEAT-xxx --runtime none`: traceability must pass (checks needing the runtime are skipped at this point; that is fine).
 

@@ -4,6 +4,7 @@
 ```
 lib/main.dart       starts the app and nothing else (it is left out of the coverage count)
 lib/app.dart        the MaterialApp: theme (light and dark), title, the first screen
+lib/theme/          app_theme.dart builds the themes from the design tokens; tokens.dart is GENERATED from .ai/design/tokens.json: never edit it
 lib/ui/             screens and widgets: props in, widgets out
 <%#hasBackend%>
 lib/api/            typed client for the backend contract (mirrors .ai/contract/openapi.json)
@@ -20,6 +21,7 @@ analysis_options.yaml   strict analysis; the platform folders are already exclud
 - Import widgets from `package:material_ui/material_ui.dart`, which also exports the widgets layer. **`package:flutter/material.dart` is deprecated since Flutter 3.47**, and the analyzer runs with `--fatal-infos`, so using it fails the gate. Add `package:cupertino_ui/cupertino_ui.dart` the same way if the app needs iOS-style widgets.
 - Strict analysis (`strict-casts`, `strict-inference`, `strict-raw-types`) and `flutter_lints` are on: no `dynamic`, no unchecked casts, no `// ignore` to silence a real finding. Fix the code.
 - Format with `dart format .` at Dart's default width (80 columns, no flags). The gate runs `flutter analyze --fatal-infos` and then `dart format --output=none --set-exit-if-changed .`.
+- Styling: colours come from the theme (`Theme.of(context).colorScheme`, built from the tokens in `lib/theme/app_theme.dart`); spacing, radius and type sizes are `Tokens.spaceMd`, `Tokens.radiusLg`, `Tokens.fontSizeXl`, ... Never a literal `Color(0x...)`, `Colors.red`, `EdgeInsets.all(16)` or `fontSize: 14`. Add a token to `.ai/design/tokens.json` and run `./<%sdlcDir%>/sdlc design sync`. Rule: `.ai/rules/design.md`.
 - Every data-driven widget models all its states: loading, empty, error, success. An error is announced (`Semantics(liveRegion: true)`) and offers a retry where one makes sense. Never swallow an exception to hide a failure.
 - Keep screens thin: a screen asks for data and chooses which widget to show; widgets only draw. Put logic in plain Dart files so it can be tested without pumping a widget.
 - Accessibility: every control has a label, tap targets are large enough, text scales with the system font size, and state is never conveyed by colour alone.

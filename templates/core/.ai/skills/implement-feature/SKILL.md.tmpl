@@ -35,6 +35,9 @@ description: Implement a specified feature in small test-first vertical slices u
 <%#hasMobile%>
 - Mobile (`<%mobileDir%>/`): see `<%mobileRuleFile%>`.
 <%/hasMobile%>
+<%#hasDesign%>
+- Anything a person can see: follow `.ai/skills/implement-ui/SKILL.md` and `.ai/rules/design.md`. Colours, spacing, radius and type sizes come from `.ai/design/tokens.json`, never from literal values.
+<%/hasDesign%>
 - Config via environment variables only; add new ones to `.env.example` and `docker-compose.yml`.
 - No `TODO` without an issue reference; no dead code; no commented-out code.
 

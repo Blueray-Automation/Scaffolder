@@ -35,6 +35,9 @@ If a failure below is the same as one listed above, your previous fix did not wo
 <%#hasBackend%>
 - DO NOT regenerate `.ai/contract/openapi.json` just to make the contract gate pass. It changes only when the PRD intentionally changes the API.
 <%/hasBackend%>
+<%#hasDesign%>
+- DO NOT silence the design gate with a `design:allow` comment, or by adding a token for a one-off value, or by editing `.ai/design/tokens.json` or a generated tokens file by hand. Use the tokens that exist; if the screen needs a value that is not there, STOP and say so.
+<%/hasDesign%>
 - If you believe the spec itself is wrong, STOP and say so in your final message instead of changing it.
 
 ## Final message

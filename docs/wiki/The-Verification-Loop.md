@@ -20,6 +20,7 @@ The rule it enforces: *done means `./scripts/sdlc verify` exits 0 and you can sh
 | `./scripts/sdlc new <slug>` | Creates an **empty** feature spec from the template, by name (`new user-login`). It does not read documents: for a `.pdf`, `.docx`, `.md` or `.txt` use `spec` |
 | `./scripts/sdlc deploy <env>` | Runs the deploy script, then checks the live URL |
 | `./scripts/sdlc secrets` | Scans for committed secrets |
+| `./scripts/sdlc design sync` / `design check` | Writes the stylesheet or Dart file from the design tokens / checks they are current and that no screen hard-codes a design value (see [Design and the UI](Design-and-the-UI)) |
 | `./scripts/sdlc report` | Prints the latest report |
 
 Two launchers start the same program (`scripts/sdlc.py`): `scripts/sdlc` (bash: macOS, Linux, WSL, Git Bash) and `scripts/sdlc.cmd` (Windows: `.\scripts\sdlc.cmd <command>`). Every command and flag is identical.

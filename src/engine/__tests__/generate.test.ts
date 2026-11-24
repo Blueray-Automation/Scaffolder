@@ -225,7 +225,7 @@ describe("generated project: web only (Next.js, no API)", () => {
     expect(cfg.runtime.local.provides).toEqual(["web"]);
     expect(cfg.runtime.local.services.map((s: Json) => s.name)).toEqual(["web"]);
     expect(cfg.runtime.local.services[0].env.API_URL).toBeUndefined();
-    expect(cfg.integrity.guarded).toEqual([]);
+    expect(cfg.integrity.guarded).toEqual([".ai/design/"]);
     expect((cfg.gates as Json[]).map((g) => g.id).filter((id) => id.startsWith("backend."))).toEqual([]);
     expect((cfg.setup as Json[]).map((s) => s.id)).toEqual(["web.install"]);
   });
@@ -265,7 +265,7 @@ describe("generated project: web only (Next.js, no API)", () => {
     expect(compose.services.web.environment.API_URL).toBeDefined();
     const loop = JSON.parse(full.get(".ai/sdlc.json")!.content) as Json;
     expect(loop.runtime.local.provides).toEqual(["backend", "web"]);
-    expect(loop.integrity.guarded).toEqual([".ai/contract/"]);
+    expect(loop.integrity.guarded).toEqual([".ai/contract/", ".ai/design/"]);
   });
 });
 
@@ -328,7 +328,7 @@ describe("generated project: Nuxt", () => {
     expect(only.files.filter((f) => f.path.startsWith("web/")).map((f) => f.path).sort()).toEqual(
       [
         "web/.dockerignore", "web/Dockerfile", "web/app/__tests__/HelloCard.test.ts", "web/app/__tests__/greeting.test.ts", "web/app/__tests__/index.test.ts",
-        "web/app/app.vue", "web/app/assets/css/main.css", "web/app/components/HelloCard.vue", "web/app/pages/index.vue", "web/app/utils/greeting.ts",
+        "web/app/app.vue", "web/app/assets/css/main.css", "web/app/assets/css/tokens.css", "web/app/components/HelloCard.vue", "web/app/pages/index.vue", "web/app/utils/greeting.ts",
         "web/eslint.config.mjs", "web/nuxt.config.ts", "web/package.json", "web/public/robots.txt", "web/tsconfig.json", "web/vitest.config.ts",
       ].sort(),
     );
@@ -420,7 +420,7 @@ describe("generated project: Flutter", () => {
   it("a Flutter app on its own is these files, with the rules for working in it", () => {
     expect(pathsUnder(only.files, "mobile/")).toEqual(
       [
-        "analysis_options.yaml", "lib/app.dart", "lib/greeting.dart", "lib/main.dart", "lib/ui/hello_card.dart", "lib/ui/hello_page.dart",
+        "analysis_options.yaml", "lib/app.dart", "lib/greeting.dart", "lib/main.dart", "lib/theme/app_theme.dart", "lib/theme/tokens.dart", "lib/ui/hello_card.dart", "lib/ui/hello_page.dart",
         "pubspec.yaml", "README.md", "test/greeting_test.dart", "test/tool/check_coverage_test.dart", "test/ui/hello_card_test.dart",
         "test/ui/hello_page_test.dart", "test/widget_test.dart", "tool/check_coverage.dart",
       ].map((p) => `mobile/${p}`).sort(),
@@ -432,7 +432,7 @@ describe("generated project: Flutter", () => {
   it("next to a backend it has a typed API client and its tests instead of the greeting logic", () => {
     expect(pathsUnder(api.files, "mobile/")).toEqual(
       [
-        "analysis_options.yaml", "lib/api/hello_client.dart", "lib/app.dart", "lib/main.dart", "lib/ui/hello_card.dart", "lib/ui/hello_page.dart",
+        "analysis_options.yaml", "lib/api/hello_client.dart", "lib/app.dart", "lib/main.dart", "lib/theme/app_theme.dart", "lib/theme/tokens.dart", "lib/ui/hello_card.dart", "lib/ui/hello_page.dart",
         "pubspec.yaml", "README.md", "test/api/hello_client_test.dart", "test/integration/backend_test.dart", "test/tool/check_coverage_test.dart",
         "test/ui/hello_card_test.dart", "test/ui/hello_page_test.dart", "test/widget_test.dart", "tool/check_coverage.dart",
       ].map((p) => `mobile/${p}`).sort(),

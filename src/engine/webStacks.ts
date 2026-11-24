@@ -20,6 +20,8 @@ export interface WebStack {
   env: Record<string, string>;
   /** Starts the built app on the given port, from the web directory: the command and its extra environment. */
   start: (port: number) => { cmd: string; env: Record<string, string> };
+  /** The design contract, relative to the web directory: where the generated stylesheet of tokens goes, and the folder checked for hard-coded values. */
+  design: { tokensCss: string; sourceDir: string };
 }
 
 const NEXTJS: WebStack = {
@@ -30,6 +32,7 @@ const NEXTJS: WebStack = {
   labels: { types: "Web type check (tsc)", build: "Web production build (next build)" },
   env: { NEXT_TELEMETRY_DISABLED: "1" },
   start: (port) => ({ cmd: `npm run start -- --port ${port} --hostname 127.0.0.1`, env: {} }),
+  design: { tokensCss: "src/app/tokens.css", sourceDir: "src" },
 };
 
 const NUXT: WebStack = {
@@ -41,6 +44,7 @@ const NUXT: WebStack = {
   env: { NUXT_TELEMETRY_DISABLED: "1" },
   // The built server reads its address from these (it has no command-line flags).
   start: (port) => ({ cmd: "npm run start", env: { NITRO_PORT: String(port), NITRO_HOST: "127.0.0.1" } }),
+  design: { tokensCss: "app/assets/css/tokens.css", sourceDir: "app" },
 };
 
 const STACKS: Partial<Record<WebFramework, WebStack>> = { nextjs: NEXTJS, nuxt: NUXT };

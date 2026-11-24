@@ -23,6 +23,7 @@ then lets an AI agent (or you) heal failures until everything is green.
 6. **[Reference: the login implementation](Reference-Login-Implementation)**: the complete, verified code for the tutorial.
 7. **[Using a Desktop App](Desktop-Apps)**: let the Claude desktop app, Cursor or VS Code be the AI agent instead of a command-line tool.
 8. **[Adopt an Existing Project](Adopt-an-Existing-Project)**: already have a repository? Add the `.ai/` folder and the verification loop to it, judged against a baseline instead of "everything green".
+9. **[Design and the UI](Design-and-the-UI)**: how a design (Figma or any tool) becomes tokens the code is built from, a UI section in every PRD, and a gate that fails when a screen hard-codes a value.
 
 ## What you get
 
@@ -32,6 +33,7 @@ then lets an AI agent (or you) heal failures until everything is green.
 | Quality gates | ruff, mypy, eslint, tsc, pytest and Vitest with enforced coverage floors, API contract drift check, secret scan |
 | AI operating system | `AGENTS.md`, rules, skills, prompts and a worked PRD example, tool-neutral |
 | Verification loop | `./scripts/sdlc`: gates, facts against the running system, evidence reports, a healing loop with an integrity guard |
+| Design | Design tokens (`.ai/design/tokens.json`) that the web and Flutter screens are generated from, a UI & design section in every PRD, and a gate against hard-coded colours, spacing, radius and type sizes |
 | CI/CD | GitHub Actions CI and CD (build images once, GHCR, staged environments, post-deploy checks), Docker, compose |
 
 ## About this wiki

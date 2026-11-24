@@ -39,10 +39,13 @@ Let a known user prove who they are with an email and password and receive a sho
 ## 5. Contract impact
 New endpoints `POST /api/v1/auth/login` and `GET /api/v1/auth/me`. New schemas `LoginRequest`, `TokenResponse`, `MeResponse`. No migrations.
 
-## 6. Out of scope
+## 6. UI & design
+No UI change.
+
+## 7. Out of scope
 Registration, refresh tokens, password reset, a users table, roles, rate limiting, and the web UI for logging in.
 
-## 7. Verification map
+## 8. Verification map
 See `acceptance.json`. AC-001 to AC-004 and the missing/malformed cases of AC-006 are proven against the running service. AC-005 and the expired-token case of AC-006 need a valid or an expired token, so they are tied to specific tests with `cmd` checks (the HTTP check format cannot carry a token from one request to the next).
 ```
 

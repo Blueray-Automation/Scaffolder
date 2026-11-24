@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../theme/tokens.dart';
+
 /// What a [HelloCard] is showing.
 enum HelloCardState { loading, success, error }
 
@@ -31,7 +33,7 @@ class HelloCard extends StatelessWidget {
     final theme = Theme.of(context);
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(Tokens.spaceLg),
         child: switch (state) {
           HelloCardState.loading => Semantics(
             label: 'Loading the greeting',
@@ -39,7 +41,12 @@ class HelloCard extends StatelessWidget {
           ),
           HelloCardState.success => Semantics(
             header: true,
-            child: Text(message ?? '', style: theme.textTheme.headlineMedium),
+            child: Text(
+              message ?? '',
+              style: theme.textTheme.headlineMedium?.copyWith(
+                fontSize: Tokens.fontSizeXl,
+              ),
+            ),
           ),
           HelloCardState.error => Semantics(
             liveRegion: true,
@@ -53,7 +60,7 @@ class HelloCard extends StatelessWidget {
                   ),
                 ),
                 if (onRetry != null) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: Tokens.spaceMd),
                   FilledButton(
                     onPressed: onRetry,
                     child: const Text('Try again'),

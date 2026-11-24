@@ -162,6 +162,7 @@ function main(): void {
       console.log(`ci / registry     : ${names(CAPABILITIES.ci)} / ${names(CAPABILITIES.registry)}`);
       console.log(`deploy targets    : ${names(CAPABILITIES.deployTarget)}`);
       console.log(`fact runtimes     : ${names(CAPABILITIES.runtime)}`);
+      console.log(`design tools      : ${names(CAPABILITIES.designTool)}`);
       return;
     }
 
