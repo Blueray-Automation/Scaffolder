@@ -76,9 +76,23 @@
       "target": "web",
       "path": "/",
       "expect": { "status": 200, "bodyContains": ["Hello, World!"] }
-    }<%/hasWeb%>
+    }<%/hasWeb%><%#hasMobile%>,
+    {
+      "id": "<%mobileChkApi%>",
+      "name": "The mobile app's API client gets the greeting from the live backend",
+      "covers": ["<%mobileAcApi%>"],
+      "type": "cmd",
+      "needs": ["backend"],
+      "cwd": "<%mobileDir%>",
+      "run": "flutter test test/integration/backend_test.dart --plain-name \"<%mobileAcApi%>\" --dart-define=API_URL=http://127.0.0.1:<%backendPort%>",
+      "env": { "FLUTTER_SUPPRESS_ANALYTICS": "true" },
+      "stdoutContains": ["All tests passed!"],
+      "timeoutSeconds": 600,
+      "expectExit": 0
+    }<%/hasMobile%>
 <%/hasBackend%>
 <%^hasBackend%>
+<%#hasWeb%>
     {
       "id": "CHK-001",
       "name": "Default greeting",
@@ -105,7 +119,46 @@
       "target": "web",
       "path": "/?name=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "expect": { "status": 200, "bodyContains": ["Hello, World!"] }
+    }<%#hasMobile%>,<%/hasMobile%>
+<%/hasWeb%>
+<%#hasMobile%>
+    {
+      "id": "<%mobileChk1%>",
+      "name": "The first screen greets the world",
+      "covers": ["<%mobileAc1%>"],
+      "type": "cmd",
+      "cwd": "<%mobileDir%>",
+      "run": "flutter test test/ui/hello_page_test.dart --plain-name \"<%mobileAc1%>\"",
+      "env": { "FLUTTER_SUPPRESS_ANALYTICS": "true" },
+      "stdoutContains": ["All tests passed!"],
+      "timeoutSeconds": 600,
+      "expectExit": 0
+    },
+    {
+      "id": "<%mobileChk2%>",
+      "name": "Typing a name greets that name",
+      "covers": ["<%mobileAc2%>"],
+      "type": "cmd",
+      "cwd": "<%mobileDir%>",
+      "run": "flutter test test/ui/hello_page_test.dart --plain-name \"<%mobileAc2%>\"",
+      "env": { "FLUTTER_SUPPRESS_ANALYTICS": "true" },
+      "stdoutContains": ["All tests passed!"],
+      "timeoutSeconds": 600,
+      "expectExit": 0
+    },
+    {
+      "id": "<%mobileChk3%>",
+      "name": "An over-long name is ignored",
+      "covers": ["<%mobileAc3%>"],
+      "type": "cmd",
+      "cwd": "<%mobileDir%>",
+      "run": "flutter test test/ui/hello_page_test.dart --plain-name \"<%mobileAc3%>\"",
+      "env": { "FLUTTER_SUPPRESS_ANALYTICS": "true" },
+      "stdoutContains": ["All tests passed!"],
+      "timeoutSeconds": 600,
+      "expectExit": 0
     }
+<%/hasMobile%>
 <%/hasBackend%>
   ]
 }

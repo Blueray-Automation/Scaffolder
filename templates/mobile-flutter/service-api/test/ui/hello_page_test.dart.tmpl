@@ -1,0 +1,109 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:<%dartPackage%>/api/hello_client.dart';
+import 'package:<%dartPackage%>/ui/hello_page.dart';
+
+http.Response _json(Object body, [int status = 200]) => http.Response(
+  jsonEncode(body),
+  status,
+  headers: {'content-type': 'application/json'},
+);
+
+Widget _host(http.Client fake) => MaterialApp(
+  home: HelloPage(
+    title: 'Hello',
+    client: HelloClient(httpClient: fake),
+  ),
+);
+
+void main() {
+  testWidgets(
+    'shows a spinner while the greeting is on its way, then the greeting',
+    (tester) async {
+      final answer = Completer<http.Response>();
+      await tester.pumpWidget(_host(MockClient((_) => answer.future)));
+
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+      answer.complete(_json({'message': 'Hello, World!'}));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.text('Hello, World!'), findsOneWidget);
+    },
+  );
+
+  testWidgets('shows what the backend returned, not a fixed text', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _host(MockClient((_) async => _json({'message': 'Hello, Ada!'}))),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Hello, Ada!'), findsOneWidget);
+  });
+
+  testWidgets('shows the error, and asks again when the user taps Try again', (
+    tester,
+  ) async {
+    var calls = 0;
+    await tester.pumpWidget(
+      _host(
+        MockClient((_) async {
+          calls++;
+          return calls == 1
+              ? http.Response('boom', 500)
+              : _json({'message': 'Hello, World!'});
+        }),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Backend responded with 500'), findsOneWidget);
+    expect(find.text('Hello, World!'), findsNothing);
+
+    await tester.tap(find.text('Try again'));
+    await tester.pumpAndSettle();
+
+    expect(calls, 2);
+    expect(find.text('Hello, World!'), findsOneWidget);
+    expect(find.text('Try again'), findsNothing);
+  });
+
+  testWidgets(
+    'says so in words when the backend cannot be reached, without leaking the failure',
+    (tester) async {
+      await tester.pumpWidget(
+        _host(
+          MockClient(
+            (_) async => throw http.ClientException('connection refused'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('Could not reach the backend'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'shows a generic message for a failure that is not an ApiException',
+    (tester) async {
+      await tester.pumpWidget(
+        _host(MockClient((_) async => throw StateError('unexpected'))),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Something went wrong'), findsOneWidget);
+    },
+  );
+}

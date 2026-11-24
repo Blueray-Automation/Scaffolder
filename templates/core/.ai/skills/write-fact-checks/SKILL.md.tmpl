@@ -22,6 +22,7 @@ A *fact check* turns one acceptance criterion into something the loop executes. 
 }
 <%/hasBackend%>
 <%^hasBackend%>
+<%#hasWeb%>
 {
   "id": "CHK-010",
   "name": "The pricing page lists the Pro plan",
@@ -32,6 +33,19 @@ A *fact check* turns one acceptance criterion into something the loop executes. 
   "path": "/pricing",
   "expect": { "status": 200, "bodyContains": ["Pro plan"] }
 }
+<%/hasWeb%>
+<%^hasWeb%>
+{
+  "id": "CHK-010",
+  "name": "The plans screen lists the Pro plan",
+  "covers": ["AC-012"],
+  "type": "cmd",
+  "cwd": "<%mobileDir%>",
+  "run": "flutter test test/ui/plans_page_test.dart --plain-name \"AC-012\"",
+  "stdoutContains": ["All tests passed!"],
+  "expectExit": 0
+}
+<%/hasWeb%>
 <%/hasBackend%>
 ```
 
@@ -41,8 +55,13 @@ A *fact check* turns one acceptance criterion into something the loop executes. 
 - **cmd**: `run`, `cwd`, `expectExit` (default 0), `stdoutContains`, optional `pathPrepend`. Use to tie a criterion to one specific test: `pytest -q tests/test_x.py::test_name`.
 <%/hasBackend%>
 <%^hasBackend%>
+<%#hasWeb%>
 - **http**: `target` (`web`), `method`, `path` (the query string is part of it: `/?name=Ada`), optional `headers`, `body` (JSON), `expect`: `status` (int or list), `json` (subset match), `bodyContains` (string or list), `headers`, `maxMs`.
 - **cmd**: `run`, `cwd`, `expectExit` (default 0), `stdoutContains`, optional `pathPrepend`. Use to tie a criterion to one specific test file: `npx vitest run src/__tests__/pricing.test.tsx` with `cwd` set to `<%webDir%>`.
+<%/hasWeb%>
+<%^hasWeb%>
+- **cmd**: `run`, `cwd`, `expectExit` (default 0), `stdoutContains`, optional `pathPrepend`. A mobile app has no address to call, so its checks run a test **by name**: `flutter test test/ui/plans_page_test.dart --plain-name "AC-012"` with `cwd` set to `<%mobileDir%>`. Put the criterion's id in the test's name, so a name that matches nothing fails (`flutter test` exits non-zero when no test ran), and add `"stdoutContains": ["All tests passed!"]` so a skipped test cannot pass either.
+<%/hasWeb%>
 <%/hasBackend%>
 - **file**: `path`, `exists`, `contains` (list), `regex`.
 

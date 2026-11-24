@@ -1,0 +1,24 @@
+name: <%dartPackage%>
+description: <%descriptionYaml%>
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: ^<%dartVersion%>.0
+  flutter: ">=<%mobileVersion%>.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+<%#hasBackend%>
+  http: ^1.6.0
+<%/hasBackend%>
+  material_ui: ^1.11.1
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

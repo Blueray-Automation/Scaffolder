@@ -125,6 +125,32 @@ That gate is advisory on purpose. It reports vulnerabilities in transitive depen
 ### A deprecation warning about `httpx2` in pytest output
 Newer Starlette versions prefer a different HTTP test client. The tests pass; the warning is harmless.
 
+## Flutter
+
+### `doctor` shows `MISS flutter`, or `flutter: command not found`
+The mobile app needs the Flutter SDK. On macOS `brew install --cask flutter`; elsewhere see <https://docs.flutter.dev/get-started/install>. Then `flutter --version` and `./scripts/sdlc doctor`. Only the SDK is needed: the checks do not build an Android or iOS app, so no Android SDK or Xcode.
+
+### `mobile.analyze` fails with `'package:flutter/material.dart' is deprecated`
+From Flutter 3.47 Material lives in its own package, and the gate runs the analyzer with `--fatal-infos`, so the old import fails. Use `import 'package:material_ui/material_ui.dart';` (it also exports the widgets layer, so a separate `widgets.dart` import is flagged as unnecessary). Cupertino is `package:cupertino_ui/cupertino_ui.dart`.
+
+### `mobile.analyze` fails and the log lists `Changed lib/...`
+That is the formatter: those files are not in Dart's default layout (80 columns, no flags). Fix them with `cd mobile && dart format .` and commit.
+
+### `mobile.unit` fails with `lib/x.dart is not loaded by any test`
+`flutter test --coverage` only lists the files a test loaded, so a file no test touches would never lower the figure. The gate counts such a file as a failure. Add a test that uses it (or delete the file if it is dead). `lib/main.dart` and generated files (`*.g.dart`, `*.freezed.dart`) are left out.
+
+### `Failed to resolve package URI "package:flutter_lints/flutter.yaml"` printed many times
+You ran `dart format` (or an editor did) before the dependencies were installed. Run `./scripts/sdlc setup` once. The gate itself runs `flutter analyze` first, which installs them, so it does not print this.
+
+### A project name is refused: `"web" is the name of a package the app depends on`
+The project's name becomes the Dart package name, and a package cannot depend on itself (nor be a Dart reserved word such as `class`). Choose another name.
+
+### After `flutter create`, `pubspec.lock` changed
+`flutter create` resolves the dependencies again and rewrites the lockfile. Commit it with the new `android/` and `ios/` folders; it still satisfies the CI install (`flutter pub get --enforce-lockfile`). `flutter create` leaves every other generated file as it was, and its own sample test is not written because the project already has `test/widget_test.dart`.
+
+### `mobile.unit` says `exit 79` or `No tests ran` in a fact
+A check's `--plain-name "AC-00N"` matched no test, because the test was renamed or deleted. Put the criterion's id at the start of the test's name again; do not edit the check to match (the spec is frozen while healing).
+
 ## `./scripts/sdlc spec`
 
 ### `No such file` or `Unsupported file type`

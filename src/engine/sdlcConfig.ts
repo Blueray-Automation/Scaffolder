@@ -1,5 +1,6 @@
 import { AGENT_PRESETS, DESKTOP_APPS } from "./capabilities";
 import { agentCommand, type ScaffolderConfig } from "./config";
+import { mobileStack } from "./mobileStacks";
 import { webStack } from "./webStacks";
 import { buildGates, NPM_CI, NPM_INSTALL, setupSteps, STAGE_ORDER, venvDirs } from "./gates";
 
@@ -128,15 +129,21 @@ export function buildSdlcConfig(cfg: ScaffolderConfig): Record<string, unknown> 
     // Python steps carry the minimum version and placeholders that `sdlc setup` fills in: {python} is an interpreter it
     // found (or offered to install) instead of failing with a raw pip error, {venv_python} is the venv's own interpreter
     // (.venv/bin/python, or .venv\Scripts\python.exe on Windows). Node steps pick `npm ci` or `npm install` by whether a lockfile exists.
-    setup: setupSteps(cfg).map((step) =>
-      step.toolchain === "python"
-        ? {
-            ...step,
-            cmd: step.cmd.replace(/^python3 /, "{python} ").split(".venv/bin/python").join("{venv_python}"),
-            minPython: cfg.backend.version,
-          }
-        : { ...step, cmd: NPM_CI, lockfile: "package-lock.json", fallbackCmd: NPM_INSTALL },
-    ),
+    setup: setupSteps(cfg).map((step) => {
+      if (step.toolchain === "python") {
+        return {
+          ...step,
+          cmd: step.cmd.replace(/^python3 /, "{python} ").split(".venv/bin/python").join("{venv_python}"),
+          minPython: cfg.backend.version,
+        };
+      }
+      if (step.toolchain === "flutter") {
+        // `tools` is what `sdlc doctor` looks for on PATH; the lockfile choice is made by the runner, like npm's.
+        const { install, tool } = mobileStack(cfg);
+        return { ...step, cmd: install.cmd, lockfile: install.lockfile, fallbackCmd: install.fallbackCmd, tools: [tool] };
+      }
+      return { ...step, cmd: NPM_CI, lockfile: "package-lock.json", fallbackCmd: NPM_INSTALL };
+    }),
     gates: buildGates(cfg),
     runtime: {
       mode: cfg.sdlc.runtime,

@@ -1,0 +1,69 @@
+import 'package:material_ui/material_ui.dart';
+
+/// What a [HelloCard] is showing.
+enum HelloCardState { loading, success, error }
+
+/// The card at the centre of the screen: the greeting, a spinner while it loads, or an error that can be retried.
+/// Presentational only: it is told what to show and never fetches anything.
+class HelloCard extends StatelessWidget {
+  const HelloCard.loading({super.key})
+    : state = HelloCardState.loading,
+      message = null,
+      detail = null,
+      onRetry = null;
+
+  const HelloCard.success({required String this.message, super.key})
+    : state = HelloCardState.success,
+      detail = null,
+      onRetry = null;
+
+  const HelloCard.error({required String this.detail, this.onRetry, super.key})
+    : state = HelloCardState.error,
+      message = null;
+
+  final HelloCardState state;
+  final String? message;
+  final String? detail;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: switch (state) {
+          HelloCardState.loading => Semantics(
+            label: 'Loading the greeting',
+            child: CircularProgressIndicator(),
+          ),
+          HelloCardState.success => Semantics(
+            header: true,
+            child: Text(message ?? '', style: theme.textTheme.headlineMedium),
+          ),
+          HelloCardState.error => Semantics(
+            liveRegion: true,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  detail ?? 'Something went wrong',
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: theme.colorScheme.error,
+                  ),
+                ),
+                if (onRetry != null) ...[
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: onRetry,
+                    child: const Text('Try again'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        },
+      ),
+    );
+  }
+}

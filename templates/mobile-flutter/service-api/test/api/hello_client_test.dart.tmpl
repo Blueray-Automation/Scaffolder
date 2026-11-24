@@ -1,0 +1,131 @@
+import 'dart:convert';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:<%dartPackage%>/api/hello_client.dart';
+
+http.Response _json(Object body, [int status = 200]) => http.Response(
+  jsonEncode(body),
+  status,
+  headers: {'content-type': 'application/json'},
+);
+
+Uri get _base => Uri.parse('http://api.test:<%backendPort%>');
+
+void main() {
+  group('HelloClient.fetchHello', () {
+    test('asks GET /api/v1/hello and returns the message', () async {
+      late http.BaseRequest seen;
+      final client = HelloClient(
+        baseUrl: _base,
+        httpClient: MockClient((request) async {
+          seen = request;
+          return _json({'message': 'Hello, World!'});
+        }),
+      );
+
+      final hello = await client.fetchHello();
+
+      expect(hello.message, 'Hello, World!');
+      expect(seen.method, 'GET');
+      expect(seen.url, Uri.parse('http://api.test:<%backendPort%>/api/v1/hello'));
+    });
+
+    test(
+      'sends the name as a query parameter, and none when it is empty',
+      () async {
+        final urls = <Uri>[];
+        final client = HelloClient(
+          baseUrl: _base,
+          httpClient: MockClient((request) async {
+            urls.add(request.url);
+            return _json({'message': 'ok'});
+          }),
+        );
+
+        await client.fetchHello(name: 'Ada Lovelace');
+        await client.fetchHello(name: '');
+
+        expect(urls[0].queryParameters, {'name': 'Ada Lovelace'});
+        expect(urls[1].hasQuery, isFalse);
+      },
+    );
+
+    test(
+      'turns an error status into an ApiException that carries it',
+      () async {
+        final client = HelloClient(
+          baseUrl: _base,
+          httpClient: MockClient((_) async => http.Response('', 422)),
+        );
+
+        await expectLater(
+          client.fetchHello(),
+          throwsA(
+            isA<ApiException>().having((e) => e.statusCode, 'statusCode', 422),
+          ),
+        );
+      },
+    );
+
+    test(
+      'turns a connection failure into an ApiException with status 0',
+      () async {
+        final client = HelloClient(
+          baseUrl: _base,
+          httpClient: MockClient(
+            (_) async => throw http.ClientException('connection refused'),
+          ),
+        );
+
+        await expectLater(
+          client.fetchHello(),
+          throwsA(
+            isA<ApiException>()
+                .having((e) => e.statusCode, 'statusCode', 0)
+                .having(
+                  (e) => e.message,
+                  'message',
+                  contains('Could not reach the backend'),
+                ),
+          ),
+        );
+      },
+    );
+
+    test('rejects an answer that is not the contract: not JSON, wrong shape, wrong type', () async {
+      for (final response in [
+        http.Response('<html>not json</html>', 200),
+        _json(['a list']),
+        _json({'msg': 'wrong key'}),
+        _json({'message': 42}),
+      ]) {
+        final client = HelloClient(
+          baseUrl: _base,
+          httpClient: MockClient((_) async => response),
+        );
+
+        await expectLater(
+          client.fetchHello(),
+          throwsA(
+            isA<ApiException>().having((e) => e.statusCode, 'statusCode', 502),
+          ),
+          reason: response.body,
+        );
+      }
+    });
+
+    test('has a readable description for logs', () {
+      expect(
+        const ApiException(500, 'down').toString(),
+        'ApiException(500): down',
+      );
+    });
+
+    test('defaults to the address given at build time', () {
+      expect(apiUrl, isNotEmpty);
+      expect(HelloClient(), isA<HelloClient>());
+    });
+  });
+}

@@ -1,4 +1,5 @@
 import { agentCommand, type ScaffolderConfig } from "./config";
+import { mobileStack } from "./mobileStacks";
 import { webStack } from "./webStacks";
 import { buildGates, OPENAPI_SNAPSHOT, relativeFrom, setupSteps, STAGE_ORDER } from "./gates";
 
@@ -10,12 +11,16 @@ function titleCase(slug: string): string {
     .join(" ");
 }
 
+/** `AC-007`, `CHK-009`: the ids a spec uses, always three digits. */
+const specId = (prefix: "AC" | "CHK", n: number) => `${prefix}-${String(n).padStart(3, "0")}`;
+
 /** Values every template can reference as `<% name %>`. */
 export function buildView(cfg: ScaffolderConfig) {
   const slug = cfg.project.name;
   const owner = cfg.project.owner.toLowerCase();
   const hasBackend = cfg.backend.enabled;
   const hasWeb = cfg.web.enabled;
+  const hasMobile = cfg.mobile.enabled;
   const hasDb = hasBackend && cfg.database.type !== "none";
   const hasDocker = cfg.docker.enabled;
   const hasCi = cfg.ci.provider !== "none";
@@ -37,6 +42,28 @@ export function buildView(cfg: ScaffolderConfig) {
   const databaseUrlLocal = hasDb
     ? `postgresql+asyncpg://${db.user}:${db.password}@localhost:${db.port}/${db.name}`
     : "";
+
+  // The mobile app's part of the hello-world spec. Next to a backend it has one criterion (the app and the live API
+  // agree); on its own it has the three greeting rules, numbered after the web app's when that has its own three.
+  const mobileFirst = !hasBackend && hasWeb ? 3 : 0;
+
+  // Wording that depends on which components exist, computed once instead of as nested conditionals in a dozen templates.
+  const auditGates = [hasBackend && "`backend.audit`", hasWeb && "`web.audit`"].filter(Boolean) as string[];
+  const dartNoAudit = "The Dart SDK has no dependency audit, so read every change to `pubspec.lock` yourself.";
+  const auditNote = auditGates.length
+    ? `${auditGates.join(" and ")} ${auditGates.length > 1 ? "report" : "reports"} known vulnerabilities (warnings; treat high/critical as blockers).` +
+      (hasMobile ? ` ${dartNoAudit}` : "")
+    : hasMobile
+      ? `There is no audit gate for a Dart project. ${dartNoAudit}`
+      : "";
+  const coverageSummary = [
+    hasBackend && `backend >= ${cfg.sdlc.coverage.backend}%`,
+    hasWeb && `web >= ${cfg.sdlc.coverage.web}%`,
+    hasMobile && `mobile >= ${cfg.sdlc.coverage.mobile}%`,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const manifests = [hasBackend && "pyproject.toml", hasWeb && "package.json", hasMobile && "pubspec.yaml"].filter(Boolean).join(" / ");
 
   const gates = buildGates(cfg);
   const gateRows = gates.map((g) => ({
@@ -64,11 +91,15 @@ export function buildView(cfg: ScaffolderConfig) {
 
     hasBackend,
     hasWeb,
+    hasMobile,
     hasDb,
     hasDocker,
     hasCi,
     hasCd,
     hasBoth: hasBackend && hasWeb,
+    /** A mobile app that talks to the backend (and so has an API client), and one that stands alone. */
+    hasMobileApi: hasMobile && hasBackend,
+    mobileOnly: hasMobile && !hasBackend && !hasWeb,
     hasSecurity: cfg.sdlc.gates.security,
     hasContract: hasBackend && cfg.sdlc.gates.contract,
     hasFacts: cfg.sdlc.gates.facts,
@@ -80,17 +111,43 @@ export function buildView(cfg: ScaffolderConfig) {
     backendDir: cfg.layout.backendDir,
     openapiFromBackend: relativeFrom(cfg.layout.backendDir, OPENAPI_SNAPSHOT),
     webDir: cfg.layout.webDir,
+    mobileDir: cfg.layout.mobileDir,
     backendPort: cfg.backend.port,
     webPort: cfg.web.port,
     webName: webStack(cfg).name,
     webDescription: webStack(cfg).description,
     webTypeTool: webStack(cfg).typeTool,
     webRuleFile: `.ai/rules/${webStack(cfg).ruleFile}`,
+    mobileName: mobileStack(cfg).name,
+    mobileDescription: mobileStack(cfg).description,
+    mobileTool: mobileStack(cfg).tool,
+    mobileRuleFile: `.ai/rules/${mobileStack(cfg).ruleFile}`,
+    mobileVersion: cfg.mobile.version,
+    /** The Dart language version that release line ships with, for `pubspec.yaml`. */
+    dartVersion: mobileStack(cfg).languageSdk[cfg.mobile.version] ?? "",
+    /** The Dart package name (a Dart identifier: lowercase letters, digits and underscores). */
+    dartPackage: slug.replace(/-/g, "_"),
+    auditNote,
+    coverageSummary,
+    manifests,
+    /** The rules file that describes how the app a person sees is built: the web app's, else the mobile app's. */
+    clientRuleFile: hasWeb || !hasMobile ? `.ai/rules/${webStack(cfg).ruleFile}` : `.ai/rules/${mobileStack(cfg).ruleFile}`,
+    /** The YAML form of the description (quoted and escaped), for `pubspec.yaml`. */
+    descriptionYaml: JSON.stringify(cfg.project.description),
+    mobileAcApi: specId("AC", 8),
+    mobileChkApi: specId("CHK", 9),
+    mobileAc1: specId("AC", mobileFirst + 1),
+    mobileAc2: specId("AC", mobileFirst + 2),
+    mobileAc3: specId("AC", mobileFirst + 3),
+    mobileChk1: specId("CHK", mobileFirst + 1),
+    mobileChk2: specId("CHK", mobileFirst + 2),
+    mobileChk3: specId("CHK", mobileFirst + 3),
     pythonVersion: cfg.backend.version,
     pythonTarget: `py${cfg.backend.version.replace(".", "")}`,
     nodeVersion: cfg.web.nodeVersion,
     coverageBackend: cfg.sdlc.coverage.backend,
     coverageWeb: cfg.sdlc.coverage.web,
+    coverageMobile: cfg.sdlc.coverage.mobile,
 
     db,
     databaseUrlCompose,

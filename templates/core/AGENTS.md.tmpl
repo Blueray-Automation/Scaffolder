@@ -33,7 +33,7 @@ Worked example: `.ai/specs/FEAT-000-hello-world/`.
 ./<%sdlcDir%>/sdlc loop       # verify -> heal -> verify (max <%maxIterations%> iterations)
 ./<%sdlcDir%>/sdlc spec requirements.pdf   # an agent drafts prd.md + acceptance.json from a document; you review the draft
 ./<%sdlcDir%>/sdlc implement FEAT-001   # spec in (prd.md + acceptance.json), verified code out; needs an agent
-./<%sdlcDir%>/sdlc sync       # install dependencies if a manifest (pyproject.toml / package.json) changed
+./<%sdlcDir%>/sdlc sync       # install dependencies if a manifest (<%manifests%>) changed
 ```
 Single gate while iterating: `./<%sdlcDir%>/sdlc gates --only <id>`. `make help` lists the same commands.
 On Windows (PowerShell or cmd) the launcher is `.\<%sdlcDir%>\sdlc.cmd`; every command and option is the same. Never edit the launchers (`<%sdlcDir%>/sdlc`, `<%sdlcDir%>/sdlc.cmd`, `<%sdlcDir%>/sdlc.py`).
@@ -60,6 +60,9 @@ scripts/        sdlc, sdlc.py                              <- the verification l
 <%#hasWeb%>
 <%webDir%>/            <%webName%> app (Node <%nodeVersion%>, TypeScript)
 <%/hasWeb%>
+<%#hasMobile%>
+<%mobileDir%>/            <%mobileName%> app (<%mobileName%> <%mobileVersion%>, Dart <%dartVersion%>)
+<%/hasMobile%>
 <%#hasDocker%>
 docker-compose.yml   full stack, also used by the facts stage
 <%/hasDocker%>

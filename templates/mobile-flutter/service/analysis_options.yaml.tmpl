@@ -1,0 +1,19 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  # `flutter create` adds every platform folder it generates to this list and rewrites the file when one is missing,
+  # so they are listed up front: creating the platform folders leaves this file as it is.
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+
+linter:
+  rules:
+    - avoid_dynamic_calls
+    - prefer_final_locals
+    - unawaited_futures

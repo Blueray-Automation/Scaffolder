@@ -1,0 +1,10 @@
+/// The longest name that is used; anything longer is ignored.
+const int maxNameLength = 50;
+
+/// The greeting for [name]: `Hello, <name>!` when the trimmed name is 1 to [maxNameLength] characters long,
+/// otherwise `Hello, World!` (a missing, blank or over-long name is ignored, never an error).
+String greeting(String? name) {
+  final trimmed = name?.trim() ?? '';
+  final usable = trimmed.isNotEmpty && trimmed.length <= maxNameLength;
+  return 'Hello, ${usable ? trimmed : 'World'}!';
+}

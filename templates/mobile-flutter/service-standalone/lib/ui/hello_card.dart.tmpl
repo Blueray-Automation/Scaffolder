@@ -1,0 +1,24 @@
+import 'package:material_ui/material_ui.dart';
+
+/// The card at the centre of the screen. Presentational only: it is told what to show.
+class HelloCard extends StatelessWidget {
+  const HelloCard({required this.message, super.key});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Semantics(
+          header: true,
+          child: Text(
+            message,
+            style: Theme.of(context).textTheme.headlineMedium,
+          ),
+        ),
+      ),
+    );
+  }
+}

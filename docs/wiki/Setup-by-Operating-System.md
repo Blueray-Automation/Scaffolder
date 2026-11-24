@@ -20,6 +20,7 @@ Both are tiny launchers for the same program (`scripts/sdlc.py`), so every comma
 | Git | the integrity guard, the secret scan, your own change history | any recent |
 | Python | the backend (and the `sdlc` tool itself) | **3.12 or newer** for the backend (the version in your config). The tool alone runs on 3.9+; `setup` finds a suitable Python for the backend and offers to install one |
 | Node.js + npm | the web app (if you included it) | **22.12 or newer** |
+| Flutter SDK | the mobile app (if you included one) | **3.50**, the release line in your config. It brings its own Dart. The checks need nothing else: no Android SDK, no Xcode |
 | Docker | the full stack and the facts stage | optional: without it use `verify --runtime local`. Needs Compose v2 (`docker compose`) |
 | An AI agent | `spec` and `implement` | optional: a CLI (`claude`, `codex`, `gemini`, `copilot` or `cursor`, installed as its own documentation says), or a desktop app: the Claude desktop app's own Claude Code (`claude-desktop`), or the Claude desktop app, Cursor or VS Code driven by you ([Using a Desktop App](Desktop-Apps)). `./scripts/sdlc agent` shows which you have and how to install the others |
 
@@ -40,6 +41,14 @@ brew install --cask docker
 ```
 
 Open Docker Desktop once so it finishes starting. macOS ships Python 3.9, which is fine for the tool itself; `setup` finds the `python@3.12` you just installed for the backend.
+
+Only if the project has a Flutter app:
+
+```bash
+brew install --cask flutter
+```
+
+The first `flutter` command downloads the Dart SDK and the engine files, which takes a few minutes. This is the one install path that was run while building the Flutter pack; on Ubuntu and Windows follow the official guide, <https://docs.flutter.dev/get-started/install>, and check with `flutter --version`.
 
 ```bash
 cd hello-scaffold

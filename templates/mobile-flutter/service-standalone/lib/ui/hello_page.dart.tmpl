@@ -1,0 +1,51 @@
+import 'package:material_ui/material_ui.dart';
+
+import '../greeting.dart';
+import 'hello_card.dart';
+
+/// The first screen: a greeting for the name typed in the field, `Hello, World!` until there is a usable one.
+class HelloPage extends StatefulWidget {
+  const HelloPage({required this.title, super.key});
+
+  final String title;
+
+  @override
+  State<HelloPage> createState() => _HelloPageState();
+}
+
+class _HelloPageState extends State<HelloPage> {
+  final TextEditingController _name = TextEditingController();
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(widget.title)),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListenableBuilder(
+                listenable: _name,
+                builder: (context, _) =>
+                    HelloCard(message: greeting(_name.text)),
+              ),
+              const SizedBox(height: 24),
+              TextField(
+                controller: _name,
+                decoration: const InputDecoration(labelText: 'Your name'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

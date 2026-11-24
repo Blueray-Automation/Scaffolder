@@ -35,6 +35,22 @@ const MATRIX: Record<string, Json> = {
     cd: { enabled: false },
     sdlc: { runtime: "local" },
   },
+  "full stack with Flutter": { mobile: { enabled: true } },
+  "Flutter with the backend, no web": { web: { enabled: false }, mobile: { enabled: true } },
+  "Flutter app on its own": {
+    backend: { enabled: false },
+    web: { enabled: false },
+    database: { type: "none" },
+    mobile: { enabled: true },
+  },
+  "Flutter beside a web app, no backend": { backend: { enabled: false }, database: { type: "none" }, mobile: { enabled: true } },
+  "Flutter, custom directory, local runtime, no ci": {
+    mobile: { enabled: true },
+    layout: { mobileDir: "apps/mobile" },
+    ci: { provider: "none" },
+    cd: { enabled: false },
+    sdlc: { runtime: "local" },
+  },
   "custom directories": { layout: { backendDir: "services/api", webDir: "apps/web" } },
   "python 3.11, node 24, custom ports": {
     backend: { version: "3.11", port: 9100 },
@@ -380,6 +396,275 @@ describe("generated project: Nuxt", () => {
     const service = (sdlcOf(next.files).runtime.local.services as Json[]).find((s) => s.name === "web")!;
     expect(service.cmd).toBe("npm run start -- --port 3000 --hostname 127.0.0.1");
     expect(service.env).toEqual({ API_URL: "http://127.0.0.1:8000", NEXT_TELEMETRY_DISABLED: "1" });
+  });
+});
+
+describe("generated project: Flutter", () => {
+  const ONLY = { backend: { enabled: false }, web: { enabled: false }, database: { type: "none" }, mobile: { enabled: true } };
+  const WITH_API = { web: { enabled: false }, mobile: { enabled: true } };
+  const BESIDE_WEB = { backend: { enabled: false }, database: { type: "none" }, mobile: { enabled: true } };
+  const FULL = { mobile: { enabled: true } };
+  const only = generate(ONLY);
+  const api = generate(WITH_API);
+  const beside = generate(BESIDE_WEB);
+  const full = generate(FULL);
+  const textOf = (files: GeneratedFile[]) => (path: string) => {
+    const file = byPath(files).get(path);
+    if (!file) throw new Error(`no generated file ${path}`);
+    return file.content;
+  };
+  const sdlcOf = (files: GeneratedFile[]) => JSON.parse(textOf(files)(".ai/sdlc.json")) as Json;
+  const acceptanceOf = (files: GeneratedFile[]) => JSON.parse(textOf(files)(".ai/specs/FEAT-000-hello-world/acceptance.json")) as Json;
+  const pathsUnder = (files: GeneratedFile[], prefix: string) => files.map((f) => f.path).filter((p) => p.startsWith(prefix)).sort();
+
+  it("a Flutter app on its own is these files, with the rules for working in it", () => {
+    expect(pathsUnder(only.files, "mobile/")).toEqual(
+      [
+        "analysis_options.yaml", "lib/app.dart", "lib/greeting.dart", "lib/main.dart", "lib/ui/hello_card.dart", "lib/ui/hello_page.dart",
+        "pubspec.yaml", "README.md", "test/greeting_test.dart", "test/tool/check_coverage_test.dart", "test/ui/hello_card_test.dart",
+        "test/ui/hello_page_test.dart", "test/widget_test.dart", "tool/check_coverage.dart",
+      ].map((p) => `mobile/${p}`).sort(),
+    );
+    expect(only.files.map((f) => f.path)).toContain(".ai/rules/mobile-flutter.md");
+    expect(only.files.map((f) => f.path)).not.toContain(".ai/rules/web-nextjs.md");
+  });
+
+  it("next to a backend it has a typed API client and its tests instead of the greeting logic", () => {
+    expect(pathsUnder(api.files, "mobile/")).toEqual(
+      [
+        "analysis_options.yaml", "lib/api/hello_client.dart", "lib/app.dart", "lib/main.dart", "lib/ui/hello_card.dart", "lib/ui/hello_page.dart",
+        "pubspec.yaml", "README.md", "test/api/hello_client_test.dart", "test/integration/backend_test.dart", "test/tool/check_coverage_test.dart",
+        "test/ui/hello_card_test.dart", "test/ui/hello_page_test.dart", "test/widget_test.dart", "tool/check_coverage.dart",
+      ].map((p) => `mobile/${p}`).sort(),
+    );
+    const text = textOf(api.files);
+    expect(text("mobile/lib/main.dart")).toContain("HelloApp(client: HelloClient())");
+    expect(text("mobile/lib/ui/hello_page.dart")).toContain("import '../api/hello_client.dart';");
+    expect(text("mobile/lib/api/hello_client.dart")).toContain("String.fromEnvironment(");
+    expect(text("mobile/lib/api/hello_client.dart")).toContain("'http://localhost:8000'");
+    expect(text("mobile/pubspec.yaml")).toMatch(/^ {2}http: \^1\.\d+\.\d+$/m);
+    const own = textOf(only.files);
+    expect(own("mobile/pubspec.yaml")).not.toMatch(/\bhttp:/);
+    expect(only.files.filter((f) => f.path.endsWith(".dart")).map((f) => f.content).join("\n")).not.toMatch(/package:http|API_URL|HelloClient/);
+  });
+
+  it("the backend's address in the client and in the spec follows the configured port", () => {
+    const moved = generate({ ...WITH_API, backend: { port: 9100 } });
+    expect(textOf(moved.files)("mobile/lib/api/hello_client.dart")).toContain("http://localhost:9100");
+    expect(textOf(moved.files)("mobile/lib/api/hello_client.dart")).not.toContain("8000");
+    const check = (acceptanceOf(moved.files).checks as Json[]).find((c) => c.covers.includes("AC-008"))!;
+    expect(check.run).toContain("--dart-define=API_URL=http://127.0.0.1:9100");
+  });
+
+  it("generates no platform folders (flutter create writes the current ones) and never the deprecated Material import", () => {
+    for (const result of [only, api, beside, full]) {
+      expect(result.files.map((f) => f.path).filter((p) => /^mobile\/(android|ios|web|macos|linux|windows)\//.test(p))).toEqual([]);
+      for (const f of result.files.filter((f) => f.path.endsWith(".dart"))) {
+        expect(f.content, f.path).not.toContain("package:flutter/material.dart");
+        expect(f.content, f.path).not.toMatch(/<%|%>/);
+      }
+      expect(textOf(result.files)("mobile/analysis_options.yaml")).toMatch(/- android\/\*\*\n\s+- ios\/\*\*/);
+    }
+    expect(textOf(only.files)("mobile/lib/ui/hello_page.dart")).toContain("package:material_ui/material_ui.dart");
+  });
+
+  it("the gates say what they run, run in the mobile folder, and need only the Flutter SDK", () => {
+    const gates = sdlcOf(only.files).gates as Json[];
+    expect(gates.filter((g) => g.component === "mobile").map((g) => [g.id, g.stage, g.cwd, g.required])).toEqual([
+      ["mobile.analyze", "static", "mobile", true],
+      ["mobile.unit", "unit", "mobile", true],
+      ["mobile.build", "build", "mobile", true],
+    ]);
+    const gate = (id: string) => gates.find((g) => g.id === id)!;
+    // analysis first: it installs the dependencies, which the formatter needs to read analysis_options.yaml without warnings
+    expect(gate("mobile.analyze").cmd).toBe("flutter analyze --fatal-infos && dart format --output=none --set-exit-if-changed .");
+    expect(gate("mobile.unit").cmd).toBe("flutter test --coverage && dart run tool/check_coverage.dart --min 70");
+    expect(gate("mobile.build").cmd).toBe("flutter build bundle");
+    expect(gate("mobile.unit").label).toBe("Mobile unit & widget tests (flutter test, coverage >= 70%)");
+    for (const id of ["mobile.analyze", "mobile.unit", "mobile.build"]) expect(gate(id).env, id).toEqual({ FLUTTER_SUPPRESS_ANALYTICS: "true" });
+    // the Dart SDK has no dependency audit, so there is no such gate, and the rules say to read pubspec.lock yourself
+    expect(gates.map((g) => g.id)).not.toContain("mobile.audit");
+    expect(textOf(only.files)(".ai/rules/security.md")).toContain("no audit gate for a Dart project");
+    expect(textOf(full.files)(".ai/rules/security.md")).toContain("`backend.audit` and `web.audit` report known vulnerabilities");
+    expect(textOf(full.files)(".ai/rules/security.md")).toContain("The Dart SDK has no dependency audit");
+  });
+
+  it("the coverage floor is configurable and lives in the protected gate config, not in a file the agent edits", () => {
+    const strict = generate({ ...ONLY, sdlc: { coverage: { mobile: 85 } } });
+    expect((sdlcOf(strict.files).gates as Json[]).find((g) => g.id === "mobile.unit")!.cmd).toContain("--min 85");
+    expect(textOf(strict.files)(".ai/rules/testing.md")).toContain("mobile >= 85%");
+    expect(textOf(full.files)(".ai/rules/testing.md")).toContain("backend >= 80%, web >= 70%, mobile >= 70%");
+    expect(sdlcOf(only.files).integrity.protected).toContain(".ai/sdlc.json");
+  });
+
+  it("linting and type checking are one pass, so either switch keeps it, and both off drops it", () => {
+    const ids = (gates: Json) => (sdlcOf(generate({ ...ONLY, sdlc: { gates } }).files).gates as Json[]).map((g) => g.id);
+    expect(ids({ lint: false })).toContain("mobile.analyze");
+    expect(ids({ types: false })).toContain("mobile.analyze");
+    expect(ids({ lint: false, types: false })).not.toContain("mobile.analyze");
+    expect(ids({ unit: false })).not.toContain("mobile.unit");
+    expect(ids({ build: false })).not.toContain("mobile.build");
+  });
+
+  it("installs dependencies with the lockfile when there is one, and tells doctor to look for flutter", () => {
+    const step = (sdlcOf(only.files).setup as Json[])[0]!;
+    expect(step).toMatchObject({
+      id: "mobile.install",
+      component: "mobile",
+      cwd: "mobile",
+      toolchain: "flutter",
+      cmd: "flutter pub get --enforce-lockfile",
+      lockfile: "pubspec.lock",
+      fallbackCmd: "flutter pub get",
+      tools: ["flutter"],
+      manifests: ["mobile/pubspec.yaml"],
+      marker: "mobile/.dart_tool",
+    });
+    // the runner is generic: it learns what to look for from `tools` above, so it names no framework
+    expect(textOf(full.files)("scripts/sdlc.py")).not.toMatch(/flutter/i);
+    // the CI form of the same step (bash) chooses by the lockfile
+    const ci = parse(textOf(full.files)(".github/workflows/ci.yml")) as Json;
+    expect(ci.jobs.mobile.steps.find((s: Json) => s.name === "Install mobile dependencies (flutter pub get)")).toMatchObject({
+      run: "if [ -f pubspec.lock ]; then flutter pub get --enforce-lockfile; else flutter pub get; fi",
+      "working-directory": "mobile",
+    });
+  });
+
+  it("pubspec.yaml pins the Flutter and Dart of the chosen release line, and keeps any description valid YAML", () => {
+    const pubspec = (patch: Json) => parse(textOf(generate({ ...ONLY, ...patch }).files)("mobile/pubspec.yaml")) as Json;
+    expect(pubspec({}).environment).toEqual({ sdk: "^3.14.0", flutter: ">=3.50.0" });
+    expect(pubspec({ project: { name: "my-shop" } }).name).toBe("my_shop");
+    const description = `Say "hi": it's {fine} # not a comment\nsecond line`;
+    expect(pubspec({ project: { description } }).description).toBe(description);
+    expect(pubspec({}).dependencies.material_ui).toMatch(/^\^1\./);
+    expect(pubspec({}).flutter).toEqual({ "uses-material-design": true });
+  });
+
+  it("the spec's checks run a named test for every criterion, and that test exists", () => {
+    for (const [label, result] of [["on its own", only], ["beside a web app", beside], ["with a backend", api], ["full stack", full]] as const) {
+      const checks = (acceptanceOf(result.files).checks as Json[]).filter((c) => c.type === "cmd" && String(c.run).startsWith("flutter test"));
+      expect(checks.length, label).toBeGreaterThan(0);
+      for (const check of checks) {
+        const match = /^flutter test (\S+) --plain-name "(AC-\d+)"/.exec(check.run as string);
+        expect(match, `${label}: ${check.run}`).not.toBeNull();
+        const [, file, ac] = match!;
+        expect(check.cwd, label).toBe("mobile");
+        expect(check.covers, label).toEqual([ac]);
+        // flutter test exits 0 for a skipped test, so the check also requires that something passed
+        expect(check.stdoutContains, label).toEqual(["All tests passed!"]);
+        expect(check.env, label).toEqual({ FLUTTER_SUPPRESS_ANALYTICS: "true" });
+        // the id begins a test name in that very file, so the name filter can never match nothing
+        expect(textOf(result.files)(`mobile/${file}`), `${label}: ${file}`).toContain(`${ac}:`);
+        expect(textOf(result.files)(`.ai/specs/FEAT-000-hello-world/prd.md`), label).toMatch(new RegExp(`\\*\\*${ac}\\*\\*`));
+      }
+    }
+  });
+
+  it("on its own it has three greeting criteria and needs no runtime; beside a web app they follow the web's three", () => {
+    expect((acceptanceOf(only.files).checks as Json[]).map((c) => [c.id, c.covers[0], c.type])).toEqual([
+      ["CHK-001", "AC-001", "cmd"], ["CHK-002", "AC-002", "cmd"], ["CHK-003", "AC-003", "cmd"],
+    ]);
+    expect((acceptanceOf(beside.files).checks as Json[]).map((c) => [c.id, c.covers[0], c.type])).toEqual([
+      ["CHK-001", "AC-001", "http"], ["CHK-002", "AC-002", "http"], ["CHK-003", "AC-003", "http"],
+      ["CHK-004", "AC-004", "cmd"], ["CHK-005", "AC-005", "cmd"], ["CHK-006", "AC-006", "cmd"],
+    ]);
+    expect(textOf(beside.files)("mobile/test/ui/hello_page_test.dart")).toContain("'AC-004: the first screen greets the world'");
+    expect(textOf(beside.files)(".ai/specs/FEAT-000-hello-world/prd.md")).toContain("a mobile screen that does the same");
+    expect(textOf(only.files)(".ai/specs/FEAT-000-hello-world/prd.md")).toContain("the Flutter app computes the greeting itself");
+    expect(textOf(only.files)(".ai/specs/FEAT-000-hello-world/prd.md")).not.toMatch(/web/i);
+    expect(sdlcOf(only.files).runtime.targets).toEqual({});
+  });
+
+  it("next to a backend one check runs the app's own client against the live API, which has to be up", () => {
+    for (const result of [api, full]) {
+      const check = (acceptanceOf(result.files).checks as Json[]).find((c) => c.id === "CHK-009")!;
+      expect(check).toMatchObject({ covers: ["AC-008"], type: "cmd", needs: ["backend"], cwd: "mobile", expectExit: 0 });
+      expect(check.run).toBe('flutter test test/integration/backend_test.dart --plain-name "AC-008" --dart-define=API_URL=http://127.0.0.1:8000');
+      expect(check.timeoutSeconds).toBeGreaterThanOrEqual(300);
+    }
+    const test = textOf(api.files)("mobile/test/integration/backend_test.dart");
+    expect(test).toContain("AC-008");
+    expect(test).toContain("skip: _liveApi.isEmpty");
+    expect(textOf(full.files)(".ai/specs/FEAT-000-hello-world/prd.md")).toContain("a web page and a mobile app that each display the greeting from the API");
+    // the web criteria are untouched by the mobile one
+    expect((acceptanceOf(full.files).checks as Json[]).find((c) => c.id === "CHK-008")).toMatchObject({ covers: ["AC-007"], target: "web" });
+  });
+
+  it("CI runs the gates in a mobile job with the SDK pinned to the release line, and the facts job has the SDK too", () => {
+    const ci = parse(textOf(full.files)(".github/workflows/ci.yml")) as Json;
+    expect(ci.jobs.mobile.env).toEqual({ FLUTTER_SUPPRESS_ANALYTICS: "true" });
+    expect(ci.jobs.mobile.steps[1]).toEqual({ uses: "subosito/flutter-action@v2", with: { channel: "stable", "flutter-version": "3.50.x", cache: true } });
+    expect(ci.jobs.mobile.steps.filter((s: Json) => s.run).map((s: Json) => s.run)).toEqual([
+      "if [ -f pubspec.lock ]; then flutter pub get --enforce-lockfile; else flutter pub get; fi",
+      "flutter analyze --fatal-infos && dart format --output=none --set-exit-if-changed .",
+      "flutter test --coverage && dart run tool/check_coverage.dart --min 70",
+      "flutter build bundle",
+    ]);
+    expect(ci.jobs.facts.needs).toEqual(expect.arrayContaining(["backend", "web", "mobile", "repo"]));
+    expect(ci.jobs.facts.steps.some((s: Json) => s.uses === "subosito/flutter-action@v2")).toBe(true);
+  });
+
+  it("on its own CI still runs the facts (so a criterion without a check fails there too), without starting anything", () => {
+    const ci = parse(textOf(only.files)(".github/workflows/ci.yml")) as Json;
+    expect(Object.keys(ci.jobs).sort()).toEqual(["facts", "mobile", "repo"]);
+    const runs = ci.jobs.facts.steps.map((s: Json) => s.run ?? s.uses);
+    expect(runs).toContain("subosito/flutter-action@v2");
+    expect(runs).toContain("python3 scripts/sdlc.py facts");
+    expect(runs).not.toContain("python3 scripts/sdlc.py setup");
+    // a web or backend project with no runtime still has no facts job (unchanged)
+    expect(Object.keys((parse(textOf(generate({ sdlc: { runtime: "none" } }).files)(".github/workflows/ci.yml")) as Json).jobs)).not.toContain("facts");
+  });
+
+  it("with nothing to put in a container there is no compose file, no CD and no deploy script; with a backend the app is not an image", () => {
+    const names = only.files.map((f) => f.path);
+    expect(names).not.toContain("docker-compose.yml");
+    expect(names).not.toContain(".github/workflows/cd.yml");
+    expect(names).not.toContain("scripts/deploy.sh");
+    expect(only.config).toMatchObject({ docker: { enabled: false }, cd: { enabled: false }, sdlc: { runtime: "none" } });
+    expect(textOf(only.files)("scaffolder.config.yaml")).toMatch(/^docker:\n {2}enabled: false$/m);
+    expect(sdlcOf(only.files).runtime.mode).toBe("none");
+    expect(textOf(only.files)("README.md")).not.toMatch(/Docker|make up/);
+
+    expect(Object.keys((parse(textOf(full.files)("docker-compose.yml")) as Json).services).sort()).toEqual(["backend", "postgres", "web"]);
+    const cd = textOf(full.files)(".github/workflows/cd.yml");
+    expect(cd).not.toMatch(/mobile/i);
+  });
+
+  it("the documents describe the app as Flutter, and the folders it generates are ignored and left out of the secret scan", () => {
+    const own = textOf(only.files);
+    expect(own("README.md")).toContain("Flutter (Dart) app whose first screen greets the user");
+    expect(own("README.md")).toContain("Flutter 3.50 (Dart 3.14)");
+    expect(textOf(api.files)("README.md")).toContain("Flutter (Dart) app that shows the greeting it fetches from the API");
+    expect(own("AGENTS.md")).toContain("mobile/            Flutter app (Flutter 3.50, Dart 3.14)");
+    expect(own("AGENTS.md")).toContain("(pubspec.yaml) changed");
+    expect(textOf(full.files)("AGENTS.md")).toContain("(pyproject.toml / package.json / pubspec.yaml) changed");
+    expect(own(".gitignore")).toMatch(/^\.dart_tool\/$/m);
+    expect(own(".gitignore")).toMatch(/^mobile\/build\/$/m);
+    expect(own("scripts/sdlc.py")).toMatch(/SECRET_SKIP_DIRS = \{[^}]*"\.dart_tool"/);
+    expect(own(".github/dependabot.yml")).toMatch(/package-ecosystem: pub\n\s+directory: \/mobile/);
+    expect(own(".ai/rules/mobile-flutter.md")).toContain("package:flutter/material.dart` is deprecated since Flutter 3.47");
+    expect(own(".ai/rules/mobile-flutter.md")).toContain("flutter create --platforms=android,ios");
+    expect(own(".ai/rules/mobile-flutter.md")).toContain("a file no test uses is a failure");
+    expect(own(".ai/skills/implement-feature/SKILL.md")).toContain("Mobile (`mobile/`): see `.ai/rules/mobile-flutter.md`.");
+    expect(own(".ai/prompts/spec.md")).toContain("`.ai/rules/mobile-flutter.md`");
+    expect(own(".ai/prompts/spec.md")).toContain("flutter test test/ui/plans_page_test.dart --plain-name");
+    expect(own(".ai/prompts/spec.md")).not.toContain("npx vitest");
+    expect(JSON.parse(own(".ai/specs/_template/acceptance.json").replace("{{ID}}", "FEAT-001")).checks[0].type).toBe("cmd");
+  });
+
+  it("projects without a mobile app are not touched by Flutter being available", () => {
+    const plain = generate({});
+    expect(plain.config.mobile.enabled).toBe(false);
+    for (const f of plain.files) {
+      expect(f.path, f.path).not.toMatch(/mobile|flutter|\.dart$|pubspec/i);
+      if (f.path === "scaffolder.config.yaml" || f.path === "scripts/sdlc.py") continue;
+      expect(f.content, f.path).not.toMatch(/Flutter|flutter|pubspec|\.dart_tool|Dart /);
+    }
+    expect((sdlcOf(plain.files).gates as Json[]).some((g) => g.component === "mobile")).toBe(false);
+    expect(sdlcOf(plain.files).setup.map((s: Json) => s.toolchain)).toEqual(["python", "node"]);
+    expect(Object.keys((parse(textOf(plain.files)(".github/workflows/ci.yml")) as Json).jobs)).toEqual(["backend", "web", "repo", "facts"]);
+    const next = (patch: Json) => generate({ web: { framework: "nuxt" }, ...patch });
+    expect(textOf(next({}).files)(".gitignore")).not.toContain(".dart_tool");
   });
 });
 
@@ -757,7 +1042,9 @@ describe("validation", () => {
   it("rejects stacks that have no pack yet instead of generating stubs", () => {
     expect(errorPaths({ backend: { language: "java", framework: "spring-boot", version: "21" } })).toContain("backend.language");
     expect(errorPaths({ web: { framework: "vue" } })).toContain("web.framework");
-    expect(errorPaths({ mobile: { enabled: true } })).toContain("mobile.enabled");
+    for (const framework of ["react-native", "android", "ios"]) {
+      expect(errorPaths({ mobile: { enabled: true, framework } }), framework).toContain("mobile.framework");
+    }
     expect(errorPaths({ database: { type: "mysql" } })).toContain("database.type");
     expect(errorPaths({ auth: { type: "jwt" } })).toContain("auth.type");
     expect(errorPaths({ cache: { type: "redis" } })).toContain("cache.type");
@@ -775,6 +1062,42 @@ describe("validation", () => {
     expect(errorPaths({ ci: { provider: "none" } })).toContain("cd.enabled");
     expect(errorPaths({ layout: { webDir: "backend" } })).toContain("layout.webDir");
     expect(errorPaths({ layout: { backendDir: "../escape" } })).toContain("layout.backendDir");
+  });
+
+  it("accepts a Flutter app on its own, with the default Docker and CD settings, and checks its version, folder and name", () => {
+    expect(errorPaths({ backend: { enabled: false }, web: { enabled: false }, database: { type: "none" }, mobile: { enabled: true } })).toEqual([]);
+    expect(errorPaths({ mobile: { enabled: true, version: "3.1" } })).toEqual(["mobile.version"]);
+    expect(errorPaths({ mobile: { enabled: true, version: "3.50" } })).toEqual([]);
+    // only the release line that was run against is offered
+    expect(errorPaths({ mobile: { enabled: true, version: "3.47" } })).toEqual(["mobile.version"]);
+    expect(check({ mobile: { enabled: true, version: "3.47" } }).find((i) => i.path === "mobile.version")!.message).toBe("Flutter supports versions: 3.50.");
+    expect(errorPaths({ mobile: { enabled: true }, layout: { mobileDir: "web" } })).toContain("layout.mobileDir");
+    expect(errorPaths({ mobile: { enabled: true }, layout: { mobileDir: "backend" } })).toContain("layout.mobileDir");
+    expect(errorPaths({ layout: { mobileDir: "../escape" } })).toContain("layout.mobileDir");
+    expect(errorPaths({ sdlc: { coverage: { mobile: 101 } } })).toContain("sdlc.coverage.mobile");
+  });
+
+  it("refuses a project name that the app's package cannot have, only when there is a mobile app", () => {
+    for (const name of ["class", "import", "for", "null", "web", "http", "path", "flutter", "async", "material-ui"]) {
+      expect(errorPaths({ project: { name }, mobile: { enabled: true } }), name).toContain("project.name");
+      expect(errorPaths({ project: { name } }), `${name} without mobile`).not.toContain("project.name");
+    }
+    // typedef and dynamic are accepted by pub, and an ordinary name that merely contains a reserved word is fine
+    for (const name of ["typedef", "dynamic", "class-room", "my-shop", "a1"]) {
+      expect(errorPaths({ project: { name }, mobile: { enabled: true } }), name).not.toContain("project.name");
+    }
+    const message = check({ project: { name: "web" }, mobile: { enabled: true } }).find((i) => i.path === "project.name")!.message;
+    expect(message).toContain("cannot depend on itself");
+    expect(message).toContain("Choose another project name");
+  });
+
+  it("leaves Docker, CD and the Docker runtime out of a project with no service to run in them", () => {
+    const cfg = resolveConfig({ backend: { enabled: false }, web: { enabled: false }, database: { type: "none" }, mobile: { enabled: true } });
+    expect([cfg.docker.enabled, cfg.cd.enabled, cfg.sdlc.runtime]).toEqual([false, false, "none"]);
+    // a runtime the person chose is theirs; and anything with a service keeps what it had
+    expect(resolveConfig({ backend: { enabled: false }, web: { enabled: false }, mobile: { enabled: true }, sdlc: { runtime: "local" } }).sdlc.runtime).toBe("local");
+    expect(resolveConfig({ mobile: { enabled: true } })).toMatchObject({ docker: { enabled: true }, cd: { enabled: true }, sdlc: { runtime: "docker" } });
+    expect(resolveConfig({ web: { enabled: false } })).toMatchObject({ docker: { enabled: true }, cd: { enabled: true } });
   });
 
   it("bounds the loop settings", () => {

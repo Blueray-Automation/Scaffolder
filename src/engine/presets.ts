@@ -55,6 +55,8 @@ export function applyPreset(base: ScaffolderConfig, preset: Preset): ScaffolderC
   const next = deepMerge(base, stackPatch(preset.stack));
   const db = findOption(CAPABILITIES.database, next.database.type);
   if (db?.versions && !db.versions.includes(next.database.version)) next.database.version = db.versions[0];
+  const mobile = findOption(CAPABILITIES.mobile.frameworks, next.mobile.framework);
+  if (mobile?.versions[0] && !mobile.versions.includes(next.mobile.version)) next.mobile.version = mobile.versions[0];
   return next;
 }
 

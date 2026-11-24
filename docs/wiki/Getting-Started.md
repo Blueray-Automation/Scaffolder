@@ -13,11 +13,16 @@ The **Config** button saves `scaffolder.config.yaml` so you can regenerate the s
 
 The starting points are tabs (arrow keys move between them, Enter chooses). Switching tabs changes only the stack and keeps
 your other settings. Available today: **Full-stack**, **API + database**, **API only**, **Next.js** and **Nuxt** (each a web app
-on its own, with no separate API). **Flutter**, **Android** and **iOS** are marked *soon*: they have no pack yet, so they
-cannot be chosen rather than being generated as broken stubs.
+on its own, with no separate API) and **Flutter** (a mobile app on its own). **Android** and **iOS** (native) are marked *soon*:
+they have no pack yet, so they cannot be chosen rather than being generated as broken stubs.
 
 Full-stack uses Next.js. To put Nuxt in front of the API instead, keep **Full-stack** and change **Web app → Framework** to Nuxt
 (on the CLI: `--set web.framework=nuxt`).
+
+To add a **Flutter** app to a stack that has a backend, tick **Mobile app** in the form (on the CLI: `--set mobile.enabled=true`). The app then
+shows the greeting it gets from the API, and the spec has one more check that runs the app's own client against the running backend.
+A Flutter app needs the Flutter SDK installed (see the table below); its `android/` and `ios/` folders are not generated, and
+`mobile/README.md` in the project says how to create them.
 
 **CLI:**
 

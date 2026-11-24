@@ -1,0 +1,28 @@
+// Runs only when a backend is up and its address is given:
+//
+//   flutter test test/integration/backend_test.dart --dart-define=API_URL=http://127.0.0.1:<%backendPort%>
+//
+// `./<%sdlcDir%>/sdlc verify` does this for you, against the system it starts. Without the address the test is
+// skipped, so a plain `flutter test` stays offline.
+import 'package:flutter_test/flutter_test.dart';
+import 'package:<%dartPackage%>/api/hello_client.dart';
+
+const String _liveApi = String.fromEnvironment('API_URL');
+
+void main() {
+  group('<%mobileAcApi%>: the app and the running backend agree', () {
+    test(
+      'the client returns the greeting the live backend serves',
+      () async {
+        final client = HelloClient(baseUrl: Uri.parse(_liveApi));
+
+        final hello = await client.fetchHello();
+
+        expect(hello.message, 'Hello, World!');
+      },
+      skip: _liveApi.isEmpty
+          ? 'Set --dart-define=API_URL=<backend address> to run against a live backend.'
+          : false,
+    );
+  });
+}

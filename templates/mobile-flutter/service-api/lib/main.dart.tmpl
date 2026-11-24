@@ -1,0 +1,7 @@
+import 'package:material_ui/material_ui.dart';
+
+import 'api/hello_client.dart';
+import 'app.dart';
+
+// Only start-up lives here (it is left out of the coverage count): everything else is in files the tests load.
+void main() => runApp(HelloApp(client: HelloClient()));

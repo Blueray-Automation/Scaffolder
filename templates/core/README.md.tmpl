@@ -16,7 +16,7 @@ make up                   # run the stack: http://localhost:<%#hasWeb%><%webPort
 <%/hasDocker%>
 ```
 
-Requirements: `python3` (3.9+ for the tooling<%#hasBackend%>, <%pythonVersion%> for the backend<%/hasBackend%>)<%#hasWeb%>, Node <%nodeVersion%><%/hasWeb%><%#runtimeDocker%>, Docker<%/runtimeDocker%>.
+Requirements: `python3` (3.9+ for the tooling<%#hasBackend%>, <%pythonVersion%> for the backend<%/hasBackend%>)<%#hasWeb%>, Node <%nodeVersion%><%/hasWeb%><%#hasMobile%>, Flutter <%mobileVersion%> (Dart <%dartVersion%>)<%/hasMobile%><%#runtimeDocker%>, Docker<%/runtimeDocker%>.
 
 **Windows** (PowerShell or cmd): write `.\<%sdlcDir%>\sdlc.cmd` wherever this document says `./<%sdlcDir%>/sdlc`<%#hasDocker%>, and `docker compose up -d --build` instead of `make up`<%/hasDocker%>. macOS, Ubuntu and WSL use `./<%sdlcDir%>/sdlc` as written.
 
@@ -33,6 +33,14 @@ Requirements: `python3` (3.9+ for the tooling<%#hasBackend%>, <%pythonVersion%> 
 - **`<%webDir%>/`**: <%webDescription%> page that greets the visitor, by `?name=` when the address gives one. It has no separate API; Vitest + ESLint + `<%webTypeTool%>` preconfigured.
 <%/hasBackend%>
 <%/hasWeb%>
+<%#hasMobile%>
+<%#hasBackend%>
+- **`<%mobileDir%>/`**: <%mobileDescription%> app that shows the greeting it fetches from the API (a typed client; the address is given at build time with `--dart-define=API_URL=...`); `flutter test` with a coverage floor, `flutter analyze` and `dart format` preconfigured. The `android/` and `ios/` folders are not generated: see `<%mobileDir%>/README.md`.
+<%/hasBackend%>
+<%^hasBackend%>
+- **`<%mobileDir%>/`**: <%mobileDescription%> app whose first screen greets the user, by the name typed into a field. It has no separate API; `flutter test` with a coverage floor, `flutter analyze` and `dart format` preconfigured. The `android/` and `ios/` folders are not generated: see `<%mobileDir%>/README.md`.
+<%/hasBackend%>
+<%/hasMobile%>
 <%#hasDocker%>
 - **`docker-compose.yml`**: the whole stack with health checks<%#hasDb%> and PostgreSQL <%db.version%><%/hasDb%>; also what the facts stage runs against.
 <%/hasDocker%>

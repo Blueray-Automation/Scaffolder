@@ -1,0 +1,81 @@
+// Typed client for the backend contract (.ai/contract/openapi.json). Keep it in sync with the API.
+import 'dart:convert';
+
+import 'package:http/http.dart' as http;
+
+/// The backend's address. A mobile app has no environment to read at run time, so it is fixed when the app is
+/// built: `flutter run --dart-define=API_URL=http://10.0.2.2:<%backendPort%>` (10.0.2.2 is how an Android emulator
+/// reaches the machine it runs on) or `flutter build apk --dart-define=API_URL=https://api.example.com`.
+const String apiUrl = String.fromEnvironment(
+  'API_URL',
+  defaultValue: 'http://localhost:<%backendPort%>',
+);
+
+/// The body of `GET /api/v1/hello`.
+class Hello {
+  const Hello(this.message);
+
+  final String message;
+}
+
+/// Anything that stops the greeting arriving: no connection, a refusal, or an answer that is not the contract.
+class ApiException implements Exception {
+  const ApiException(this.statusCode, this.message);
+
+  /// The HTTP status, or 0 when no answer came at all.
+  final int statusCode;
+
+  /// Text that is safe to show the user.
+  final String message;
+
+  @override
+  String toString() => 'ApiException($statusCode): $message';
+}
+
+class HelloClient {
+  HelloClient({http.Client? httpClient, Uri? baseUrl})
+    : _http = httpClient ?? http.Client(),
+      _baseUrl = baseUrl ?? Uri.parse(apiUrl);
+
+  final http.Client _http;
+  final Uri _baseUrl;
+
+  /// `GET /api/v1/hello`, optionally for [name]. Throws [ApiException] for every failure.
+  Future<Hello> fetchHello({String? name}) async {
+    final uri = _baseUrl.replace(
+      path: '/api/v1/hello',
+      queryParameters: (name == null || name.isEmpty) ? null : {'name': name},
+    );
+
+    final http.Response response;
+    try {
+      response = await _http.get(uri);
+    } on http.ClientException catch (e) {
+      throw ApiException(0, 'Could not reach the backend (${e.message})');
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ApiException(
+        response.statusCode,
+        'Backend responded with ${response.statusCode}',
+      );
+    }
+
+    final Object? body;
+    try {
+      body = jsonDecode(response.body);
+    } on FormatException {
+      throw const ApiException(
+        502,
+        'Backend returned an unexpected response shape',
+      );
+    }
+    if (body is Map<String, dynamic>) {
+      final message = body['message'];
+      if (message is String) return Hello(message);
+    }
+    throw const ApiException(
+      502,
+      'Backend returned an unexpected response shape',
+    );
+  }
+}

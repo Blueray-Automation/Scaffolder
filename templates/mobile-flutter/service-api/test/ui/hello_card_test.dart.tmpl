@@ -1,0 +1,48 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:<%dartPackage%>/ui/hello_card.dart';
+
+Widget _host(Widget child) => MaterialApp(home: Scaffold(body: child));
+
+void main() {
+  testWidgets('shows the greeting as a heading', (tester) async {
+    await tester.pumpWidget(
+      _host(const HelloCard.success(message: 'Hello, World!')),
+    );
+
+    expect(find.text('Hello, World!'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+  });
+
+  testWidgets('shows a spinner with an accessible label while loading', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_host(const HelloCard.loading()));
+
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.bySemanticsLabel('Loading the greeting'), findsOneWidget);
+  });
+
+  testWidgets(
+    'shows the error, and a retry button only when there is something to retry',
+    (tester) async {
+      await tester.pumpWidget(
+        _host(const HelloCard.error(detail: 'Backend responded with 500')),
+      );
+      expect(find.text('Backend responded with 500'), findsOneWidget);
+      expect(find.text('Try again'), findsNothing);
+
+      var retried = 0;
+      await tester.pumpWidget(
+        _host(
+          HelloCard.error(
+            detail: 'Backend responded with 500',
+            onRetry: () => retried++,
+          ),
+        ),
+      );
+      await tester.tap(find.text('Try again'));
+      expect(retried, 1);
+    },
+  );
+}

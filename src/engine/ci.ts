@@ -1,6 +1,7 @@
 import { stringify } from "yaml";
 import type { ScaffolderConfig, Environment } from "./config";
 import { buildGates, setupSteps, type Gate } from "./gates";
+import { mobileStack } from "./mobileStacks";
 import { buildView } from "./view";
 
 type Obj = Record<string, unknown>;
@@ -55,6 +56,26 @@ function webJob(cfg: ScaffolderConfig): Obj {
   };
 }
 
+/** Installs the Flutter SDK at the configured release line. The action is third-party, so it is the one place that needs vetting. */
+function flutterSetup(cfg: ScaffolderConfig): Obj {
+  return {
+    uses: "subosito/flutter-action@v2",
+    with: { channel: "stable", "flutter-version": `${cfg.mobile.version}.x`, cache: true },
+  };
+}
+
+function mobileJob(cfg: ScaffolderConfig): Obj {
+  const setup = setupSteps(cfg).find((s) => s.component === "mobile")!;
+  const gates = buildGates(cfg).filter((g) => g.component === "mobile");
+  return {
+    name: "Mobile verify",
+    "runs-on": "ubuntu-latest",
+    "timeout-minutes": 30,
+    env: mobileStack(cfg).env,
+    steps: [{ uses: "actions/checkout@v4" }, flutterSetup(cfg), { name: setup.label, run: setup.cmd, "working-directory": setup.cwd }, ...gates.map(gateStep)],
+  };
+}
+
 function repoJob(cfg: ScaffolderConfig): Obj | null {
   const gates = buildGates(cfg).filter((g) => g.component === "repo");
   if (gates.length === 0) return null;
@@ -76,6 +97,8 @@ function factsJob(cfg: ScaffolderConfig, needs: string[]): Obj {
     { uses: "actions/checkout@v4" },
     { uses: "actions/setup-python@v5", with: { "python-version": cfg.backend.enabled ? cfg.backend.version : "3.12" } },
   ];
+  // The spec's mobile checks run `flutter test`, so the facts job needs the SDK whether or not a system is started.
+  if (cfg.mobile.enabled) steps.push(flutterSetup(cfg));
   if (local) {
     if (cfg.web.enabled) steps.push({ uses: "actions/setup-node@v4", with: { "node-version": cfg.web.nodeVersion } });
     steps.push(
@@ -100,17 +123,28 @@ function factsJob(cfg: ScaffolderConfig, needs: string[]): Obj {
       with: { name: "sdlc-evidence", path: ".ai/evidence/", "if-no-files-found": "ignore", "retention-days": 14 },
     },
   );
-  return { name: "Facts (PRD → running system)", "runs-on": "ubuntu-latest", needs, "timeout-minutes": 30, steps };
+  return {
+    name: "Facts (PRD → running system)",
+    "runs-on": "ubuntu-latest",
+    needs,
+    "timeout-minutes": 30,
+    ...(cfg.mobile.enabled ? { env: mobileStack(cfg).env } : {}),
+    steps,
+  };
 }
 
 export function buildCiWorkflow(cfg: ScaffolderConfig): string {
   const jobs: Obj = {};
   if (cfg.backend.enabled) jobs.backend = backendJob(cfg);
   if (cfg.web.enabled) jobs.web = webJob(cfg);
+  if (cfg.mobile.enabled) jobs.mobile = mobileJob(cfg);
   const repo = repoJob(cfg);
   if (repo) jobs.repo = repo;
   const needs = Object.keys(jobs);
-  if (cfg.sdlc.gates.facts && cfg.sdlc.runtime !== "none" && (cfg.backend.enabled || cfg.web.enabled)) {
+  // A mobile-only project has no system to start, but its spec still has checks (named tests) and a traceability rule:
+  // CI runs the facts for it as well, so a criterion without a check fails there too.
+  const mobileOnly = cfg.mobile.enabled && !cfg.backend.enabled && !cfg.web.enabled;
+  if (cfg.sdlc.gates.facts && (cfg.sdlc.runtime !== "none" || mobileOnly) && (cfg.backend.enabled || cfg.web.enabled || cfg.mobile.enabled)) {
     jobs.facts = factsJob(cfg, needs);
   }
 

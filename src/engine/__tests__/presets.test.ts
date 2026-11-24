@@ -37,19 +37,53 @@ describe("start-from presets", () => {
     }
   });
 
-  it("Next.js and Nuxt on their own generate; presets without a pack are blocked by the validator, never generated as stubs", () => {
-    for (const [id, marker] of [["nextjs", "web/next.config.mjs"], ["nuxt", "web/nuxt.config.ts"]]) {
-      expect(presetProblems(preset(id)), id).toEqual([]);
-      const result = generateProject(applyPreset(defaultConfig(), preset(id)));
+  it("Next.js, Nuxt and Flutter on their own generate; presets without a pack are blocked by the validator, never generated as stubs", () => {
+    for (const [id, marker, dir] of [
+      ["nextjs", "web/next.config.mjs", "web/"],
+      ["nuxt", "web/nuxt.config.ts", "web/"],
+      ["flutter", "mobile/pubspec.yaml", "mobile/"],
+    ]) {
+      expect(presetProblems(preset(id!)), id).toEqual([]);
+      const result = generateProject(applyPreset(defaultConfig(), preset(id!)));
       expect(result.issues.filter((i) => i.level === "error"), id).toEqual([]);
       expect(result.files.some((f) => f.path === marker), id).toBe(true);
-      expect(result.files.some((f) => f.path.startsWith("web/")), id).toBe(true);
+      expect(result.files.some((f) => f.path.startsWith(dir!)), id).toBe(true);
       expect(result.files.some((f) => f.path.startsWith("backend/")), id).toBe(false);
     }
 
-    for (const id of ["flutter", "android", "ios"]) {
+    for (const id of ["android", "ios"]) {
       expect(presetProblems(preset(id)).length, id).toBeGreaterThan(0);
     }
+  });
+
+  it("the Flutter preset is a Flutter app and nothing else, with no Docker or CD because there is nothing to containerize", () => {
+    const result = generateProject(applyPreset(defaultConfig(), preset("flutter")));
+    expect(result.config).toMatchObject({
+      backend: { enabled: false },
+      web: { enabled: false },
+      mobile: { enabled: true, framework: "flutter", version: "3.50" },
+      database: { type: "none" },
+      docker: { enabled: false },
+      cd: { enabled: false },
+    });
+    expect(result.files.some((f) => f.path === "docker-compose.yml" || f.path.startsWith("web/"))).toBe(false);
+  });
+
+  it("switching to Flutter and back changes nothing else: Docker, CD and the runtime come back exactly as they were", () => {
+    const mine = deepMerge(defaultConfig(), {
+      project: { name: "my-app", owner: "acme" },
+      cd: { target: "ssh-compose" },
+      sdlc: { runtime: "docker", agent: { preset: "codex" } },
+    });
+    const there = applyPreset(mine, preset("flutter"));
+    // the preset set the stack and nothing else; the generator, not the preset, leaves out what has nothing to act on
+    expect({ ...there, backend: mine.backend, web: mine.web, mobile: mine.mobile, database: mine.database }).toEqual(mine);
+    expect(applyPreset(there, preset("fullstack"))).toEqual(mine);
+  });
+
+  it("switching to another mobile framework leaves a version that framework supports", () => {
+    const stale = deepMerge(defaultConfig(), { mobile: { version: "1.0" } });
+    expect(applyPreset(stale, preset("flutter")).mobile.version).toBe("3.50");
   });
 
   it("applying a preset is detected as that preset, from any starting point", () => {

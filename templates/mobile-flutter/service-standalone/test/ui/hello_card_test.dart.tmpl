@@ -1,0 +1,13 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:<%dartPackage%>/ui/hello_card.dart';
+
+Widget _host(Widget child) => MaterialApp(home: Scaffold(body: child));
+
+void main() {
+  testWidgets('shows the message it is given as a heading', (tester) async {
+    await tester.pumpWidget(_host(const HelloCard(message: 'Hello, Ada!')));
+
+    expect(find.text('Hello, Ada!'), findsOneWidget);
+  });
+}

@@ -1,0 +1,169 @@
+// Fails when line coverage is under a floor, or when a library file never reached the coverage report.
+//
+//   flutter test --coverage && dart run tool/check_coverage.dart --min 70
+//
+// `flutter test --coverage` only lists the files a test loaded. A file that no test imports would be missing from
+// the report and could never lower the figure, so this script also reads `lib/` itself and counts such a file as a
+// failure. That is what keeps the floor honest as the app grows.
+import 'dart:io';
+
+/// Line coverage of one file, from one `SF:` record of an lcov report.
+class FileCoverage {
+  const FileCoverage(this.path, {required this.found, required this.hit});
+
+  final String path;
+  final int found;
+  final int hit;
+}
+
+/// The outcome of checking a coverage report against a floor.
+class CoverageReport {
+  const CoverageReport({required this.percent, required this.problems});
+
+  /// Covered lines as a percentage of all executable lines in the files that count.
+  final double percent;
+
+  /// Everything that should stop the build; empty when the report is acceptable.
+  final List<String> problems;
+
+  bool get passed => problems.isEmpty;
+}
+
+String _normalize(String path) => path.replaceAll(r'\', '/');
+
+/// Reads the `SF:` / `LF:` / `LH:` records of an lcov file.
+List<FileCoverage> parseLcov(String text) {
+  final files = <FileCoverage>[];
+  String? path;
+  var found = 0;
+  var hit = 0;
+  for (final raw in text.split('\n')) {
+    final line = raw.trim();
+    if (line.startsWith('SF:')) {
+      path = _normalize(line.substring(3));
+      found = 0;
+      hit = 0;
+    } else if (line.startsWith('LF:')) {
+      found = int.tryParse(line.substring(3)) ?? 0;
+    } else if (line.startsWith('LH:')) {
+      hit = int.tryParse(line.substring(3)) ?? 0;
+    } else if (line == 'end_of_record' && path != null) {
+      files.add(FileCoverage(path, found: found, hit: hit));
+      path = null;
+    }
+  }
+  return files;
+}
+
+/// Whether [path] is generated code, which has no tests of its own.
+bool isGenerated(String path) =>
+    path.endsWith('.g.dart') ||
+    path.endsWith('.freezed.dart') ||
+    path.endsWith('.gr.dart');
+
+/// Checks [reported] against [min] percent. [sources] are the library files that exist; one that is neither
+/// reported nor in [excluded] is a failure of its own. Paths are relative to the package, with `/` separators.
+CoverageReport evaluate({
+  required List<FileCoverage> reported,
+  required Iterable<String> sources,
+  required double min,
+  Set<String> excluded = const {},
+}) {
+  final problems = <String>[];
+  final counted = reported
+      .where((f) => !excluded.contains(f.path) && !isGenerated(f.path))
+      .toList();
+  final seen = reported.map((f) => f.path).toSet();
+
+  for (final source in sources.map(_normalize).toList()..sort()) {
+    final skip =
+        excluded.contains(source) ||
+        isGenerated(source) ||
+        seen.contains(source);
+    if (skip) continue;
+    problems.add(
+      '$source is not loaded by any test, so it has no coverage figure. Add a test that uses it.',
+    );
+  }
+
+  final found = counted.fold<int>(0, (sum, f) => sum + f.found);
+  final hit = counted.fold<int>(0, (sum, f) => sum + f.hit);
+  if (found == 0) {
+    problems.add(
+      'The report has no executable lines: is anything under lib/ being tested?',
+    );
+    return CoverageReport(percent: 0, problems: problems);
+  }
+  final percent = hit * 100 / found;
+  if (percent < min) {
+    problems.add(
+      'Line coverage is ${percent.toStringAsFixed(1)}%, under the floor of $min%.',
+    );
+  }
+  return CoverageReport(percent: percent, problems: problems);
+}
+
+/// The `.dart` files under [dir], relative to the current directory.
+List<String> libraryFiles(Directory dir) => dir
+    .listSync(recursive: true)
+    .whereType<File>()
+    .map((f) => _normalize(f.path))
+    .where((p) => p.endsWith('.dart'))
+    .toList();
+
+int run(List<String> args, {StringSink? out}) {
+  final sink = out ?? stdout;
+  double? min;
+  var lcov = 'coverage/lcov.info';
+  var lib = 'lib';
+  final excluded = <String>{'lib/main.dart'};
+  for (var i = 0; i < args.length; i++) {
+    final value = i + 1 < args.length ? args[i + 1] : null;
+    switch (args[i]) {
+      case '--min' when value != null:
+        min = double.tryParse(value);
+        i++;
+      case '--lcov' when value != null:
+        lcov = value;
+        i++;
+      case '--lib' when value != null:
+        lib = value;
+        i++;
+      case '--exclude' when value != null:
+        excluded.add(_normalize(value));
+        i++;
+      default:
+        sink.writeln(
+          'usage: dart run tool/check_coverage.dart --min <percent> [--lcov <file>] [--lib <dir>] [--exclude <file>]...',
+        );
+        return 2;
+    }
+  }
+  if (min == null) {
+    sink.writeln('--min <percent> is required (for example --min 70).');
+    return 2;
+  }
+  final report = File(lcov);
+  if (!report.existsSync()) {
+    sink.writeln(
+      'No coverage report at $lcov: run `flutter test --coverage` first.',
+    );
+    return 2;
+  }
+  final libDir = Directory(lib);
+  final result = evaluate(
+    reported: parseLcov(report.readAsStringSync()),
+    sources: libDir.existsSync() ? libraryFiles(libDir) : const [],
+    min: min,
+    excluded: excluded,
+  );
+  sink.writeln(
+    'Line coverage: ${result.percent.toStringAsFixed(1)}% (floor $min%).',
+  );
+  for (final problem in result.problems) {
+    sink.writeln('  - $problem');
+  }
+  return result.passed ? 0 : 1;
+}
+
+void main(List<String> args) => exit(run(args));

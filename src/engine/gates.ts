@@ -1,4 +1,5 @@
 import type { ScaffolderConfig } from "./config";
+import { mobileStack } from "./mobileStacks";
 import { webStack } from "./webStacks";
 
 /**
@@ -11,7 +12,7 @@ export type Stage = "static" | "unit" | "build" | "contract" | "facts" | "securi
 
 export const STAGE_ORDER: Stage[] = ["static", "unit", "build", "contract", "facts", "security"];
 
-export type Component = "backend" | "web" | "repo";
+export type Component = "backend" | "web" | "mobile" | "repo";
 
 export interface Gate {
   id: string;
@@ -35,7 +36,7 @@ export interface SetupStep {
   component: Exclude<Component, "repo">;
   cwd: string;
   cmd: string;
-  toolchain: "python" | "node";
+  toolchain: "python" | "node" | "flutter";
   /** Files whose change means dependencies must be reinstalled (`sdlc sync`). */
   manifests: string[];
   /** If this path is missing the step has never run (e.g. the venv or node_modules). */
@@ -70,6 +71,20 @@ export function setupSteps(cfg: ScaffolderConfig): SetupStep[] {
       manifests: [`${cfg.layout.backendDir}/pyproject.toml`],
       marker: `${cfg.layout.backendDir}/.venv`,
       cmd: 'python3 -m venv --clear .venv && .venv/bin/python -m pip install --quiet --upgrade pip && .venv/bin/python -m pip install --quiet -e ".[dev]"',
+    });
+  }
+  if (cfg.mobile.enabled) {
+    const install = mobileStack(cfg).install;
+    steps.push({
+      id: "mobile.install",
+      label: install.label,
+      component: "mobile",
+      cwd: cfg.layout.mobileDir,
+      toolchain: "flutter",
+      manifests: [`${cfg.layout.mobileDir}/${install.manifest}`],
+      marker: `${cfg.layout.mobileDir}/${install.marker}`,
+      // The form CI runs (bash); the local runner picks `install.cmd` or `install.fallbackCmd` itself, with no shell syntax.
+      cmd: `if [ -f ${install.lockfile} ]; then ${install.cmd}; else ${install.fallbackCmd}; fi`,
     });
   }
   if (cfg.web.enabled) {
@@ -222,6 +237,52 @@ export function buildGates(cfg: ScaffolderConfig): Gate[] {
         cmd: "npm audit --audit-level=high",
         required: false,
         timeoutSeconds: 300,
+      });
+    }
+  }
+
+  if (cfg.mobile.enabled) {
+    const mobile = mobileStack(cfg);
+    const env = Object.keys(mobile.env).length > 0 ? { env: mobile.env } : {};
+    // Dart's analyzer is its type checker too, so linting and type checking are one pass: either switch keeps it on.
+    if (g.lint || g.types) {
+      gates.push({
+        id: "mobile.analyze",
+        label: mobile.analyze.label,
+        stage: "static",
+        component: "mobile",
+        cwd: cfg.layout.mobileDir,
+        cmd: mobile.analyze.cmd,
+        required: true,
+        timeoutSeconds: 600,
+        ...env,
+      });
+    }
+    if (g.unit) {
+      const unit = mobile.unit(cfg.sdlc.coverage.mobile);
+      gates.push({
+        id: "mobile.unit",
+        label: unit.label,
+        stage: "unit",
+        component: "mobile",
+        cwd: cfg.layout.mobileDir,
+        cmd: unit.cmd,
+        required: true,
+        timeoutSeconds: 900,
+        ...env,
+      });
+    }
+    if (g.build) {
+      gates.push({
+        id: "mobile.build",
+        label: mobile.build.label,
+        stage: "build",
+        component: "mobile",
+        cwd: cfg.layout.mobileDir,
+        cmd: mobile.build.cmd,
+        required: true,
+        timeoutSeconds: 900,
+        ...env,
       });
     }
   }

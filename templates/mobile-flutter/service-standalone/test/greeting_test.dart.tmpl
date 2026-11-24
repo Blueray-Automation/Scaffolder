@@ -1,0 +1,26 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:<%dartPackage%>/greeting.dart';
+
+void main() {
+  group('greeting', () {
+    test('greets the world when there is no name', () {
+      expect(greeting(null), 'Hello, World!');
+      expect(greeting(''), 'Hello, World!');
+    });
+
+    test('greets the name', () {
+      expect(greeting('Ada'), 'Hello, Ada!');
+    });
+
+    test('trims the name, and ignores one that is only spaces', () {
+      expect(greeting('  Ada  '), 'Hello, Ada!');
+      expect(greeting('   '), 'Hello, World!');
+    });
+
+    test('uses a name of exactly the longest length, and ignores one character more', () {
+      final longest = 'a' * maxNameLength;
+      expect(greeting(longest), 'Hello, $longest!');
+      expect(greeting('a' * (maxNameLength + 1)), 'Hello, World!');
+    });
+  });
+}

@@ -1,0 +1,48 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:<%dartPackage%>/ui/hello_page.dart';
+
+Future<void> _open(WidgetTester tester) =>
+    tester.pumpWidget(const MaterialApp(home: HelloPage(title: 'Hello')));
+
+void main() {
+  testWidgets('<%mobileAc1%>: the first screen greets the world', (tester) async {
+    await _open(tester);
+
+    expect(find.text('Hello, World!'), findsOneWidget);
+  });
+
+  testWidgets('<%mobileAc2%>: typing a name greets that name', (tester) async {
+    await _open(tester);
+
+    await tester.enterText(find.byType(TextField), 'Ada');
+    await tester.pump();
+
+    expect(find.text('Hello, Ada!'), findsOneWidget);
+    expect(find.text('Hello, World!'), findsNothing);
+  });
+
+  testWidgets('<%mobileAc3%>: a name longer than 50 characters is ignored', (
+    tester,
+  ) async {
+    await _open(tester);
+
+    await tester.enterText(find.byType(TextField), 'a' * 51);
+    await tester.pump();
+
+    expect(find.text('Hello, World!'), findsOneWidget);
+  });
+
+  testWidgets('clearing the field goes back to the default greeting', (
+    tester,
+  ) async {
+    await _open(tester);
+
+    await tester.enterText(find.byType(TextField), 'Ada');
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), '');
+    await tester.pump();
+
+    expect(find.text('Hello, World!'), findsOneWidget);
+  });
+}

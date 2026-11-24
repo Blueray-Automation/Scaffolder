@@ -1,4 +1,5 @@
 import { AGENT_PRESETS, CAPABILITIES, availableIds, findOption } from "./capabilities";
+import { mobileStack } from "./mobileStacks";
 
 export const CONFIG_VERSION = 1;
 
@@ -46,6 +47,7 @@ export interface ScaffolderConfig {
   layout: {
     backendDir: string;
     webDir: string;
+    mobileDir: string;
   };
   backend: {
     enabled: boolean;
@@ -64,6 +66,8 @@ export interface ScaffolderConfig {
   mobile: {
     enabled: boolean;
     framework: MobileFramework;
+    /** The framework release line the project is built with, e.g. Flutter "3.50". */
+    version: string;
   };
   database: {
     type: DatabaseType;
@@ -97,7 +101,7 @@ export interface ScaffolderConfig {
       command: string;
       timeoutSeconds: number;
     };
-    coverage: { backend: number; web: number };
+    coverage: { backend: number; web: number; mobile: number };
     gates: {
       lint: boolean;
       types: boolean;
@@ -129,10 +133,10 @@ export function defaultConfig(): ScaffolderConfig {
       owner: "your-org",
       license: "MIT",
     },
-    layout: { backendDir: "backend", webDir: "web" },
+    layout: { backendDir: "backend", webDir: "web", mobileDir: "mobile" },
     backend: { enabled: true, language: "python", framework: "fastapi", version: "3.12", port: 8000 },
     web: { enabled: true, framework: "nextjs", typescript: true, nodeVersion: "22", port: 3000 },
-    mobile: { enabled: false, framework: "flutter" },
+    mobile: { enabled: false, framework: "flutter", version: "3.50" },
     database: { type: "postgres", version: "16" },
     cache: { type: "none" },
     auth: { type: "none" },
@@ -153,7 +157,7 @@ export function defaultConfig(): ScaffolderConfig {
       failFast: true,
       runtime: "docker",
       agent: { preset: "claude", command: "", timeoutSeconds: 900 },
-      coverage: { backend: 80, web: 70 },
+      coverage: { backend: 80, web: 70, mobile: 70 },
       gates: { lint: true, types: true, unit: true, build: true, contract: true, facts: true, security: true },
       protectedPaths: [],
     },
@@ -197,6 +201,14 @@ export function resolveConfig(input: unknown = {}): ScaffolderConfig {
   if (db?.versions && !db.versions.includes(merged.database.version)) {
     merged.database.version = db.versions[0];
   }
+  // A mobile app is not a container, and its release is not an image: with neither a backend nor a web app there is
+  // nothing for Docker, the image build or the deploy step to act on, so they are left out (and the generated
+  // scaffolder.config.yaml says so). A runtime that is not Docker is the user's own choice and is kept.
+  if (!merged.backend.enabled && !merged.web.enabled) {
+    merged.docker.enabled = false;
+    merged.cd.enabled = false;
+    if (merged.sdlc.runtime === "docker") merged.sdlc.runtime = "none";
+  }
   return merged;
 }
 
@@ -222,7 +234,7 @@ export function validateConfig(cfg: ScaffolderConfig): Issue[] {
   }
 
   // Layout
-  for (const key of ["backendDir", "webDir"] as const) {
+  for (const key of ["backendDir", "webDir", "mobileDir"] as const) {
     const dir = cfg.layout[key];
     if (!DIR.test(dir) || dir.includes("..") || dir.endsWith("/")) {
       err(`layout.${key}`, "Must be a relative path without '..' and without a trailing slash.");
@@ -231,13 +243,24 @@ export function validateConfig(cfg: ScaffolderConfig): Issue[] {
   if (cfg.layout.backendDir === cfg.layout.webDir) {
     err("layout.webDir", "backendDir and webDir must differ.");
   }
+  if (cfg.layout.mobileDir === cfg.layout.backendDir || cfg.layout.mobileDir === cfg.layout.webDir) {
+    err("layout.mobileDir", "mobileDir must differ from backendDir and webDir.");
+  }
 
   // Components
   if (!cfg.backend.enabled && !cfg.web.enabled && !cfg.mobile.enabled) {
     err("backend.enabled", "Enable at least one component (backend, web or mobile).");
   }
   if (cfg.mobile.enabled) {
-    err("mobile.enabled", "Mobile packs are not available yet. Disable mobile to generate.");
+    const fw = findOption(CAPABILITIES.mobile.frameworks, cfg.mobile.framework);
+    if (!fw || !fw.available) {
+      err("mobile.framework", `"${cfg.mobile.framework}" is not available yet. Available: ${availableIds(CAPABILITIES.mobile.frameworks).join(", ")}.`);
+    } else {
+      if (!fw.versions.includes(cfg.mobile.version)) err("mobile.version", `${fw.label} supports versions: ${fw.versions.join(", ")}.`);
+      // The project's name becomes the app's package name, which the framework's tooling restricts.
+      const problem = mobileStack(cfg).projectNameProblem(cfg.project.name);
+      if (problem) err("project.name", `${problem} Choose another project name.`);
+    }
   }
   if (cfg.backend.enabled) {
     const lang = findOption(CAPABILITIES.backend.languages, cfg.backend.language);
@@ -345,7 +368,7 @@ export function validateConfig(cfg: ScaffolderConfig): Issue[] {
   if (!Number.isInteger(s.agent.timeoutSeconds) || s.agent.timeoutSeconds < 30 || s.agent.timeoutSeconds > 7200) {
     err("sdlc.agent.timeoutSeconds", "Must be between 30 and 7200 seconds.");
   }
-  for (const key of ["backend", "web"] as const) {
+  for (const key of ["backend", "web", "mobile"] as const) {
     const v = s.coverage[key];
     if (typeof v !== "number" || v < 0 || v > 100) err(`sdlc.coverage.${key}`, "Must be between 0 and 100.");
   }

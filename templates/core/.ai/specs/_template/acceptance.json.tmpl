@@ -5,6 +5,14 @@
       "id": "CHK-001",
       "name": "TODO: what fact does this check prove?",
       "covers": ["AC-001"],
+<%#mobileOnly%>
+      "type": "cmd",
+      "cwd": "<%mobileDir%>",
+      "run": "flutter test test/TODO_test.dart --plain-name \"AC-001\"",
+      "stdoutContains": ["All tests passed!"],
+      "expectExit": 0
+<%/mobileOnly%>
+<%^mobileOnly%>
       "type": "http",
 <%#hasBackend%>
       "target": "backend",
@@ -17,6 +25,7 @@
       "path": "/",
 <%/hasBackend%>
       "expect": { "status": 200 }
+<%/mobileOnly%>
     }
   ]
 }

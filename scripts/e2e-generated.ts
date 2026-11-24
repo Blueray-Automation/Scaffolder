@@ -7,7 +7,8 @@
  *   npm run e2e                       # all scenarios
  *   npm run e2e -- --scenario default --keep
  *
- * Needs: python3 >= the scenario's backend version on PATH, node >= 22, network (pip/npm).
+ * Needs: python3 >= the scenario's backend version on PATH, node >= 22, network (pip/npm). The flutter-* scenarios also need the
+ * Flutter SDK on PATH (they are skipped, and said to be skipped, when it is missing).
  */
 import { spawn, spawnSync, type SpawnSyncOptions, type SpawnSyncOptionsWithStringEncoding } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -21,12 +22,19 @@ import { OPENAPI_SNAPSHOT, relativeFrom } from "../src/engine/gates";
 
 type Json = Record<string, any>;
 
+// What the generated gates set for themselves; the setup step (flutter pub get) has no such switch, so keep the harness quiet too.
+process.env.FLUTTER_SUPPRESS_ANALYTICS ??= "true";
+
 const SCENARIOS: Record<string, Json> = {
   default: {},
   "backend-only-no-db": { web: { enabled: false }, database: { type: "none" } },
   "custom-dirs": { layout: { backendDir: "services/api", webDir: "apps/web" } },
   // The same stack with Nuxt in place of Next.js: its build, its server, and the page asking the backend through its own route.
   "nuxt-fullstack": { web: { framework: "nuxt" } },
+  // The same stack with a Flutter app beside the web app: its gates, and its client run against the live backend (AC-008).
+  "flutter-fullstack": { mobile: { enabled: true } },
+  // A Flutter app on its own: nothing to start, so the spec's checks are named widget tests (see mobileOnlyScenario).
+  "flutter-only": { backend: { enabled: false }, web: { enabled: false }, database: { type: "none" }, mobile: { enabled: true } },
 };
 
 const { values } = parseArgs({
@@ -72,6 +80,10 @@ function scenario(name: string, patch: Json): void {
   const cfg = deepMerge(defaultConfig(), patch);
   const result = generateProject(cfg);
   if (result.issues.some((i) => i.level === "error")) return bad(`config invalid: ${JSON.stringify(result.issues)}`);
+  if (cfg.mobile.enabled && run("flutter", ["--version"], process.cwd()).status !== 0) {
+    return log("  - the Flutter SDK is not on PATH: this scenario was NOT exercised (install it, then run again)");
+  }
+  if (!cfg.backend.enabled && !cfg.web.enabled) return mobileOnlyScenario(name, cfg, result);
   const need = cfg.backend.version;
   const have = pythonVersion();
   if (!versionAtLeast(have, need)) {
@@ -231,6 +243,117 @@ function scenario(name: string, patch: Json): void {
   }
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// A Flutter app on its own. There is no server to start, so the spec's checks run named widget tests, and the
+// things worth proving are that every gate runs, that each check can really fail, and that the platform folders
+// (`flutter create`) leave the project green. Needs only the Flutter SDK.
+// ---------------------------------------------------------------------------------------------
+
+function mobileOnlyScenario(name: string, cfg: Json, result: ReturnType<typeof generateProject>): void {
+  const dir = mkdtempSync(join(tmpdir(), `scaffolder-e2e-${name}-`));
+  const mobile = join(dir, cfg.layout.mobileDir);
+  const read = (path: string) => readFileSync(join(dir, path), "utf8");
+  try {
+    for (const f of result.files) {
+      const full = join(dir, f.path);
+      mkdirSync(dirname(full), { recursive: true });
+      writeFileSync(full, f.content);
+      if (f.executable) chmodSync(full, 0o755);
+    }
+    ok(`generated ${result.files.length} files in ${dir}`);
+    const git = (...a: string[]) => run("git", ["-c", "user.email=e2e@example.com", "-c", "user.name=e2e", ...a], dir);
+    git("init", "-q");
+    // Docker and CD have nothing to act on without a service: the generator leaves them out whatever the config said.
+    const written = JSON.parse(readFileSync(join(dir, ".ai/sdlc.json"), "utf8")) as Json;
+    if (!result.files.some((f) => f.path === "docker-compose.yml" || f.path.startsWith(".github/workflows/cd")) && written.runtime.mode === "none") {
+      ok("no compose file, no CD workflow, runtime none: nothing to containerize");
+    } else bad("a mobile-only project got Docker or CD files");
+
+    const doctor = expectExit("doctor finds the Flutter SDK", dir, ["doctor"], 0);
+    if (/ok\s+flutter/.test(doctor)) ok("doctor lists flutter among the tools it checked");
+    else bad("doctor did not check for flutter");
+    expectExit("setup (flutter pub get)", dir, ["setup"], 0);
+    git("add", "-A");
+    git("commit", "-qm", "baseline");
+
+    expectExit("gates: analysis + format, tests with the coverage floor, build check, secrets", dir, ["gates", "--keep-going"], 0);
+    const facts = expectExit("facts: the spec's named widget tests", dir, ["facts"], 0);
+    const results = JSON.parse(read(".ai/evidence/latest/results.json")) as Json;
+    const items = results.items as Json[];
+    if (results.passed === true && items.filter((i) => i.kind === "fact" && i.status === "pass").length >= 4 && !facts.includes("SKIP")) {
+      ok("the traceability check and every named-test check passed, none skipped");
+    } else bad("facts did not all pass without skips");
+
+    // --- a check must be able to fail: break the code, then break a check's link to its test ---
+    const greeting = join(cfg.layout.mobileDir, "lib/greeting.dart");
+    const good = read(greeting);
+    writeFileSync(join(dir, greeting), good.replace("'World'", "'Earth'"));
+    expectExit("facts FAIL when the greeting is wrong", dir, ["facts"], 1);
+    expectExit("the unit gate fails too", dir, ["gates", "--stage", "unit"], 1);
+    writeFileSync(join(dir, greeting), good);
+
+    const pageTest = join(cfg.layout.mobileDir, "test/ui/hello_page_test.dart");
+    const goodTest = read(pageTest);
+    writeFileSync(join(dir, pageTest), goodTest.replace("AC-002: typing", "AC-902: typing"));
+    const orphan = expectExit("facts FAIL when a check's test no longer exists (flutter test ran nothing)", dir, ["facts"], 1);
+    if (orphan.includes("exit 79")) ok("it fails because no test matched, not by luck");
+    else bad("the missing test was not reported as 'no tests ran'");
+    writeFileSync(join(dir, pageTest), goodTest);
+
+    // --- the coverage floor counts a file that no test loads, which `flutter test --coverage` alone would never list ---
+    writeFileSync(join(mobile, "lib/untested.dart"), "int double(int n) => n * 2;\n");
+    const unloaded = expectExit("the unit gate FAILS for a lib file no test uses", dir, ["gates", "--only", "mobile.unit"], 1);
+    if (unloaded.includes("untested.dart is not loaded by any test") || read(".ai/evidence/latest/logs/mobile.unit.log").includes("untested.dart is not loaded by any test")) {
+      ok("the failure names the file");
+    } else bad("the unloaded file was not named");
+    rmSync(join(mobile, "lib/untested.dart"));
+
+    // --- the healing loop works for a Dart gate: a scripted agent restores the file ---
+    const goodCopy = join(dir, "..", `good-${name}.dart`);
+    writeFileSync(goodCopy, good);
+    const fakeAgent = join(dir, "..", `agent-${name}.sh`);
+    writeFileSync(fakeAgent, `#!/usr/bin/env bash\ncat >/dev/null\ncp '${goodCopy}' '${join(dir, greeting)}'\n`);
+    chmodSync(fakeAgent, 0o755);
+    writeFileSync(join(dir, greeting), good.replace("'World'", "'Earth'"));
+    expectExit("loop heals a regression in the Dart code via the agent", dir, ["loop", "--stage", "unit", "--only", "mobile.unit", "--agent", fakeAgent], 0);
+    if (read(greeting) === good) ok("agent's fix is on disk");
+    else bad("agent fix not on disk");
+
+    // --- an unverified requirement must fail verification ---
+    const prdPath = join(dir, ".ai/specs/FEAT-000-hello-world/prd.md");
+    const prd = readFileSync(prdPath, "utf8");
+    writeFileSync(prdPath, `${prd}\n- **AC-900** Given anything, when anything, then nothing is verified.\n`);
+    const unchecked = expectExit("facts reject a criterion that has no check", dir, ["facts"], 1);
+    if (unchecked.includes("AC-900 has no check")) ok("failure names the unverified criterion");
+    else bad("failure did not name AC-900");
+    writeFileSync(prdPath, prd);
+
+    writeFileSync(join(dir, "leak.txt"), `aws_key = AKIA${"ABCDEFGHIJKLMNOP"}\n`);
+    expectExit("secret scan catches a committed key", dir, ["secrets"], 1);
+    rmSync(join(dir, "leak.txt"));
+
+    // --- the platform folders: `flutter create` must not break or rewrite what was generated ---
+    const shipped = (root: string) =>
+      readdirSync(root, { recursive: true, withFileTypes: true })
+        .filter((e) => e.isFile() && !/(^|\/)(build|\.dart_tool|coverage|android|ios|\.idea|pubspec\.lock)(\/|$)/.test(join(e.parentPath, e.name).slice(root.length)))
+        .map((e) => join(e.parentPath, e.name));
+    const before = new Map(shipped(mobile).map((p) => [p, readFileSync(p, "utf8")]));
+    const created = run("flutter", ["create", "--platforms=android,ios", "--org", "com.example", "--project-name", cfg.project.name.replace(/-/g, "_"), "."], mobile);
+    if (created.status === 0) ok("flutter create writes the android/ and ios/ folders");
+    else bad(`flutter create failed: ${created.stderr}`);
+    const changed = [...before].filter(([p, text]) => !existsSync(p) || readFileSync(p, "utf8") !== text).map(([p]) => p.slice(mobile.length + 1));
+    if (changed.length === 0) ok("it left every generated file as it was (analysis_options.yaml, tests, README, pubspec.yaml)");
+    else bad(`flutter create changed or removed: ${changed.join(", ")}`);
+    // It does re-resolve and rewrite pubspec.lock (so the docs say to commit the result); CI installs with --enforce-lockfile.
+    if (run("flutter", ["pub", "get", "--enforce-lockfile"], mobile).status === 0) ok("the lockfile it leaves satisfies CI's `flutter pub get --enforce-lockfile`");
+    else bad("the lockfile left by flutter create does not satisfy --enforce-lockfile");
+    expectExit("every gate still passes with the platform folders present", dir, ["gates", "--keep-going"], 0);
+  } finally {
+    if (values.keep) log(`  kept: ${dir}`);
+    else rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 // ---------------------------------------------------------------------------------------------
 // `sdlc implement`: the user writes only prd.md + acceptance.json; an agent does the rest.

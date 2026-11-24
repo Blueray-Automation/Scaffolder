@@ -3037,7 +3037,7 @@ SECRET_PATTERNS = [
     ("Anthropic/OpenAI style API key", re.compile(r"\b(?:sk-ant-|sk-)[A-Za-z0-9_-]{24,}")),
     ("hard-coded credential", re.compile(r"""(?i)\b(?:api[_-]?key|secret|token|passwd|password)\b['"]?\s*[:=]\s*['"](?![$<{%])[^'"\s]{12,}['"]""")),
 ]
-SECRET_SKIP_DIRS = {".git", "node_modules", ".venv", ".next", ".nuxt", ".output", "__pycache__", ".ai/evidence"}
+SECRET_SKIP_DIRS = {".git", "node_modules", ".venv", ".next", ".nuxt", ".output", ".dart_tool", "__pycache__", ".ai/evidence"}
 SECRET_SKIP_FILES = {".env.example", "package-lock.json", "docker-compose.yml"}
 # Fake credentials are normal in tests and specs, so the generic keyword heuristic skips them.
 # High-confidence formats (cloud keys, tokens, private keys) are still caught everywhere.

@@ -18,6 +18,15 @@ updates:
       npm-dependencies:
         patterns: ["*"]
 <%/hasWeb%>
+<%#hasMobile%>
+  - package-ecosystem: pub
+    directory: /<%mobileDir%>
+    schedule:
+      interval: weekly
+    groups:
+      dart-dependencies:
+        patterns: ["*"]
+<%/hasMobile%>
 <%#hasDocker%>
 <%#hasBackend%>
   - package-ecosystem: docker

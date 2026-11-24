@@ -4,7 +4,7 @@ import React from "react";
 import { Boxes, GitBranch, Layers, Plus, ShieldCheck, Smartphone, Trash2 } from "lucide-react";
 import { AGENT_PRESETS, CAPABILITIES, type DeployTrigger, type Issue, type ScaffolderConfig } from "@/engine";
 import { setIn } from "@/lib/utils";
-import { Badge, Button, Field, NumberInput, Section, Select, TextInput, Toggle } from "./ui";
+import { Button, Field, NumberInput, Section, Select, TextInput, Toggle } from "./ui";
 
 interface Props {
   config: ScaffolderConfig;
@@ -19,13 +19,13 @@ const TRIGGERS: Array<{ id: DeployTrigger; label: string }> = [
 ];
 
 const GATE_LABELS: Array<[keyof ScaffolderConfig["sdlc"]["gates"], string, string]> = [
-  ["lint", "Lint & format", "ruff, eslint"],
-  ["types", "Type check", "mypy, tsc, vue-tsc"],
-  ["unit", "Unit tests + coverage floor", "pytest, vitest"],
-  ["build", "Production build", "next build or nuxt build, compose validation"],
+  ["lint", "Lint & format", "ruff, eslint, flutter analyze + dart format"],
+  ["types", "Type check", "mypy, tsc, vue-tsc (Dart: analyzed with lint)"],
+  ["unit", "Unit tests + coverage floor", "pytest, vitest, flutter test"],
+  ["build", "Production build", "next build or nuxt build, flutter build bundle, compose validation"],
   ["contract", "API contract drift", "OpenAPI snapshot"],
   ["facts", "Facts: PRD vs running system", "acceptance.json"],
-  ["security", "Security scans", "secrets, pip-audit, npm audit"],
+  ["security", "Security scans", "secrets, pip-audit, npm audit (none for Dart)"],
 ];
 
 /** The preset's own note, plus how to install it (shown whether or not it is installed where the project will run). */
@@ -42,6 +42,7 @@ export function ConfigForm({ config, onChange, issues }: Props) {
   const pyFrameworks = CAPABILITIES.backend.languages.find((l) => l.id === config.backend.language)?.frameworks ?? [];
   const pyVersions = pyFrameworks.find((f) => f.id === config.backend.framework)?.versions ?? [];
   const webVersions = CAPABILITIES.web.frameworks.find((f) => f.id === config.web.framework)?.versions ?? [];
+  const mobileVersions = CAPABILITIES.mobile.frameworks.find((f) => f.id === config.mobile.framework)?.versions ?? [];
   const dbVersions = CAPABILITIES.database.find((d) => d.id === config.database.type)?.versions ?? [];
 
   const toOptions = (list: readonly string[]) => list.map((v) => ({ id: v, label: v }));
@@ -124,11 +125,36 @@ export function ConfigForm({ config, onChange, issues }: Props) {
           )}
         </div>
 
-        <div className="flex items-center justify-between rounded-lg border border-dashed border-zinc-800 p-3">
-          <span className="flex items-center gap-2 text-sm text-zinc-400">
-            <Smartphone className="h-4 w-4" aria-hidden /> Mobile ({CAPABILITIES.mobile.frameworks.map((f) => f.label).join(", ")})
-          </span>
-          <Badge tone="info">coming soon</Badge>
+        <div className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+          <Toggle checked={config.mobile.enabled} onChange={(v) => set(["mobile", "enabled"], v)} label="Mobile app" />
+          {config.mobile.enabled && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Framework" error={err("mobile.framework")}>
+                  {(id) => (
+                    <Select
+                      id={id}
+                      value={config.mobile.framework}
+                      options={CAPABILITIES.mobile.frameworks}
+                      onChange={(v) => {
+                        const fw = CAPABILITIES.mobile.frameworks.find((f) => f.id === v);
+                        onChange({ ...config, mobile: { ...config.mobile, framework: v as never, version: fw?.versions[0] ?? config.mobile.version } });
+                      }}
+                    />
+                  )}
+                </Field>
+                <Field label="Version" error={err("mobile.version")}>
+                  {(id) => <Select id={id} value={config.mobile.version} options={toOptions(mobileVersions)} onChange={(v) => set(["mobile", "version"], v)} />}
+                </Field>
+              </div>
+              {!config.backend.enabled && !config.web.enabled && (
+                <p className="flex items-start gap-2 text-xs text-zinc-500">
+                  <Smartphone className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                  With only a mobile app there is nothing to put in a container, so Docker and CD are left out.
+                </p>
+              )}
+            </>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -165,6 +191,9 @@ export function ConfigForm({ config, onChange, issues }: Props) {
             <Field label="Web directory" error={err("layout.webDir")}>
               {(id) => <TextInput id={id} value={config.layout.webDir} onChange={(v) => set(["layout", "webDir"], v)} />}
             </Field>
+            <Field label="Mobile directory" error={err("layout.mobileDir")}>
+              {(id) => <TextInput id={id} value={config.layout.mobileDir} onChange={(v) => set(["layout", "mobileDir"], v)} />}
+            </Field>
           </div>
         </details>
       </Section>
@@ -186,6 +215,9 @@ export function ConfigForm({ config, onChange, issues }: Props) {
           </Field>
           <Field label="Coverage floor: web %" error={err("sdlc.coverage.web")}>
             {(id) => <NumberInput id={id} value={config.sdlc.coverage.web} onChange={(v) => set(["sdlc", "coverage", "web"], v)} />}
+          </Field>
+          <Field label="Coverage floor: mobile %" error={err("sdlc.coverage.mobile")}>
+            {(id) => <NumberInput id={id} value={config.sdlc.coverage.mobile} onChange={(v) => set(["sdlc", "coverage", "mobile"], v)} />}
           </Field>
         </div>
 

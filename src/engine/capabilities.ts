@@ -62,11 +62,11 @@ export const CAPABILITIES = {
   },
   mobile: {
     frameworks: [
-      { id: "flutter", label: "Flutter", available: false },
-      { id: "react-native", label: "React Native", available: false },
-      { id: "android", label: "Android (native)", available: false },
-      { id: "ios", label: "iOS (native)", available: false },
-    ] as Option[],
+      { id: "flutter", label: "Flutter", available: true, versions: ["3.50"] },
+      { id: "react-native", label: "React Native", available: false, versions: [] },
+      { id: "android", label: "Android (native)", available: false, versions: [] },
+      { id: "ios", label: "iOS (native)", available: false, versions: [] },
+    ] as VersionedOption[],
   },
   database: [
     { id: "none", label: "None", available: true },

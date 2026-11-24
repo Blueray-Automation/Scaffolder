@@ -1,0 +1,57 @@
+# Rule: mobile (Flutter <%mobileVersion%>, Dart <%dartVersion%>), in `<%mobileDir%>/`
+
+## Layout
+```
+lib/main.dart       starts the app and nothing else (it is left out of the coverage count)
+lib/app.dart        the MaterialApp: theme (light and dark), title, the first screen
+lib/ui/             screens and widgets: props in, widgets out
+<%#hasBackend%>
+lib/api/            typed client for the backend contract (mirrors .ai/contract/openapi.json)
+<%/hasBackend%>
+<%^hasBackend%>
+lib/greeting.dart   plain Dart logic, no Flutter imports: easy to test without a widget tree
+<%/hasBackend%>
+test/               mirrors lib/: test/ui/hello_page_test.dart tests lib/ui/hello_page.dart. test/widget_test.dart (the app starts and has its themes) keeps that name on purpose: `flutter create` writes its own counter-app test under it unless one exists, and that test would not compile here.
+tool/               check_coverage.dart enforces the coverage floor: do not edit it
+analysis_options.yaml   strict analysis; the platform folders are already excluded
+```
+
+## Conventions
+- Import widgets from `package:material_ui/material_ui.dart`, which also exports the widgets layer. **`package:flutter/material.dart` is deprecated since Flutter 3.47**, and the analyzer runs with `--fatal-infos`, so using it fails the gate. Add `package:cupertino_ui/cupertino_ui.dart` the same way if the app needs iOS-style widgets.
+- Strict analysis (`strict-casts`, `strict-inference`, `strict-raw-types`) and `flutter_lints` are on: no `dynamic`, no unchecked casts, no `// ignore` to silence a real finding. Fix the code.
+- Format with `dart format .` at Dart's default width (80 columns, no flags). The gate runs `flutter analyze --fatal-infos` and then `dart format --output=none --set-exit-if-changed .`.
+- Every data-driven widget models all its states: loading, empty, error, success. An error is announced (`Semantics(liveRegion: true)`) and offers a retry where one makes sense. Never swallow an exception to hide a failure.
+- Keep screens thin: a screen asks for data and chooses which widget to show; widgets only draw. Put logic in plain Dart files so it can be tested without pumping a widget.
+- Accessibility: every control has a label, tap targets are large enough, text scales with the system font size, and state is never conveyed by colour alone.
+- `main.dart` only starts the app. Anything else in it would be untested.
+- Add a dependency with `flutter pub add <package>` (and `flutter pub add --dev <package>`), then `./<%sdlcDir%>/sdlc sync`. Commit `pubspec.lock`: with it, setup installs exactly the locked versions (`flutter pub get --enforce-lockfile`).
+<%#hasBackend%>
+- All backend access goes through `lib/api/`: widgets never use `package:http` themselves. Responses are validated against the contract shape before use, and every failure surfaces as an `ApiException` with text that is safe to show.
+- The backend's address is fixed when the app is built, because a mobile app has no environment to read: `flutter run --dart-define=API_URL=http://10.0.2.2:<%backendPort%>` (an Android emulator reaches the computer it runs on at `10.0.2.2`; the iOS simulator and desktop use `localhost`). Never hard-code another environment's address in the source. Android blocks plain `http://` in release builds, so a deployed API must use `https://`.
+<%/hasBackend%>
+<%^hasBackend%>
+- This app has no separate backend. When it needs one, enable the backend component and keep every call in a typed client under `lib/api/`.
+<%/hasBackend%>
+
+## Tests (`flutter test`, coverage floor <%coverageMobile%>%)
+- Test behaviour through what the user sees: `tester.pumpWidget`, then `find.text(...)`, `tester.enterText`, `tester.tap`. Do not test private state.
+- **Put the acceptance criterion's id at the start of the test's name** (`'AC-002: typing a name greets that name'`): the spec's checks run `flutter test <file> --plain-name "AC-002"`, and a name that matches no test makes `flutter test` fail, so a check cannot pass without its test.
+- `flutter test --coverage` only lists the files a test loaded. `tool/check_coverage.dart` also reads `lib/`, so **a file no test uses is a failure**, not a gap in the figure. Generated files (`*.g.dart`, `*.freezed.dart`) and `lib/main.dart` are left out.
+<%#hasBackend%>
+- Give the client a fake HTTP client (`MockClient` from `package:http/testing.dart`) and cover each state of each screen and each way a request can fail. `test/integration/backend_test.dart` runs against a real backend only when `API_URL` is defined: `./<%sdlcDir%>/sdlc verify` starts the backend and does that for you.
+
+## Contract
+When the backend contract changes, update `lib/api/` and its tests in the same PR.
+<%/hasBackend%>
+<%^hasBackend%>
+- Test pure logic (`lib/greeting.dart`) directly, without a widget tree. Cover each rejected input and each boundary (0, 1, 50 and 51 characters).
+<%/hasBackend%>
+
+## Platforms
+- The `android/` and `ios/` folders are **not** generated: their contents change with every Flutter release, so `flutter create` writes the current ones. When you want to run on a device or ship, run this once in `<%mobileDir%>/`, pick your own reverse-domain `--org`, and commit the result:
+  ```bash
+  flutter create --platforms=android,ios --org com.example --project-name <%dartPackage%> .
+  ```
+  It leaves `lib/`, `test/` and `pubspec.yaml` as they are, and `analysis_options.yaml` already excludes the new folders.
+- The gates need only the Flutter SDK. They do not build an APK or an iOS app, which needs the Android SDK or Xcode: `flutter build apk` / `flutter build ipa` are yours to run when you release.
+- `build/`, `.dart_tool/` and `coverage/` are generated: never edit or commit them.

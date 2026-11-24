@@ -4,7 +4,7 @@ Status: Accepted. This is the worked example every new PRD follows. Copy its sha
 
 <%#hasBackend%>
 ## 1. Objective
-Prove the whole pipeline end to end (code, tests, contract, running system, deploy) with the smallest possible feature: a service that greets, reports its own health, <%#hasDb%>checks its database, <%/hasDb%><%#hasWeb%>and a web page that displays the greeting from the API.<%/hasWeb%><%^hasWeb%>and a documented API.<%/hasWeb%>
+Prove the whole pipeline end to end (code, tests, contract, running system, deploy) with the smallest possible feature: a service that greets, reports its own health, <%#hasDb%>checks its database, <%/hasDb%><%#hasWeb%>and a web page<%#hasMobile%> and a mobile app that each display<%/hasMobile%><%^hasMobile%> that displays<%/hasMobile%> the greeting from the API.<%/hasWeb%><%^hasWeb%><%#hasMobile%>and a mobile app that displays the greeting from the API.<%/hasMobile%><%^hasMobile%>and a documented API.<%/hasMobile%><%/hasWeb%>
 
 ## 2. User stories & acceptance criteria
 - **AC-001** Given the backend is running, when a client requests `GET /health`, then it responds `200` with `{"status": "ok"}` without touching any dependency (liveness).
@@ -18,6 +18,9 @@ Prove the whole pipeline end to end (code, tests, contract, running system, depl
 <%#hasWeb%>
 - **AC-007** Given backend and web are both running, when a user opens the web root `/`, then the page shows the greeting `Hello, World!` fetched from the backend at request time.
 <%/hasWeb%>
+<%#hasMobile%>
+- **AC-008** Given the backend is running, when the mobile app's API client asks for the greeting, then it returns `Hello, World!`, exactly what `GET /api/v1/hello` answers (the client the app's first screen uses, run against the live backend).
+<%/hasMobile%>
 
 ## 3. Permissions & roles
 None: all endpoints are public and read-only.
@@ -33,30 +36,37 @@ New endpoints `GET /health`, `GET /ready`, `GET /api/v1/hello`. No migrations. E
 Authentication, persistence of greetings, localization.
 
 ## 7. Verification map
-See `acceptance.json`. AC-001 to AC-004 are proven against the running service; AC-006 by a file check plus the contract gate<%#hasWeb%>; AC-007 by an HTTP check on the web app (which proves the web-to-backend wiring)<%/hasWeb%>.
+See `acceptance.json`. AC-001 to AC-004 are proven against the running service; AC-006 by a file check plus the contract gate<%#hasWeb%>; AC-007 by an HTTP check on the web app (which proves the web-to-backend wiring)<%/hasWeb%><%#hasMobile%>; AC-008 by running the mobile app's own API client against the live backend (which proves the mobile-to-backend wiring)<%/hasMobile%>.
 <%/hasBackend%>
 <%^hasBackend%>
 ## 1. Objective
-Prove the whole pipeline end to end (code, tests, running system, deploy) with the smallest possible feature: a web page that greets the visitor, by name when the address gives one.
+Prove the whole pipeline end to end (code, tests, running system, deploy) with the smallest possible feature: <%#hasWeb%>a web page that greets the visitor, by name when the address gives one<%#hasMobile%>, and a mobile screen that does the same with a name typed into a field<%/hasMobile%>.<%/hasWeb%><%^hasWeb%>a mobile screen that greets the user, by the name typed into a field.<%/hasWeb%>
 
 ## 2. User stories & acceptance criteria
+<%#hasWeb%>
 - **AC-001** Given the web app is running, when a user opens the web root `/`, then the page shows the greeting `Hello, World!`.
 - **AC-002** Given the web app is running, when a user opens `/?name=Ada`, then the page shows the greeting `Hello, Ada!`.
 - **AC-003** Given the web app is running, when a user opens `/` with a `name` longer than 50 characters, then the name is ignored and the page shows `Hello, World!`.
+<%/hasWeb%>
+<%#hasMobile%>
+- **<%mobileAc1%>** Given the mobile app has launched, when its first screen shows, then it displays the greeting `Hello, World!`.
+- **<%mobileAc2%>** Given the first screen is showing, when the user types `Ada` into the name field, then it displays `Hello, Ada!`.
+- **<%mobileAc3%>** Given the first screen is showing, when the user types a name longer than 50 characters, then the name is ignored and the screen shows `Hello, World!`.
+<%/hasMobile%>
 
 ## 3. Permissions & roles
-None: the page is public and read-only.
+None: <%#hasWeb%>the page<%#hasMobile%> and the screen are<%/hasMobile%><%^hasMobile%> is<%/hasMobile%><%/hasWeb%><%^hasWeb%>the screen is<%/hasWeb%> public and read-only.
 
 ## 4. Data & validation
-- `name`: optional query parameter. Surrounding spaces are removed; it is used only when it is then 1 to 50 characters long. Anything else (missing, blank, longer than 50) is ignored and the greeting is for `World`.
+- `name`: <%#hasWeb%>optional query parameter<%#hasMobile%> on the web page, and the text of the name field in the mobile app<%/hasMobile%><%/hasWeb%><%^hasWeb%>the text of the name field<%/hasWeb%>. Surrounding spaces are removed; it is used only when it is then 1 to 50 characters long. Anything else (missing, blank, longer than 50) is ignored and the greeting is for `World`.
 - The greeting is always `Hello, <name>!`.
 
 ## 5. Contract impact
-None. This project has no separate API: the <%webName%> app renders the page itself.
+None. This project has no separate API: <%#hasWeb%>the <%webName%> app renders the page itself<%#hasMobile%> and the <%mobileName%> app computes the greeting itself<%/hasMobile%><%/hasWeb%><%^hasWeb%>the <%mobileName%> app computes the greeting itself<%/hasWeb%>.
 
 ## 6. Out of scope
 Authentication, persistence, localization, and any API or database.
 
 ## 7. Verification map
-See `acceptance.json`. All three criteria are proven by HTTP checks against the running web app.
+See `acceptance.json`. <%#hasWeb%><%^hasMobile%>All three criteria are proven by HTTP checks against the running web app.<%/hasMobile%><%#hasMobile%>The web criteria (AC-001 to AC-003) are proven by HTTP checks against the running web app; the mobile ones (<%mobileAc1%> to <%mobileAc3%>) by running the app's named widget tests (`flutter test --plain-name`).<%/hasMobile%><%/hasWeb%><%^hasWeb%>All three criteria are proven by running the app's named widget tests (`flutter test --plain-name "<%mobileAc1%>"`), so a name that matches no test fails the check.<%/hasWeb%>
 <%/hasBackend%>

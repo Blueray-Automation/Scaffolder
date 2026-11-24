@@ -1,0 +1,187 @@
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+
+import '../../tool/check_coverage.dart';
+
+const String _lcov = '''
+TN:
+SF:lib/a.dart
+DA:1,1
+LF:10
+LH:9
+end_of_record
+SF:lib\\ui\\b.dart
+LF:10
+LH:5
+end_of_record
+''';
+
+void main() {
+  group('parseLcov', () {
+    test('reads the lines found and hit of every file, whatever the path separator', () {
+      final files = parseLcov(_lcov);
+
+      expect(files.map((f) => f.path), ['lib/a.dart', 'lib/ui/b.dart']);
+      expect(files.map((f) => f.found), [10, 10]);
+      expect(files.map((f) => f.hit), [9, 5]);
+    });
+
+    test('ignores a record that never ends and an empty report', () {
+      expect(parseLcov('SF:lib/a.dart\nLF:1\nLH:1\n'), isEmpty);
+      expect(parseLcov(''), isEmpty);
+    });
+  });
+
+  group('evaluate', () {
+    final reported = parseLcov(_lcov);
+
+    test('passes when the covered lines reach the floor', () {
+      final report = evaluate(
+        reported: reported,
+        sources: ['lib/a.dart', 'lib/ui/b.dart'],
+        min: 70,
+      );
+
+      expect(report.percent, 70);
+      expect(report.passed, isTrue);
+    });
+
+    test('fails under the floor and says by how much', () {
+      final report = evaluate(
+        reported: reported,
+        sources: ['lib/a.dart', 'lib/ui/b.dart'],
+        min: 71,
+      );
+
+      expect(report.passed, isFalse);
+      expect(report.problems.single, contains('70.0%'));
+    });
+
+    test('counts a library file that no test loaded as a failure, even above the floor', () {
+      final report = evaluate(
+        reported: reported,
+        sources: ['lib/a.dart', 'lib/ui/b.dart', 'lib/never.dart'],
+        min: 10,
+      );
+
+      expect(report.passed, isFalse);
+      expect(
+        report.problems.single,
+        contains('lib/never.dart is not loaded by any test'),
+      );
+    });
+
+    test('leaves out excluded and generated files', () {
+      final report = evaluate(
+        reported: reported,
+        sources: [
+          'lib/a.dart',
+          'lib/ui/b.dart',
+          'lib/main.dart',
+          'lib/model.g.dart',
+        ],
+        min: 10,
+        excluded: {'lib/main.dart'},
+      );
+
+      expect(report.passed, isTrue);
+    });
+
+    test(
+      'does not count the lines of an excluded file towards the percentage',
+      () {
+        final report = evaluate(
+          reported: reported,
+          sources: ['lib/a.dart'],
+          min: 90,
+          excluded: {'lib/ui/b.dart'},
+        );
+
+        expect(report.percent, 90);
+        expect(report.passed, isTrue);
+      },
+    );
+
+    test('fails when the report has nothing to measure', () {
+      final report = evaluate(reported: const [], sources: const [], min: 0);
+
+      expect(report.passed, isFalse);
+      expect(report.problems.single, contains('no executable lines'));
+    });
+  });
+
+  group('run', () {
+    late Directory dir;
+    late Directory previous;
+
+    setUp(() {
+      previous = Directory.current;
+      dir = Directory.systemTemp.createTempSync('coverage_check');
+      Directory.current = dir;
+      Directory('lib/ui').createSync(recursive: true);
+      Directory('coverage').createSync();
+      File('lib/a.dart').writeAsStringSync('');
+      File('lib/ui/b.dart').writeAsStringSync('');
+      File('lib/main.dart').writeAsStringSync('');
+      File('coverage/lcov.info').writeAsStringSync(_lcov);
+    });
+
+    tearDown(() {
+      Directory.current = previous;
+      dir.deleteSync(recursive: true);
+    });
+
+    String output(List<String> args, int expectedCode) {
+      final out = StringBuffer();
+      expect(run(args, out: out), expectedCode, reason: out.toString());
+      return out.toString();
+    }
+
+    test('exits 0 at the floor and prints the figure', () {
+      expect(
+        output(['--min', '70'], 0),
+        contains('Line coverage: 70.0% (floor 70.0%).'),
+      );
+    });
+
+    test('exits 1 under the floor, listing what is wrong', () {
+      expect(output(['--min', '80'], 1), contains('under the floor'));
+    });
+
+    test('leaves lib/main.dart out by default, and takes more exclusions', () {
+      File('lib/extra.dart').writeAsStringSync('');
+      expect(
+        output(['--min', '10'], 1),
+        contains('lib/extra.dart is not loaded'),
+      );
+      expect(
+        output(['--min', '10', '--exclude', r'lib\extra.dart'], 0),
+        contains('Line coverage'),
+      );
+    });
+
+    test('reads the report and the library from where it is told', () {
+      Directory('elsewhere').createSync();
+      File('elsewhere/report.info').writeAsStringSync(_lcov);
+      expect(
+        output([
+          '--min',
+          '70',
+          '--lcov',
+          'elsewhere/report.info',
+          '--lib',
+          'missing',
+        ], 0),
+        contains('70.0%'),
+      );
+    });
+
+    test('asks for a floor, and for a report to exist', () {
+      expect(output([], 2), contains('--min'));
+      expect(output(['--bogus'], 2), contains('usage'));
+      File('coverage/lcov.info').deleteSync();
+      expect(output(['--min', '70'], 2), contains('flutter test --coverage'));
+    });
+  });
+}

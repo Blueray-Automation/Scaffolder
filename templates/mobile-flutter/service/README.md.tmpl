@@ -1,0 +1,36 @@
+# <%title%> (<%mobileName%> app)
+
+<%description%>
+
+<%#hasBackend%>
+The first screen shows the greeting the backend returns from `GET /api/v1/hello`, with a spinner while it loads and an error with a retry button when it cannot be reached.
+<%/hasBackend%>
+<%^hasBackend%>
+The first screen greets the user: type a name and it says `Hello, <name>!`; with no name, or one longer than 50 characters, it says `Hello, World!`.
+<%/hasBackend%>
+
+## Everyday commands
+
+```bash
+flutter pub get                 # install dependencies
+flutter analyze                 # lints and types
+dart format .                   # format
+flutter test --coverage         # tests (then: dart run tool/check_coverage.dart --min <%coverageMobile%>)
+```
+
+`./<%sdlcDir%>/sdlc gates` runs the same checks from the repository root, with the coverage floor, and `./<%sdlcDir%>/sdlc verify` adds the spec's facts. Conventions for agents and people: [`<%mobileRuleFile%>`](../<%mobileRuleFile%>).
+
+## Run it on a device or emulator
+
+The `android/` and `ios/` folders are not generated (they change with every Flutter release). Create them once, with your own reverse-domain `--org`, and commit them:
+
+```bash
+flutter create --platforms=android,ios --org com.example --project-name <%dartPackage%> .
+flutter run<%#hasBackend%> --dart-define=API_URL=http://10.0.2.2:<%backendPort%><%/hasBackend%>
+```
+<%#hasBackend%>
+
+`API_URL` is fixed when the app is built (a mobile app has no environment to read): `10.0.2.2` is how an Android emulator reaches the computer it runs on; the iOS simulator can use `http://localhost:<%backendPort%>`, which is also the default. Android blocks plain `http://` in release builds, so a deployed API needs `https://`.
+<%/hasBackend%>
+
+Building the APK or the iOS app needs the Android SDK or Xcode, which the gates do not require: run `flutter build apk` or `flutter build ipa` yourself when you release.

@@ -5,14 +5,14 @@ Tests are evidence. A test that cannot fail proves nothing.
 ## Layers
 | Layer | Proves | Where | Runs in |
 |---|---|---|---|
-| Unit | one behaviour, fast, no network/disk | `<%#hasBackend%><%backendDir%>/tests/<%/hasBackend%>`<%#hasWeb%>, `<%webDir%>/src/__tests__/`<%/hasWeb%> | `gates` |
+| Unit | one behaviour, fast, no network/disk | `<%#hasBackend%><%backendDir%>/tests/<%/hasBackend%>`<%#hasWeb%>, `<%webDir%>/src/__tests__/`<%/hasWeb%><%#hasMobile%>, `<%mobileDir%>/test/`<%/hasMobile%> | `gates` |
 <%#hasBackend%>
 | Contract | the API shape did not drift | `backend.contract` gate | `gates` |
 <%/hasBackend%>
 | Facts | each PRD acceptance criterion holds on the RUNNING system | `.ai/specs/*/acceptance.json` | `facts` |
 
 ## Standards
-- Coverage floors are enforced, not advisory:<%#hasBackend%> backend >= <%coverageBackend%>%<%/hasBackend%><%#hasWeb%>, web >= <%coverageWeb%>%<%/hasWeb%>. Never lower them to pass.
+- Coverage floors are enforced, not advisory: <%coverageSummary%>. Never lower them to pass.
 - Arrange / Act / Assert. One reason to fail per test. Name tests by behaviour: `test_hello_rejects_name_longer_than_50_chars`.
 - Cover: happy path, every validation rule, boundaries (0, 1, max, max+1), error paths, and each acceptance criterion at least once.
 - Deterministic: no sleeping, no real clock/network/randomness without control. Fakes at the system boundary only; do not mock the unit under test.

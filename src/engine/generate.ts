@@ -24,6 +24,11 @@ interface Mount {
   from: string;
   /** Destination directory in the generated repo. "" = repo root. */
   to: (cfg: ScaffolderConfig) => string;
+  /**
+   * Only mounted when this holds. Lets a pack keep each variant of a file (with a backend, without one) as its own
+   * template folder mounted to the same place, instead of one template full of conditionals.
+   */
+  when?: (cfg: ScaffolderConfig) => boolean;
 }
 
 interface Pack {
@@ -107,6 +112,19 @@ const PACKS: Pack[] = [
     include: webInclude(NUXT_API_CLIENT_FILES, NUXT_STANDALONE_FILES),
   },
   {
+    id: "mobile-flutter",
+    dir: "mobile-flutter",
+    enabled: (c) => c.mobile.enabled && c.mobile.framework === "flutter",
+    // The app is plain Dart (the formatter runs on it), so its two shapes are separate folders, not conditionals:
+    // next to a backend it asks the API through a typed client; on its own it computes the greeting itself.
+    mounts: [
+      { from: "service/", to: (c) => c.layout.mobileDir },
+      { from: "service-api/", to: (c) => c.layout.mobileDir, when: (c) => c.backend.enabled },
+      { from: "service-standalone/", to: (c) => c.layout.mobileDir, when: (c) => !c.backend.enabled },
+      { from: "repo/", to: root },
+    ],
+  },
+  {
     id: "github",
     dir: "github",
     enabled: (c) => c.ci.provider === "github-actions",
@@ -146,7 +164,10 @@ function renderPack(pack: Pack, cfg: ScaffolderConfig, view: Record<string, unkn
     if (!key.startsWith(prefix)) continue;
     const inPack = key.slice(prefix.length);
     // Longest matching mount wins ("" matches everything).
-    const mount = [...pack.mounts].sort((a, b) => b.from.length - a.from.length).find((m) => inPack.startsWith(m.from));
+    const mount = pack.mounts
+      .filter((m) => !m.when || m.when(cfg))
+      .sort((a, b) => b.from.length - a.from.length)
+      .find((m) => inPack.startsWith(m.from));
     if (!mount) continue;
     const rel = inPack.slice(mount.from.length).replace(/\.tmpl$/, "");
     if (pack.include && !pack.include(rel, cfg)) continue;
