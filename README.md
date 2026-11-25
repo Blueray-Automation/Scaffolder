@@ -47,6 +47,7 @@ npx ai-scaffolder adopt ./my-repo --write
 | Pick a stack (Next.js, Nuxt, FastAPI, Flutter) and see what is generated | [Stacks and Options](docs/wiki/Stacks-and-Options.md) |
 | Build a feature from a requirements document | [Tutorial: Add a Login API](docs/wiki/Tutorial-Add-a-Login-API.md) |
 | Make the UI match a design (Figma, PDF or image) | [Design and the UI](docs/wiki/Design-and-the-UI.md) |
+| Give the frontend the API to integrate with, along with the requirements | [API Integration](docs/wiki/API-Integration.md) |
 | Add the loop to a repository I already have | [Adopt an Existing Project](docs/wiki/Adopt-an-Existing-Project.md) |
 | Use the Claude desktop app, Cursor or VS Code as the agent | [Using a Desktop App](docs/wiki/Desktop-Apps.md) |
 | Understand gates, facts, evidence and healing | [The Verification Loop](docs/wiki/The-Verification-Loop.md) |
@@ -64,6 +65,7 @@ The same pages are inside the web app (**Docs**, with search) and published to t
 | **AI operating system** (`.ai/`) | `AGENTS.md` for any agent, plus rules, skills, prompts and a worked PRD example |
 | **Verification loop** (`scripts/sdlc`) | Gates, **facts** (PRD criteria against the running system), evidence reports, a healing loop with an integrity guard that stops agents from editing the checks |
 | **Design** (`.ai/design/`) | Design tokens that the web and Flutter screens are generated from, a UI & design section in every PRD, and a gate against hard-coded values |
+| **API documentation** (`.ai/api/`) | The OpenAPI, Swagger or Postman documentation of the API a screen calls, an API integration section in every PRD that may only name documented operations, and a gate that keeps the imported files as imported |
 | **CI/CD and runtime** | GitHub Actions CI and CD (build images once, GHCR, staged environments, post-deploy checks), Dockerfiles, `docker-compose.yml` |
 
 ## Build a feature
@@ -85,6 +87,17 @@ A project can pass every test and still not look like the design. So the design 
 ```
 
 It does **not** compare pixels with your Figma frame; whether the screen looks like the design stays a review. Details: [Design and the UI](docs/wiki/Design-and-the-UI.md).
+
+## API integration is a contract too
+
+A frontend is only half a feature: it also calls an API. Bring that API's documentation in next to the requirements, and the agent builds against what is documented, not against guesses.
+
+```bash
+./scripts/sdlc spec requirements.pdf --api openapi.yaml    # an OpenAPI or Swagger file, a Postman collection, a link or a guide, plus the requirements
+./scripts/sdlc api show GET /pets/{petId}                  # one documented operation with its parameters, responses and types
+```
+
+Every PRD then lists the operations it calls, and the spec fails on one nobody documented. It does **not** prove the live API behaves as documented. Details: [API Integration](docs/wiki/API-Integration.md).
 
 ## Status
 

@@ -23,6 +23,14 @@
 - [ ] New or changed tokens in `.ai/design/tokens.json`, and why (or: none)
 - [ ] No hard-coded colour, spacing, radius or font size (`./<%sdlcDir%>/sdlc design check` is green)
 <%/hasDesign%>
+<%#hasApiDocs%>
+
+## API integration (delete this section when nothing calls an API)
+- [ ] Every operation called is in the PRD's API integration section and in the documentation (`./<%sdlcDir%>/sdlc api show METHOD /path`)
+- [ ] Each documented error the screen can cause is shown to the user, and has a test with a documented response body
+- [ ] No address or credential in the code; new settings are in `.env.example` (and `docker-compose.yml`)
+- [ ] Documentation that looked wrong or out of date, listed (or: none)
+<%/hasApiDocs%>
 
 ## Risk and rollout
 <!-- New env vars/secrets, migrations, backwards compatibility, rollback plan -->

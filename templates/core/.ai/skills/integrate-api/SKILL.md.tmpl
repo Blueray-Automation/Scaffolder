@@ -1,0 +1,36 @@
+---
+name: integrate-api
+description: Integrate a screen with a documented API: read the operations the PRD names, build a typed client from the documentation, and handle every documented outcome. Use for any change that calls an API.
+---
+
+# Integrate with a documented API
+
+**Goal**: a client that calls exactly the documented operations the PRD lists, with types taken from the documentation, and a screen that handles every outcome the documentation describes.
+
+## Before you code
+1. Read the feature's `prd.md`, **API integration** section: the operations (`` `GET /path` ``), what each is for, how requests are authenticated, what the user sees when each fails, and how fields map to the screen.
+   Missing, vague, or naming something you cannot find: stop and ask. Do not guess an API.
+2. Find each operation in the documentation: `./<%sdlcDir%>/sdlc api list --grep <word>`, then `./<%sdlcDir%>/sdlc api show GET /path`. It prints the parameters, the request body, every documented response and each type they use.
+   Read the document itself (`.ai/api/<name>/`) only for what `show` does not print (a long description, an example).
+3. Note the server address and the authentication scheme (`api list` prints them). They become configuration, never constants.
+4. Read the existing client module<%#hasWeb%> (in `<%webApiDir%>`)<%/hasWeb%><%#hasMobile%> and `<%mobileDir%>/lib/api/`<%/hasMobile%> and follow how it is built. Extend it; do not add a second way to call an API.
+
+## Build
+5. **Types first**, from the documented schemas: required and optional fields as the documentation marks them, nullable fields as nullable, enums as unions. Narrow what comes back at the boundary: a body that does not match is an error, not a crash.
+6. **One operation at a time, test first.** For each documented status the screen handles (success, each error it can cause, 5xx, a timeout, offline) write the test with a response shaped exactly as the documentation says, watch it fail, then build it.
+7. **Configuration.** The base URL and any credential come from environment variables read at run time; add them to `.env.example` and `docker-compose.yml` with a development default (no real secret anywhere).
+8. **Every state is shown**: loading, empty, error, success, with the exact copy from the PRD, each error announced to assistive technology (`.ai/skills/implement-ui/`).
+
+## Check
+9. `./<%sdlcDir%>/sdlc api check`, then `./<%sdlcDir%>/sdlc gates`. Read your client once more against `api show` for each operation: the path, the method, the parameter names and where each goes (path, query, header, body).
+10. `./<%sdlcDir%>/sdlc verify` exits 0.
+
+## Done when
+Every operation in the PRD has a client function and a test for each documented outcome the screen handles, nothing is called that the PRD does not list, no address or credential is in the code, and your final message says which documented behaviour you could not check against a live service.
+
+## Pitfalls
+- An endpoint "everyone knows exists" that is not in the documentation. Ask for it.
+- Typing a response as `any`, or trusting a field the documentation marks optional.
+- A test whose mocked body was invented to pass. Copy the documented body.
+- Handling only the success response. The documented errors are where integrations break.
+- A token in a log line, an error message or a URL.

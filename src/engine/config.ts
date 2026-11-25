@@ -89,6 +89,15 @@ export interface ScaffolderConfig {
     /** Link to the design file (a Figma file, a Penpot project, a style guide). Empty = none yet. */
     url: string;
   };
+  /**
+   * The API a screen integrates with. A project with a screen (web or mobile) can import its API documentation
+   * (`sdlc api import`: an OpenAPI or Swagger file, a Postman collection, a link or a guide), and an agent builds against
+   * what is documented. `enforce` makes every PRD carry an API integration section that names only documented
+   * operations, and adds the `repo.api` gate that checks the imported files are still what was imported.
+   */
+  api: {
+    enforce: boolean;
+  };
   ci: {
     provider: CiProvider;
     defaultBranch: string;
@@ -155,6 +164,7 @@ export function defaultConfig(): ScaffolderConfig {
     auth: { type: "none" },
     docker: { enabled: true },
     design: { enforce: true, tool: "none", url: "" },
+    api: { enforce: true },
     ci: { provider: "github-actions", defaultBranch: "main" },
     cd: {
       enabled: true,
@@ -226,6 +236,8 @@ export function resolveConfig(input: unknown = {}): ScaffolderConfig {
   // Design is about screens: a backend on its own has none, so there is nothing to enforce (and the generated
   // scaffolder.config.yaml says so).
   if (!merged.web.enabled && !merged.mobile.enabled) merged.design.enforce = false;
+  // The API documentation is what a screen integrates with: a backend on its own serves an API and has none to import.
+  if (!merged.web.enabled && !merged.mobile.enabled) merged.api.enforce = false;
   return merged;
 }
 

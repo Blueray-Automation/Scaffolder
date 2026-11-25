@@ -107,6 +107,17 @@ Screens are built from those names and never from literal values<%#hasWeb%>; the
   It proves the screen is made of the design's values, not that it looks like the frame: a reviewer compares the PR's screenshots with the references. Details: [`.ai/design/README.md`](.ai/design/README.md).
 
 <%/hasDesign%>
+<%#hasApiDocs%>
+## API integration: the documentation is a contract too
+
+<%#hasBackend%>This project's own API is documented by its contract, [`.ai/contract/openapi.json`](.ai/contract/openapi.json). For any **other** API the screens call, import its documentation.<%/hasBackend%><%^hasBackend%>The screens of this project call an API it does not contain, so that API's documentation is part of the repository.<%/hasBackend%>
+
+- **Bring it in**: `./<%sdlcDir%>/sdlc api import api.yaml` (an OpenAPI or Swagger file, a Postman collection, a link to one, or a guide as PDF, Word, Markdown or text). Together with the requirements: `./<%sdlcDir%>/sdlc spec requirements.pdf --api api.yaml`.
+- **Read it**: `./<%sdlcDir%>/sdlc api list` shows every documented operation, `./<%sdlcDir%>/sdlc api show GET /pets/{petId}` one with its parameters, body, responses and types. The agent is given the same.
+- **Say what is called**: every PRD has an **API integration** section that lists each operation as `` `GET /path` ``<%#apiEnforced%>; the spec fails when one is not documented<%/apiEnforced%>. The agent builds a typed client from the documentation (skill `.ai/skills/integrate-api`).
+- **Check it**: `./<%sdlcDir%>/sdlc api check`<%#apiEnforced%> is the `repo.api` gate: an imported document cannot be edited or swapped unnoticed<%/apiEnforced%>. It does not prove the live API behaves as documented. Details: [`.ai/api/README.md`](.ai/api/README.md).
+
+<%/hasApiDocs%>
 ## Use it from an AI desktop app (Claude Code, Codex, ...)
 
 You can open this folder in a desktop coding app instead of letting `./<%sdlcDir%>/sdlc` start an agent CLI. What changes is **who is in charge**.

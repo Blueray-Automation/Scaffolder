@@ -119,6 +119,8 @@ export function buildSdlcConfig(cfg: ScaffolderConfig): Record<string, unknown> 
         "scripts/sdlc.cmd",
         "scripts/sdlc.py",
         ".github/workflows/",
+        // The API documentation a person imported is what the screens integrate with: an agent never edits it.
+        ...(cfg.web.enabled || cfg.mobile.enabled ? [".ai/api/"] : []),
         ...cfg.sdlc.protectedPaths,
       ],
       // Requirements and checks: frozen while healing (healing fixes code, not the goalposts).
@@ -170,6 +172,11 @@ export function buildSdlcConfig(cfg: ScaffolderConfig): Record<string, unknown> 
     // The design contract: the tokens file, what is generated from it and the folders `design check` scans (absent = no screen).
     // `enforce` is whether verification fails on a hard-coded value and on a PRD without a UI & design section.
     ...(designPlan(cfg) ? { design: { enforce: cfg.design.enforce, tool: cfg.design.tool, url: cfg.design.url, ...designPlan(cfg) } } : {}),
+    // The API documentation a screen integrates with (absent = no screen): where it is kept, and this project's own contract when it has a backend.
+    // `enforce` is whether verification fails on an imported file that changed and on a PRD that names an undocumented operation.
+    ...(cfg.web.enabled || cfg.mobile.enabled
+      ? { api: { enforce: cfg.api.enforce, dir: ".ai/api", manifest: ".ai/api/apis.json", ...(cfg.backend.enabled ? { contract: ".ai/contract/openapi.json" } : {}) } }
+      : {}),
     deploy: {
       target: cfg.cd.target,
       script: "scripts/deploy.sh",

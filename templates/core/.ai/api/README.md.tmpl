@@ -1,0 +1,60 @@
+# API documentation
+
+A screen is half of a frontend; the other half is the API it talks to. The documentation of every API this project integrates with is kept here, so that the agent
+(and you) build against the operations that are **documented**, in the same way the screens are built from the design tokens instead of from guesses.
+
+<%#hasBackend%>
+This project has a backend of its own: its contract, [`.ai/contract/openapi.json`](../contract/openapi.json), is already its API documentation, and `api list` includes it as `backend`.
+Import documentation here for any **other** API the screens call (a payment provider, a partner's service, a backend that lives in another repository).
+<%/hasBackend%>
+<%^hasBackend%>
+This project has no backend of its own, so what its screens call is documented here. Without it, the only honest PRD API integration section is `No API calls.`.
+<%/hasBackend%>
+
+## Bringing the documentation in
+
+```bash
+./<%sdlcDir%>/sdlc api import api.yaml                       # an OpenAPI 3.x or Swagger 2.0 document, JSON or YAML
+./<%sdlcDir%>/sdlc api import https://api.example.com/openapi.json   # the same, from a link (also: a documentation page; it looks for the document beside it)
+./<%sdlcDir%>/sdlc api import collection.json --name partner-api # a Postman collection (v2.x)
+./<%sdlcDir%>/sdlc api import api-guide.pdf --name partner-guide  # a guide written for people: .pdf, .docx, .md, .txt (its text is kept beside it)
+```
+
+Along with a requirements document, in one step:
+
+```bash
+./<%sdlcDir%>/sdlc spec requirements.pdf --api api.yaml      # import the API documentation, then draft the spec from both
+```
+
+Each import creates `.ai/api/<name>/` with the document exactly as it is, and for an OpenAPI, Swagger or Postman document a generated `endpoints.md`: one line per operation with its
+parameters, request body and documented responses. `.ai/api/apis.json` records every file with its size and checksum. Importing a name again replaces it and prints which operations were added or removed.
+
+| What | How exact | Notes |
+|---|---|---|
+| **OpenAPI 3.x / Swagger 2.0** (JSON or YAML) | The operations, parameters, request and response types, servers and auth schemes are read from the document | A YAML document that uses anchors, aliases or tags is kept, but no index is built (convert it to JSON for the full benefit) |
+| **Postman collection** | The requests (method, path, query) and the examples saved in it | A collection has examples, not types: `api show` prints the example bodies |
+| **A link** | The same as a file; a link to a documentation page is followed to `/openapi.json`, `/swagger.json`, `/v3/api-docs` and a few other usual places | Credentials in the link are refused (they would be written down); download a protected document and import the file |
+| **A guide** (PDF, Word, Markdown, text) | Stored as it is, with its text extracted | It has no machine-readable operations, so the PRD's operations are not checked against it |
+
+## Reading it
+
+```bash
+./<%sdlcDir%>/sdlc api list                       # every documented operation, grouped by tag
+./<%sdlcDir%>/sdlc api list --grep order          # only the lines that mention "order"
+./<%sdlcDir%>/sdlc api show GET /pets/{petId}     # one operation with its parameters, body, responses and every type it uses
+```
+
+## What is checked
+
+- **`./<%sdlcDir%>/sdlc api check`** (the `repo.api` gate<%^apiEnforced%>, switched off here by `api.enforce: false`<%/apiEnforced%>): every file in `apis.json` exists and is byte for byte what was imported, every generated `endpoints.md` is current, and
+  nothing sits in `.ai/api/` that `apis.json` does not list. A document cannot be edited or swapped unnoticed.
+<%#apiEnforced%>
+- **The PRD's API integration section.** Each feature lists the operations it calls, written the way the documentation writes them (`` `GET /pets/{petId}` ``), or says `No API calls.`. The spec fails when it names an operation that no imported
+  document (or this project's backend contract) has, and says what is closest. This is the check that stops an agent from calling an endpoint it made up.
+<%/apiEnforced%>
+- **Agents** are given the documents and the index (`implement` and `spec` both do), and may not edit `.ai/api/`: it is protected like the specs and the gate configuration.
+
+## What it does not prove
+
+That the real API behaves as it is documented, and that the documentation is current. The tests of a screen use responses shaped as the documentation says; whether the live service answers like that is for you to check
+(import the document again when the API changes, and read what was added or removed). `./<%sdlcDir%>/sdlc api import` the new version, review the diff, commit it.

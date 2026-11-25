@@ -19,7 +19,7 @@ Follow `.ai/rules/prd.md` and the playbook `.ai/skills/write-prd/SKILL.md`. `.ai
 
 - First lines: `# {{feature}}: <short title>`, then `Status: Draft (generated from {{sourceName}}; a human must review it before implementation)`.
   The title names the **feature**, in two to four words (`Customer Login`, `Password Reset`), not the document (`Requirements`): the spec folder is named after it.
-- **Objective**, then **User stories & acceptance criteria**, then Permissions & roles, Data & validation, Contract impact, <%#designEnforced%>**UI & design** (see below), <%/designEnforced%>Out of scope, Verification map.
+- **Objective**, then **User stories & acceptance criteria**, then Permissions & roles, Data & validation, Contract impact, <%#designEnforced%>**UI & design** (see below), <%/designEnforced%><%#apiEnforced%>**API integration** (see below), <%/apiEnforced%>Out of scope, Verification map.
 - Every acceptance criterion is one line: `- **AC-001** Given ..., when ..., then ... (Source: <page or section of the document>)`.
   - One observable behaviour per criterion. Observable from outside: HTTP status and body, page content, a command's result, a file.
   - Include the unhappy paths the document implies: validation errors, not found, unauthorized, boundaries (0, 1, max, max+1), empty states.
@@ -41,6 +41,24 @@ design tokens it needs (colours, spacing, sizes the document names; else `none`)
 `ASSUMPTION:` line. Do not write `.ai/design/tokens.json`: that file is not yours to change.
 
 <%/designEnforced%>
+<%#hasApiDocs%>
+## API documentation
+
+{{apiReferences}}
+
+<%/hasApiDocs%>
+<%#apiEnforced%>
+## API integration (a section of prd.md, always present)
+
+Heading `## <%prdApiNo%>. API integration`. If the scope above calls no API, the section is the single line `No API calls.` Otherwise it lists:
+- **Operations**: every operation the feature calls, one per line, in backticks exactly as the documentation above writes it (`` `GET /path` ``), with what it is for and which screen or state calls it.
+  Use only operations that appear in the documentation above: the tool rejects the spec if one does not. If the document needs a call that is not documented, do not invent one: list it as an `ASSUMPTION:` and an open question.
+- **Documentation**: which of the documents above they come from. **Authentication**: the scheme the documentation names and what the screen does when a request is refused (401, 403).
+- **Failure behaviour**: what the user sees for each documented error response, a server error, a timeout, and offline: from the requirements document, else as an `ASSUMPTION:`.
+- **Data mapping**: which response fields are shown or stored, and how a missing or null one is handled. Take field names from the documentation, never from memory.
+Acceptance criteria stay observable from outside (what the screen shows when an operation succeeds or fails); they do not name functions or libraries.
+
+<%/apiEnforced%>
 ## acceptance.json
 
 Format: `{ "feature": "{{feature}}", "checks": [ ... ] }`. Every acceptance criterion needs at least one check; every check lists the criteria it proves in `covers`.

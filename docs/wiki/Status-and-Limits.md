@@ -32,6 +32,23 @@ What was run for real, what was run against a stand-in, and what was not run at 
 - **The Figma import has not been run against Figma.** It was run against a stand-in server written from Figma's documentation: the field names and the rate-limit headers follow the documented API, but nobody has run it with a real token and file, so expect to meet a difference the first time. If you try it, [Troubleshooting](Troubleshooting#design-import-for-a-figma-link-fails) says what to look at.
 - Comparing screenshots with the reference images, importing HTML prototypes, and the design contract in `adopt`ed existing projects are not built.
 
+## The API integration layer
+
+**Run for real**
+
+- The small YAML reader in `scripts/sdlc.py` reads back 600 random documents written by the `yaml` library in twelve styles identically (`npm test`), and the petstore document reads the same as in libyaml (Ruby). A one-off run of 3,000 documents in thirteen styles agreed too.
+- `api import`, `list`, `show`, `check` and `sync` run through the generated project's own `./scripts/sdlc` on Python 3.9: a petstore document (YAML and the same document as JSON, with the same index), a Swagger 2.0 document, a Postman collection, a guide, links served by a local server (including a documentation page that is followed to `/openapi.json`), every refusal, every way the gate fails, and the PRD's API integration section against both imported documents and a project's own contract.
+- The spec and implement prompts that carry the documentation were rendered by the real tool and read back.
+- `npm run e2e` (scenarios `flutter-only` and `default`, Next.js + FastAPI): the `repo.api` gate in a real project, an imported document that somebody edited failing it and passing again, and a PRD that names an undocumented operation failing the spec check, and (in `default`) `implement` and `spec` run through their scripted agents with the new prompts and PRD section. `flutter-only` passed completely; in `default` every check passed except the two that build the Docker images, which could not pull base images from Docker Hub on the machine it ran on (the same environment failure noted for the design layer), so those were not run.
+
+**Not run**
+
+- **No document from a real API, a real Postman export or a real Swagger UI has been imported.** The documents used were written from the OpenAPI, Swagger and Postman specifications (the petstore one follows the public sample), so expect to meet an unusual construct the first time. `api check` and the message the import prints say what could not be read.
+- **No live API was called.** Nothing here checks that an API behaves as its documentation says, and a link was only ever fetched from a local server.
+- A guide as a PDF was imported with the built-in text extractor, not with every extractor `spec` can use; a scanned PDF has no text.
+- Windows: the code is written for it (LF files, no shell) but was run on macOS only, like the rest.
+- A mock server generated from the documentation, contract tests against the live API, GraphQL, gRPC, AsyncAPI and HAR files, documentation behind a login, and the API layer in `adopt`ed existing projects are not built.
+
 ## Things to know
 
 - **One vertical slice.** FastAPI + Next.js (App Router) + PostgreSQL + GitHub Actions + GHCR, with Nuxt 4 in place of Next.js and Flutter 3.50 on its own or beside the API. Other stacks are planned: see [Stacks and Options](Stacks-and-Options).

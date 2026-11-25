@@ -29,6 +29,8 @@ export function buildView(cfg: ScaffolderConfig) {
   const hasCd = cfg.cd.enabled;
   const hasDesign = hasWeb || hasMobile;
   const designTool = cfg.design.tool;
+  const designEnforced = hasDesign && cfg.design.enforce;
+  const apiEnforced = hasDesign && cfg.api.enforce;
 
   const db = {
     type: cfg.database.type,
@@ -107,7 +109,7 @@ export function buildView(cfg: ScaffolderConfig) {
     /** Design tokens (and the rule and skill about them): every project with a screen. */
     hasDesign,
     /** The gate that fails on a hard-coded design value, and the PRD's UI & design section (section 6, which moves the ones after it down). */
-    designEnforced: hasDesign && cfg.design.enforce,
+    designEnforced,
     hasDesignUrl: cfg.design.url !== "",
     designUrl: cfg.design.url,
     /** "Figma", or "your design tool" when none is named. */
@@ -115,10 +117,16 @@ export function buildView(cfg: ScaffolderConfig) {
     designToolFigma: designTool === "figma",
     designToolPenpot: designTool === "penpot",
     tokensPath: TOKENS_PATH,
+    webApiDir: `${cfg.layout.webDir}/${webStack(cfg).apiDir}/`,
     webTokensFile: `${cfg.layout.webDir}/${webStack(cfg).design.tokensCss}`,
     mobileTokensFile: `${cfg.layout.mobileDir}/${mobileStack(cfg).design.tokensFile}`,
-    prdOutOfScopeNo: hasDesign && cfg.design.enforce ? 7 : 6,
-    prdVerificationNo: hasDesign && cfg.design.enforce ? 8 : 7,
+    /** The API integration guide, rule and skill: every project with a screen. */
+    hasApiDocs: hasDesign,
+    /** The gate for imported API documentation, and the PRD's API integration section (after UI & design when that is enforced too). */
+    apiEnforced,
+    prdApiNo: designEnforced ? 7 : 6,
+    prdOutOfScopeNo: 6 + (designEnforced ? 1 : 0) + (apiEnforced ? 1 : 0),
+    prdVerificationNo: 7 + (designEnforced ? 1 : 0) + (apiEnforced ? 1 : 0),
     hasSecurity: cfg.sdlc.gates.security,
     hasContract: hasBackend && cfg.sdlc.gates.contract,
     hasFacts: cfg.sdlc.gates.facts,

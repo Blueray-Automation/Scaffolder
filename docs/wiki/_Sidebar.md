@@ -10,6 +10,7 @@
 
 - [Tutorial: Add a Login API](Tutorial-Add-a-Login-API)
 - [Design and the UI](Design-and-the-UI)
+- [API Integration](API-Integration)
 - [Adopt an Existing Project](Adopt-an-Existing-Project)
 - [Using a Desktop App](Desktop-Apps)
 

@@ -21,6 +21,7 @@ Standard library only (Python 3.9+). Configured by .ai/sdlc.json; see .ai/README
   deploy    deploy an image tag to an environment, then verify facts there
   secrets   scan the working tree for committed secrets
   design    check (or `design sync`: regenerate) the files built from the design tokens in .ai/design/tokens.json; `design import` brings in a design (PDF, image, Figma link)
+  api       check (or `api import|list|show|sync`) the API documentation the screens integrate against: an OpenAPI/Swagger file, a Postman collection, a link or a guide
   up|down   start/stop the runtime used by facts
   report    print the latest evidence report
 
@@ -31,6 +32,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import datetime
+import difflib
 import fnmatch
 import hashlib
 import json
@@ -703,6 +705,8 @@ def load_specs(cfg: dict) -> list:
                 spec["errors"].append("prd.md still contains TODO(prd) placeholders: the PRD is not finished")
             if (cfg.get("design") or {}).get("enforce") and not UI_SECTION.search(prd.read_text(encoding="utf-8")):
                 spec["errors"].append("prd.md has no 'UI & design' section: add it (write 'No UI change.' under it when the feature has no screen)")
+            if (cfg.get("api") or {}).get("enforce"):
+                spec["errors"] += api_prd_problems(cfg, prd.read_text(encoding="utf-8"))
         else:
             spec["errors"].append("prd.md is missing")
         if acc.exists():
@@ -2008,6 +2012,19 @@ def cmd_spec(cfg: dict, args: argparse.Namespace) -> int:
         say("Commit or stash them first so you can see exactly what the agent changes (or pass --allow-dirty).")
         return EXIT_HUMAN
 
+    api_sources_given = list(getattr(args, "api", None) or [])
+    if api_sources_given and not cfg.get("api"):
+        say(warn("  --api is ignored: this project has no screen, so it has no API documentation to integrate against"))
+        api_sources_given = []
+    if api_sources_given and not args.dry_run:
+        say(c("\n== API documentation ==", "1"))
+        manifest = api_load()
+        for given in api_sources_given:
+            entry, _ = api_import_one(given, "", manifest)
+            api_save(manifest)
+            say(ok(f"  imported {entry['name']}: {api_describe(entry)}"))
+        say(dim(f"  saved in {API_DIR}/: commit it together with the spec (the agent may not change it)"))
+
     text, how = extract_source(src)
     run = Run(f"spec-{slug}")
     if text:
@@ -2026,6 +2043,7 @@ def cmd_spec(cfg: dict, args: argparse.Namespace) -> int:
         "specDir": rel(planned), "sourceName": src.name, "sourcePath": rel(source_in_spec),
         "focus": args.focus or "the whole document", "extractor": how, "sourceText": shown,
         "targets": targets, "questionsFile": rel(questions),
+        "apiReferences": api_references_text(cfg, [api_label(g) if re.match(r"https?://", g) else Path(g).name for g in api_sources_given] if args.dry_run else None) if cfg.get("api") else "",
     }
     prompt = render_prompt(cfg["agent"]["prompts"]["spec"], values)
     if args.dry_run:
@@ -2596,6 +2614,7 @@ def cmd_implement(cfg: dict, args: argparse.Namespace) -> int:
         "questionsFile": rel(questions),
         "context": listing(".ai/context/*.md"),
         "designReferences": design_references_text(spec_dir) if cfg.get("design") else "",
+        "apiReferences": api_references_text(cfg) if cfg.get("api") else "",
     })
     for path, state in context_state(cfg):
         if state == "draft":
@@ -4074,6 +4093,1391 @@ def cmd_design(cfg: dict, args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- entry
 
 
+# --------------------------------------------------------------------------- api documentation
+#
+# A screen is half of a frontend; the other half is the API it talks to. `api import` brings the API's documentation into the
+# repository (an OpenAPI or Swagger document, a Postman collection, or a guide as PDF, Word, Markdown or text; a file or a link) and
+# records every file in .ai/api/apis.json with its checksum, so that an agent integrates against the operations that are DOCUMENTED
+# instead of guessing, and nothing changes unnoticed. Beside each machine-readable document a compact operation index
+# (endpoints.md) is GENERATED, `api show METHOD /path` prints one operation with its request and response types, and a PRD's
+# "API integration" section may only name operations that exist in the documentation (or in this project's own backend contract).
+# Nothing here proves that an API behaves as documented: that is what the facts against the running system are for.
+
+API_DIR = ".ai/api"
+API_MANIFEST = "apis.json"
+API_MAX_BYTES = 20 * 1024 * 1024
+API_METHODS = ("get", "put", "post", "delete", "patch", "options", "head", "trace")
+API_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,47}")
+API_FILE = re.compile(r"[a-z0-9][a-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]*")
+API_PROBES = ("/openapi.json", "/swagger.json", "/v3/api-docs", "/api-docs", "/openapi.yaml", "/swagger/v1/swagger.json")
+API_PROMPT_BUDGET = 12000
+API_SECTION = re.compile(r"^(#{2,3})[ \t]+(?:[0-9]+\.[ \t]*)?API[ \t]+integration\b[^\n]*$", re.I | re.M)
+API_OPERATION = re.compile(r"`([A-Za-z]{3,7})[ \t]+(/[^`\s]*)`")
+API_KINDS = {"openapi": "OpenAPI", "swagger": "Swagger", "postman": "Postman collection", "document": "a guide"}
+
+
+# ---- a small YAML reader. OpenAPI documents are very often YAML and this tool uses the standard library only, so it reads the
+# part of YAML that API documents are written in: block mappings and sequences, plain, quoted and block (| and >) scalars, flow
+# [lists] and {maps}, comments, and the first document of a file. Anchors, aliases, tags, merge keys and several documents are not
+# supported: they raise YamlError, and the import then keeps the file but builds no index. Mapping keys are always strings.
+
+
+class YamlError(ValueError):
+    """Something this reader does not support, or a syntax error."""
+
+
+YAML_ESCAPES = {"0": "\0", "a": "\a", "b": "\b", "t": "\t", "\t": "\t", "n": "\n", "v": "\v", "f": "\f", "r": "\r", "e": "\x1b",
+                " ": " ", '"': '"', "/": "/", "\\": "\\", "N": "\x85", "_": "\xa0", "L": "\u2028", "P": "\u2029"}
+YAML_INT = re.compile(r"[-+]?[0-9]+")
+YAML_FLOAT = re.compile(r"[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?")
+
+
+def yaml_scalar(text: str):
+    if text in ("", "~", "null", "Null", "NULL"):
+        return None
+    if text in ("true", "True", "TRUE"):
+        return True
+    if text in ("false", "False", "FALSE"):
+        return False
+    if YAML_INT.fullmatch(text):
+        return int(text)
+    if re.fullmatch(r"0x[0-9a-fA-F]+", text):
+        return int(text, 16)
+    if re.fullmatch(r"0o[0-7]+", text):
+        return int(text[2:], 8)
+    if YAML_FLOAT.fullmatch(text):
+        return float(text)
+    return text
+
+
+def yaml_decode_double(text: str) -> str:
+    def one(m):
+        code = m.group(1)
+        if len(code) > 1 and code[0] in "xuU":
+            return chr(int(code[1:], 16))
+        if code in YAML_ESCAPES:
+            return YAML_ESCAPES[code]
+        raise YamlError("an unknown escape \\" + code + " in a quoted string")
+    return re.sub(r"\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|.)", one, text, flags=re.S)
+
+
+def yaml_quote_end(text: str, quote: str):
+    """Index of the quote that closes a quoted scalar whose content starts at text[0], or None."""
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if quote == '"' and ch == "\\":
+            i += 2
+            continue
+        if ch == quote:
+            if quote == "'" and text[i + 1:i + 2] == "'":
+                i += 2
+                continue
+            return i
+        i += 1
+    return None
+
+
+def yaml_unquote(quote: str, raw: str) -> str:
+    return yaml_decode_double(raw) if quote == '"' else raw.replace("''", "'")
+
+
+def yaml_comment_free(line: str) -> str:
+    """The line without a trailing comment (a # starts one at the start or after a space, outside quotes)."""
+    if "#" not in line:
+        return line.rstrip(" \t")
+    quote = ""
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if quote:
+            if quote == '"' and ch == "\\":
+                i += 1
+            elif ch == quote:
+                if quote == "'" and line[i + 1:i + 2] == "'":
+                    i += 1
+                else:
+                    quote = ""
+        elif ch in ("'", '"') and (i == 0 or line[i - 1] in " \t[{,"):
+            quote = ch
+        elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
+            return line[:i].rstrip(" \t")
+        i += 1
+    return line.rstrip(" \t")
+
+
+def yaml_split_key(text: str):
+    """(key, offset of what follows the colon) when `text` begins a mapping entry, else None."""
+    if text[:1] in ("'", '"'):
+        end = yaml_quote_end(text[1:], text[0])
+        if end is None:
+            return None
+        after = end + 2
+        if text[after:after + 1] == ":" and (after + 1 == len(text) or text[after + 1] in " \t"):
+            return yaml_unquote(text[0], text[1:end + 1]), after + 1
+        return None
+    if text[:1] in ("[", "{"):
+        return None
+    for i, ch in enumerate(text):
+        if ch == ":" and (i + 1 == len(text) or text[i + 1] in " \t"):
+            key = text[:i].rstrip(" \t")
+            return (key, i + 1) if key else None
+    return None
+
+
+def yaml_flow_depth(text: str) -> int:
+    depth, quote, i = 0, "", 0
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            if quote == '"' and ch == "\\":
+                i += 1
+            elif ch == quote:
+                quote = ""
+        elif ch in ("'", '"') and (i == 0 or text[i - 1] in " \t[{,:"):
+            quote = ch
+        elif ch in "[{":
+            depth += 1
+        elif ch in "]}":
+            depth -= 1
+        i += 1
+    return depth
+
+
+def yaml_flow(text: str):
+    """A flow collection written on one line: [a, b] or {a: 1, b: [2]}."""
+    pos = [0]
+
+    def ws() -> None:
+        while pos[0] < len(text) and text[pos[0]] in " \t":
+            pos[0] += 1
+
+    def quoted() -> str:
+        q = text[pos[0]]
+        end = yaml_quote_end(text[pos[0] + 1:], q)
+        if end is None:
+            raise YamlError("an unterminated quoted string in a flow collection")
+        raw = text[pos[0] + 1:pos[0] + 1 + end]
+        pos[0] += end + 2
+        return yaml_unquote(q, raw)
+
+    def plain(in_map: bool) -> str:
+        start = pos[0]
+        while pos[0] < len(text):
+            ch = text[pos[0]]
+            if ch in ",]}" or (in_map and ch == ":" and (pos[0] + 1 == len(text) or text[pos[0] + 1] in " \t,]}")):
+                break
+            pos[0] += 1
+        return text[start:pos[0]].strip(" \t")
+
+    def node(in_map: bool):
+        ws()
+        ch = text[pos[0]] if pos[0] < len(text) else ""
+        if ch == "[":
+            return seq()
+        if ch == "{":
+            return mapping()
+        if ch in ("'", '"'):
+            return quoted()
+        if ch in ("&", "*", "!"):
+            raise YamlError("anchors, aliases and tags are not supported")
+        return yaml_scalar(plain(in_map))
+
+    def seq() -> list:
+        pos[0] += 1
+        out: list = []
+        while True:
+            ws()
+            if pos[0] >= len(text):
+                raise YamlError("a flow sequence is never closed")
+            if text[pos[0]] == "]":
+                pos[0] += 1
+                return out
+            out.append(node(False))
+            ws()
+            if text[pos[0]:pos[0] + 1] == ",":
+                pos[0] += 1
+            elif text[pos[0]:pos[0] + 1] != "]":
+                raise YamlError("expected , or ] in a flow sequence")
+
+    def mapping() -> dict:
+        pos[0] += 1
+        out: dict = {}
+        while True:
+            ws()
+            if pos[0] >= len(text):
+                raise YamlError("a flow mapping is never closed")
+            if text[pos[0]] == "}":
+                pos[0] += 1
+                return out
+            key = quoted() if text[pos[0]] in ("'", '"') else plain(True)
+            ws()
+            value = None
+            if text[pos[0]:pos[0] + 1] == ":":
+                pos[0] += 1
+                ws()
+                if pos[0] < len(text) and text[pos[0]] not in ",}":
+                    value = node(True)
+            out[str(key)] = value
+            ws()
+            if text[pos[0]:pos[0] + 1] == ",":
+                pos[0] += 1
+            elif text[pos[0]:pos[0] + 1] != "}":
+                raise YamlError("expected , or } in a flow mapping")
+
+    value = node(False)
+    ws()
+    if pos[0] != len(text):
+        raise YamlError("unexpected text after a flow collection")
+    return value
+
+
+def yaml_fold(lines: list) -> str:
+    """Folded (>) text: a single line break becomes a space, blank lines stay line breaks, more-indented lines keep theirs."""
+    out, prev, blanks = "", None, 0
+    for line in lines:
+        if line == "":
+            blanks += 1
+            continue
+        more = line[:1] in (" ", "\t")
+        if prev is None:
+            out = line
+        elif blanks == 0:
+            out += ("\n" if more or prev[:1] in (" ", "\t") else " ") + line
+        else:
+            out += "\n" * (blanks + (1 if more or prev[:1] in (" ", "\t") else 0)) + line
+        prev, blanks = line, 0
+    return out
+
+
+class YamlReader:
+    def __init__(self, text: str):
+        lines = text.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff").split("\n")
+        body: list = []
+        started = False
+        for n, line in enumerate(lines):
+            if not started and (line.strip(" \t") == "" or line.lstrip(" \t").startswith("#") or line.startswith("%")):
+                body.append("")
+                continue
+            if line[:3] == "---" and (len(line) == 3 or line[3] in " \t"):
+                if started:
+                    break
+                if line[3:].strip(" \t") and not line[3:].strip(" \t").startswith("#"):
+                    raise YamlError("content on the same line as --- is not supported")
+                started = True
+                body.append("")
+                continue
+            if line.rstrip(" \t") == "...":
+                break
+            started = True
+            if re.match(r" *\t", line):
+                raise YamlError(f"line {n + 1}: a tab is used for indentation")
+            body.append(line)
+        self.lines = body
+        self.i = 0
+
+    @staticmethod
+    def _indent(line: str) -> int:
+        return len(line) - len(line.lstrip(" "))
+
+    def _sig(self):
+        """Index of the next line that has content (not blank, not a comment); self.i does not move."""
+        j = self.i
+        while j < len(self.lines):
+            s = self.lines[j].strip(" \t")
+            if s and not s.startswith("#"):
+                return j
+            j += 1
+        return None
+
+    def parse(self):
+        j = self._sig()
+        if j is None:
+            return None
+        self.i = j
+        value = self._node(self._indent(self.lines[j]))
+        k = self._sig()
+        if k is not None:
+            raise YamlError(f"line {k + 1}: unexpected content (a second document or a wrong indent)")
+        return value
+
+    def _node(self, min_indent: int):
+        j = self._sig()
+        if j is None:
+            return None
+        line = self.lines[j]
+        ind = self._indent(line)
+        if ind < min_indent:
+            return None
+        self.i = j
+        body = yaml_comment_free(line[ind:])
+        if body == "-" or body.startswith("- "):
+            return self._seq(ind)
+        if yaml_split_key(body) is not None:
+            return self._map(ind)
+        self.i = j + 1
+        return self._value(line[ind:], ind - 1)
+
+    def _nested(self, indent: int, same_indent_sequence: bool):
+        """The value of a key or a dash that has nothing after it on its line: a deeper block, or (for a key) a sequence at its own indent."""
+        k = self._sig()
+        if k is None:
+            return None
+        ind = self._indent(self.lines[k])
+        body = yaml_comment_free(self.lines[k][ind:])
+        if ind > indent:
+            return self._node(indent + 1)
+        if same_indent_sequence and ind == indent and (body == "-" or body.startswith("- ")):
+            return self._seq(indent)
+        return None
+
+    def _map(self, indent: int) -> dict:
+        out: dict = {}
+        while True:
+            j = self._sig()
+            if j is None:
+                break
+            line = self.lines[j]
+            ind = self._indent(line)
+            if ind < indent:
+                break
+            if ind > indent:
+                raise YamlError(f"line {j + 1}: unexpected indentation")
+            body = yaml_comment_free(line[ind:])
+            if body == "-" or body.startswith("- "):
+                break
+            found = yaml_split_key(body)
+            if found is None:
+                raise YamlError(f"line {j + 1}: expected `key: value`")
+            key, offset = found
+            if key == "<<":
+                raise YamlError(f"line {j + 1}: merge keys (<<) are not supported")
+            if key in out:
+                raise YamlError(f"line {j + 1}: the key {key!r} appears twice")
+            self.i = j + 1
+            rest = line[ind + offset:]
+            out[key] = self._nested(indent, True) if yaml_comment_free(rest).strip(" \t") == "" else self._value(rest, indent)
+        return out
+
+    def _seq(self, indent: int) -> list:
+        out: list = []
+        while True:
+            j = self._sig()
+            if j is None:
+                break
+            line = self.lines[j]
+            ind = self._indent(line)
+            body = yaml_comment_free(line[ind:])
+            if ind < indent or not (body == "-" or body.startswith("- ")):
+                break
+            if ind > indent:
+                raise YamlError(f"line {j + 1}: unexpected indentation")
+            after = line[ind + 1:]
+            item = after.lstrip(" ")
+            offset = ind + 1 + (len(after) - len(item))
+            self.i = j + 1
+            cf = yaml_comment_free(item)
+            if cf.strip(" \t") == "":
+                out.append(self._nested(indent, False))
+            elif cf == "-" or cf.startswith("- ") or yaml_split_key(cf) is not None:
+                # `- key: value` or `- - x`: the rest of the line starts a block of its own, at the column where it begins
+                self.lines[j] = " " * offset + item
+                self.i = j
+                out.append(self._node(offset))
+            else:
+                out.append(self._value(item, indent))
+        return out
+
+    def _value(self, rest: str, parent: int):
+        raw = rest.strip(" \t")
+        text = yaml_comment_free(raw)
+        ch = text[:1]
+        if ch in ("|", ">"):
+            return self._block(text, parent)
+        if ch in ("&", "*", "!"):
+            raise YamlError("anchors, aliases and tags are not supported")
+        if ch in ("[", "{"):
+            blanks = 0
+            while yaml_flow_depth(text) > 0:
+                if self.i >= len(self.lines):
+                    raise YamlError("a flow collection is never closed")
+                more = yaml_comment_free(self.lines[self.i]).strip(" \t")
+                self.i += 1
+                if more == "":
+                    blanks += 1
+                    continue
+                # a line break folds to a space, k blank lines to k line breaks, and a backslash before the break joins the lines with nothing
+                joiner = "\n" * blanks if blanks else " "
+                if not blanks and (len(text) - len(text.rstrip("\\"))) % 2 == 1:
+                    text, joiner = text[:-1], ""
+                text += joiner + more
+                blanks = 0
+            return yaml_flow(text)
+        if ch in ("'", '"'):
+            return self._quoted(raw)
+        return yaml_scalar(self._plain(text, parent))
+
+    def _plain(self, first: str, parent: int) -> str:
+        text, blanks, j = first.strip(" \t"), 0, self.i
+        while j < len(self.lines):
+            raw = self.lines[j]
+            if raw.strip(" \t") == "":
+                blanks += 1
+                j += 1
+                continue
+            if self._indent(raw) <= parent or raw.lstrip(" \t").startswith("#"):
+                break
+            text += ("\n" * blanks if blanks else " ") + yaml_comment_free(raw).strip(" \t")
+            blanks = 0
+            j += 1
+            self.i = j
+        return text
+
+    def _quoted(self, raw: str):
+        quote, buf, parts = raw[0], raw[1:], []
+        while True:
+            end = yaml_quote_end(buf, quote)
+            if end is not None:
+                parts.append(buf[:end])
+                tail = buf[end + 1:].strip(" \t")
+                break
+            parts.append(buf)
+            if self.i >= len(self.lines):
+                raise YamlError("a quoted string is never closed")
+            buf = self.lines[self.i]
+            self.i += 1
+        if tail and not tail.startswith("#"):
+            raise YamlError("unexpected text after a quoted string: " + tail[:30])
+        text, breaks = parts[0], 1
+        for n, part in enumerate(parts[1:], 1):
+            last = n == len(parts) - 1
+            piece = part.lstrip(" \t") if last else part.strip(" \t")
+            prev = parts[n - 1]
+            if quote == '"' and breaks == 1 and (len(prev) - len(prev.rstrip("\\"))) % 2 == 1:
+                text = text[:-1] + piece  # an escaped line break joins the two lines with nothing between them
+                continue
+            if piece == "" and not last:
+                breaks += 1
+                continue
+            text = text.rstrip(" \t") + ("\n" * (breaks - 1) if breaks > 1 else " ") + piece
+            breaks = 1
+        return yaml_unquote(quote, text)
+
+    def _block(self, header: str, parent: int) -> str:
+        m = re.fullmatch(r"([|>])(?:([1-9])([+-]?)|([+-]?)([1-9])?)", header.strip(" \t"))
+        if not m:
+            raise YamlError("cannot read the block scalar header " + header)
+        digit, chomp = m.group(2) or m.group(5), m.group(3) or m.group(4) or ""
+        indent = parent + int(digit) if digit else None
+        content: list = []
+        j = self.i
+        while j < len(self.lines):
+            raw = self.lines[j]
+            if raw.strip(" \t") == "":
+                content.append("")
+                j += 1
+                continue
+            ind = self._indent(raw)
+            if indent is None:
+                if ind <= parent:
+                    break
+                indent = ind
+            if ind < indent:
+                break
+            content.append(raw[indent:])
+            j += 1
+        self.i = j
+        trail = 0
+        while content and content[-1] == "":
+            content.pop()
+            trail += 1
+        text = "\n".join(content) if m.group(1) == "|" else yaml_fold(content)
+        if not content:
+            return "\n" * trail if chomp == "+" else ""
+        return text if chomp == "-" else text + "\n" + ("\n" * trail if chomp == "+" else "")
+
+
+def yaml_load(text: str):
+    return YamlReader(text).parse()
+
+
+# ---- reading an API document
+
+def api_doc_parse(data: bytes) -> tuple:
+    """(document, "") or (None, why not)."""
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return None, "it is not UTF-8 text"
+    try:
+        return (json.loads(text) if text.lstrip()[:1] in ("{", "[") else yaml_load(text)), ""
+    except (ValueError, RecursionError) as e:
+        return None, str(e)
+
+
+def api_kind(doc) -> str:
+    """openapi, swagger, postman, or "" when the document is none of them."""
+    if not isinstance(doc, dict):
+        return ""
+    if str(doc.get("openapi", "")).startswith("3") and isinstance(doc.get("paths", {}), dict):
+        return "openapi"
+    if str(doc.get("swagger", "")).startswith("2") and isinstance(doc.get("paths", {}), dict):
+        return "swagger"
+    info = doc.get("info")
+    if isinstance(info, dict) and isinstance(doc.get("item"), list) and ("postman" in str(info.get("schema", "")).lower() or "_postman_id" in info):
+        return "postman"
+    return ""
+
+
+def api_ref(doc, ref):
+    """What a local reference (#/components/schemas/Pet) points at, or None."""
+    if not isinstance(ref, str) or not ref.startswith("#/"):
+        return None
+    node = doc
+    for part in ref[2:].split("/"):
+        part = urllib.parse.unquote(part).replace("~1", "/").replace("~0", "~")
+        if isinstance(node, dict) and part in node:
+            node = node[part]
+        elif isinstance(node, list) and part.isdigit() and int(part) < len(node):
+            node = node[int(part)]
+        else:
+            return None
+    return node
+
+
+def api_deref(doc, node):
+    """`node`, or what it references when it is only a reference (a parameter, a response, a request body)."""
+    seen = 0
+    while isinstance(node, dict) and "$ref" in node and seen < 8:
+        node, seen = api_ref(doc, node["$ref"]), seen + 1
+    return node if isinstance(node, dict) else {}
+
+
+def api_media_schema(doc, node):
+    """(media type, schema) of a request body or a response, whichever of OpenAPI 3 and Swagger 2 wrote it."""
+    node = api_deref(doc, node)
+    content = node.get("content")
+    if isinstance(content, dict) and content:
+        media = "application/json" if "application/json" in content else next(iter(content))
+        body = content[media]
+        return media, (body.get("schema") if isinstance(body, dict) else None)
+    return "", node.get("schema")
+
+
+def api_ops(doc: dict, kind: str) -> list:
+    """Every operation of a document, in a fixed order: [{method, path, op, params, summary, id, tags, deprecated}]."""
+    if kind == "postman":
+        return api_postman_ops(doc)
+    ops: list = []
+    paths = doc.get("paths") if isinstance(doc.get("paths"), dict) else {}
+    for path in sorted(paths):
+        item = api_deref(doc, paths[path])
+        shared = item.get("parameters") if isinstance(item.get("parameters"), list) else []
+        for method in API_METHODS:
+            op = item.get(method)
+            if not isinstance(op, dict):
+                continue
+            own = op.get("parameters") if isinstance(op.get("parameters"), list) else []
+            merged: dict = {}
+            for p in list(shared) + list(own):
+                p = api_deref(doc, p)
+                if p.get("name"):
+                    merged[(p["name"], p.get("in", ""))] = p
+            summary = op.get("summary") or str(op.get("description") or "").strip().split("\n")[0]
+            tags = [str(t) for t in op.get("tags", []) if isinstance(t, (str, int))] if isinstance(op.get("tags"), list) else []
+            ops.append({"method": method.upper(), "path": str(path), "op": op, "params": list(merged.values()), "summary": str(summary or "").strip(),
+                        "id": str(op.get("operationId") or ""), "tags": tags, "deprecated": op.get("deprecated") is True})
+    return ops
+
+
+def api_postman_ops(doc: dict) -> list:
+    ops: list = []
+
+    def walk(items, folders) -> None:
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            if isinstance(it.get("item"), list):
+                walk(it["item"], folders + [str(it.get("name") or "")])
+                continue
+            req = it.get("request")
+            if isinstance(req, str):
+                req = {"method": "GET", "url": req}
+            if not isinstance(req, dict):
+                continue
+            url = req.get("url")
+            raw = url if isinstance(url, str) else (url.get("raw", "") if isinstance(url, dict) else "")
+            segments = url.get("path") if isinstance(url, dict) and isinstance(url.get("path"), list) else None
+            if segments is None:
+                tail = re.sub(r"^(?:[a-z]+://)?(?:\{\{[^}]*\}\}|[^/?#]*)", "", str(raw).split("?")[0].split("#")[0])
+                segments = [s for s in tail.split("/") if s]
+            names = [s.get("value", "") if isinstance(s, dict) else str(s) for s in segments]
+            names = [re.sub(r"^:(\w+)$", r"{\1}", re.sub(r"\{\{([^}]*)\}\}", r"{\1}", n)) for n in names]
+            path = "/" + "/".join(names)
+            params = [{"name": m.group(1), "in": "path", "required": True} for m in (re.fullmatch(r"\{([^}/]+)\}", n) for n in names) if m]
+            query = url.get("query") if isinstance(url, dict) and isinstance(url.get("query"), list) else []
+            params += [{"name": str(q.get("key")), "in": "query", "required": False} for q in query if isinstance(q, dict) and q.get("key") and not q.get("disabled")]
+            ops.append({"method": str(req.get("method") or "GET").upper(), "path": path, "op": it, "params": params, "summary": str(it.get("name") or ""),
+                        "id": "", "tags": [" / ".join(f for f in folders if f)] if folders else [], "deprecated": False})
+
+    walk(doc.get("item") or [], [])
+    ops.sort(key=lambda o: (o["path"], o["method"]))
+    return ops
+
+
+def api_norm(path: str) -> str:
+    """A path in the form two spellings of it share: no query, no trailing slash, every {name} or :name alike."""
+    path = path.split("?")[0].split("#")[0]
+    path = re.sub(r"\{[^}/]*\}|<[^>/]*>|(?<=/):[A-Za-z_][A-Za-z0-9_]*", "{}", path)
+    return path.rstrip("/") or "/"
+
+
+def api_same_path(template: str, given: str) -> bool:
+    """Whether `given` (a path as written, or one with real values such as /pets/12) fits `template` (/pets/{}), segment by segment."""
+    a, b = template.split("/"), given.split("/")
+    return len(a) == len(b) and all(x == y or x == "{}" or y == "{}" for x, y in zip(a, b))
+
+
+def api_base_paths(doc: dict, kind: str) -> list:
+    """The path prefixes a server adds (/api/v3), so `/api/v3/pet` and `/pet` can name the same operation."""
+    bases: list = []
+    if kind == "swagger" and isinstance(doc.get("basePath"), str):
+        bases.append(doc["basePath"])
+    for s in doc.get("servers", []) if isinstance(doc.get("servers"), list) else []:
+        if isinstance(s, dict) and isinstance(s.get("url"), str):
+            bases.append(urllib.parse.urlsplit(re.sub(r"\{[^}]*\}", "x", s["url"])).path)
+    return sorted({b.rstrip("/") for b in bases if b.rstrip("/")})
+
+
+def api_servers(doc: dict, kind: str) -> list:
+    if kind == "swagger":
+        host = str(doc.get("host") or "")
+        base = str(doc.get("basePath") or "")
+        schemes = [str(s) for s in doc.get("schemes", [])] if isinstance(doc.get("schemes"), list) and doc.get("schemes") else ["https"]
+        return [f"{s}://{host}{base}" for s in schemes] if host else ([base] if base else [])
+    if kind == "postman":
+        wanted = ("baseurl", "base_url", "url", "host", "server")
+        return [str(v.get("value")) for v in doc.get("variable", []) if isinstance(v, dict) and str(v.get("key", "")).lower() in wanted and v.get("value")] if isinstance(doc.get("variable"), list) else []
+    return [str(s["url"]) for s in doc.get("servers", []) if isinstance(s, dict) and s.get("url")] if isinstance(doc.get("servers"), list) else []
+
+
+def api_auth(doc: dict, kind: str) -> list:
+    schemes = doc.get("securityDefinitions") if kind == "swagger" else (doc.get("components") or {}).get("securitySchemes") if isinstance(doc.get("components"), dict) else None
+    out = []
+    for name in sorted(schemes) if isinstance(schemes, dict) else []:
+        s = api_deref(doc, schemes[name])
+        what = str(s.get("type", "?"))
+        if s.get("scheme"):
+            what += " " + str(s["scheme"])
+        if s.get("in") and s.get("name"):
+            what += f" in {s['in']} `{s['name']}`"
+        out.append(f"{name} ({what})")
+    if kind == "postman" and isinstance(doc.get("auth"), dict) and doc["auth"].get("type"):
+        out.append(str(doc["auth"]["type"]))
+    return out
+
+
+def api_type(schema, depth: int = 2) -> str:
+    """A schema written the way TypeScript would: named schemas by name, inline objects spelled out to `depth` levels."""
+    if not isinstance(schema, dict):
+        return "any"
+    if "$ref" in schema:
+        return str(schema["$ref"]).rsplit("/", 1)[-1]
+    kind, nullable = schema.get("type"), schema.get("nullable") is True
+    if isinstance(kind, list):
+        nullable = nullable or "null" in kind
+        kind = next((k for k in kind if k != "null"), None)
+    if isinstance(schema.get("enum"), list):
+        out = " | ".join(json.dumps(v, ensure_ascii=False) for v in schema["enum"][:12]) + (" | ..." if len(schema["enum"]) > 12 else "")
+    elif isinstance(schema.get("oneOf") or schema.get("anyOf"), list):
+        out = " | ".join(api_type(s, depth) for s in (schema.get("oneOf") or schema.get("anyOf")))
+    elif isinstance(schema.get("allOf"), list):
+        out = " & ".join(api_type(s, depth) for s in schema["allOf"])
+    elif kind == "array":
+        inner = api_type(schema.get("items"), depth)
+        out = ("(" + inner + ")" if " | " in inner or " & " in inner else inner) + "[]"
+    elif kind == "object" or "properties" in schema or "additionalProperties" in schema:
+        required = schema.get("required") if isinstance(schema.get("required"), list) else []
+        props = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+        if props and depth <= 0:
+            out = "{ ... }"
+        else:
+            fields = [f"{k}{'' if k in required else '?'}: {api_type(v, depth - 1)}" for k, v in props.items()]
+            extra = schema.get("additionalProperties")
+            if extra:
+                fields.append("[key: string]: " + (api_type(extra, depth - 1) if isinstance(extra, dict) else "any"))
+            out = "{ " + ", ".join(fields) + " }" if fields else "object"
+    elif kind:
+        out = f"{kind} ({schema['format']})" if schema.get("format") else str(kind)
+    else:
+        out = "any"
+    return out + " | null" if nullable else out
+
+
+def api_schema_refs(node, doc: dict, found: dict, limit: int = 60) -> None:
+    """Every named schema `node` mentions, directly or through other schemas: name -> schema."""
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str):
+            name = ref.rsplit("/", 1)[-1]
+            if ("/schemas/" in ref or "/definitions/" in ref) and name not in found and len(found) < limit:
+                target = api_ref(doc, ref)
+                if target is not None:
+                    found[name] = target
+                    api_schema_refs(target, doc, found, limit)
+            return
+        for value in node.values():
+            api_schema_refs(value, doc, found, limit)
+    elif isinstance(node, list):
+        for value in node:
+            api_schema_refs(value, doc, found, limit)
+
+
+def api_definition(name: str, schema, indent: str = "  ") -> list:
+    """A named schema as readable lines: one field per line with its description."""
+    if not isinstance(schema, dict):
+        return [f"{name} = any"]
+    props = schema.get("properties") if isinstance(schema.get("properties"), dict) else None
+    if props is None or "allOf" in schema or "oneOf" in schema or "anyOf" in schema:
+        return [f"{name} = {api_type(schema, 1)}"]
+    required = schema.get("required") if isinstance(schema.get("required"), list) else []
+    lines = [f"{name} {{"]
+    for key, value in props.items():
+        note = str(value.get("description") or "").strip().split("\n")[0][:80] if isinstance(value, dict) else ""
+        lines.append(f"{indent}{key}{'' if key in required else '?'}: {api_type(value, 1)}" + (f"   // {note}" if note else ""))
+    return lines + ["}"]
+
+
+def api_op_line(o: dict, doc: dict, kind: str) -> str:
+    """One line for the operation index."""
+    inputs = [f"{p.get('name')}{'*' if p.get('required') else ''}" for p in o["params"] if p.get("in") != "body"]
+    outputs: list = []
+    if kind in ("openapi", "swagger"):
+        body = api_deref(doc, o["op"].get("requestBody")) if o["op"].get("requestBody") else None
+        if body is not None:
+            _, schema = api_media_schema(doc, body)
+            inputs.append(f"body {api_type(schema, 0)}" + ("*" if body.get("required") else ""))
+        for p in o["params"]:
+            if p.get("in") == "body":
+                inputs.append(f"body {api_type(p.get('schema'), 0)}" + ("*" if p.get("required") else ""))
+        responses = o["op"].get("responses") if isinstance(o["op"].get("responses"), dict) else {}
+        for code in sorted(responses, key=str):
+            _, schema = api_media_schema(doc, responses[code])
+            outputs.append(f"{code} {api_type(schema, 0)}" if schema else str(code))
+    line = f"- `{o['method']} {o['path']}`"
+    line += f" {o['id']}" if o["id"] else ""
+    line += (": " if o["summary"] or o["id"] else "") + (("(deprecated) " if o["deprecated"] else "") + o["summary"] if o["summary"] else "")
+    detail = ("in: " + ", ".join(inputs)) if inputs else ""
+    detail += ("; " if detail and outputs else "") + (("out: " + ", ".join(outputs)) if outputs else "")
+    return line + (f" ({detail})" if detail else "")
+
+
+def api_op_lines(ops: list, doc: dict, kind: str) -> list:
+    """The index lines of a document's operations, grouped by their first tag."""
+    groups: dict = {}
+    for o in ops:
+        groups.setdefault(o["tags"][0] if o["tags"] else "(untagged)", []).append(o)
+    out: list = []
+    for tag in sorted(groups):
+        out += [f"## {tag}"] + [api_op_line(o, doc, kind) for o in groups[tag]] + [""]
+    return out
+
+
+def api_index_text(entry: dict, doc: dict, ops: list) -> str:
+    """The generated endpoints.md of one imported document."""
+    title = str(entry.get("title") or entry["name"])
+    lines = [f"# {entry['name']}: {title}" + (f" {entry['version']}" if entry.get("version") else ""),
+             f"Generated by `./<%sdlcDir%>/sdlc api import` from `{API_DIR}/{entry['file']}` (sha256 {str(entry['sha256'])[:12]}). Do not edit it: import the document again.", ""]
+    if entry.get("servers"):
+        lines.append("Servers: " + ", ".join(entry["servers"]))
+    if entry.get("auth"):
+        lines.append("Auth: " + ", ".join(entry["auth"]))
+    lines += ["`name*` is required; `body X*` is a required request body; `out:` lists the documented responses.", ""]
+    return "\n".join(lines + api_op_lines(ops, doc, entry["kind"])).rstrip() + "\n"
+
+
+def api_security(o: dict, doc: dict) -> str:
+    sec = o["op"].get("security", doc.get("security")) if isinstance(o["op"], dict) else None
+    if sec is None:
+        return ""
+    if not sec:
+        return "none"
+    return " or ".join("+".join(f"{k}" + (f" [{', '.join(v)}]" if isinstance(v, list) and v else "") for k, v in req.items()) or "none" for req in sec if isinstance(req, dict))
+
+
+def api_show_text(o: dict, src: dict) -> str:
+    """One operation with the types of everything it takes and returns."""
+    doc, kind = src["doc"], src["kind"]
+    lines = [f"{o['method']} {o['path']}   [{src['name']}]"]
+    if o["summary"]:
+        lines.append(("(deprecated) " if o["deprecated"] else "") + o["summary"])
+    meta = ([f"operationId: {o['id']}"] if o["id"] else []) + ([f"tags: {', '.join(o['tags'])}"] if o["tags"] else [])
+    if meta:
+        lines.append("   ".join(meta))
+    servers = api_servers(doc, kind)
+    if servers:
+        lines.append("servers: " + ", ".join(servers))
+    auth = api_security(o, doc)
+    if auth:
+        lines.append("auth: " + auth)
+    description = str(o["op"].get("description") or "").strip() if isinstance(o["op"], dict) else ""
+    if description and description != o["summary"]:
+        lines += ["", description[:600] + (" ..." if len(description) > 600 else "")]
+    if o["params"]:
+        lines += ["", "Parameters"]
+        for p in o["params"]:
+            schema = p.get("schema") if isinstance(p.get("schema"), dict) else ({"type": p["type"]} if p.get("type") else p.get("schema"))
+            note = str(p.get("description") or "").strip().split("\n")[0][:100]
+            lines.append(f"  {p.get('name')}   {p.get('in', '?')}   {api_type(schema, 1) if schema else '-'}   {'required' if p.get('required') else 'optional'}" + (f"   {note}" if note else ""))
+    refs: dict = {}
+    if kind == "postman":
+        req = o["op"].get("request") if isinstance(o["op"].get("request"), dict) else {}
+        raw = req.get("body", {}).get("raw") if isinstance(req.get("body"), dict) else None
+        if raw:
+            lines += ["", "Request body (an example from the collection)", "  " + str(raw).strip()[:800].replace("\n", "\n  ")]
+        saved = [r for r in o["op"].get("response", []) if isinstance(r, dict)] if isinstance(o["op"].get("response"), list) else []
+        if saved:
+            lines += ["", "Responses (examples saved in the collection)"]
+            for r in saved[:6]:
+                lines.append(f"  {r.get('code', '?')} {r.get('status', '')}".rstrip())
+                if r.get("body"):
+                    lines.append("    " + str(r["body"]).strip()[:500].replace("\n", "\n    "))
+    else:
+        body = o["op"].get("requestBody")
+        bodies = [(api_media_schema(doc, body), api_deref(doc, body).get("required"))] if body else []
+        bodies += [(("", p.get("schema")), p.get("required")) for p in o["params"] if p.get("in") == "body"]
+        for (media, schema), required in bodies:
+            lines += ["", f"Request body ({media or 'body'}{', required' if required else ''})", "  " + api_type(schema, 2)]
+            api_schema_refs(schema, doc, refs)
+        responses = o["op"].get("responses") if isinstance(o["op"].get("responses"), dict) else {}
+        if responses:
+            lines += ["", "Responses"]
+            for code in sorted(responses, key=str):
+                media, schema = api_media_schema(doc, responses[code])
+                said = str(api_deref(doc, responses[code]).get("description") or "").strip().split("\n")[0][:80]
+                lines.append(f"  {code}   " + (f"{media}   {api_type(schema, 2)}" if schema else "(no body)") + (f"   {said}" if said else ""))
+                api_schema_refs(schema, doc, refs)
+        for p in o["params"]:
+            api_schema_refs(p.get("schema"), doc, refs)
+        if refs:
+            lines += ["", "Types"]
+            for name in sorted(refs):
+                lines += ["  " + ln for ln in api_definition(name, refs[name])]
+    return "\n".join(lines) + "\n"
+
+
+# ---- the manifest and the documents on disk
+
+def api_write(path: Path, text: str) -> None:
+    """Text with LF line endings on every system (Path.write_text takes no newline argument before Python 3.10)."""
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+
+
+def api_load() -> dict:
+    try:
+        data = json.loads((ROOT / API_DIR / API_MANIFEST).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = None
+    if not isinstance(data, dict) or not isinstance(data.get("apis"), list):
+        data = {"version": 1, "apis": []}
+    data["apis"] = [a for a in data["apis"] if isinstance(a, dict) and isinstance(a.get("name"), str)]
+    return data
+
+
+def api_save(manifest: dict) -> None:
+    manifest["apis"].sort(key=lambda a: a["name"])
+    (ROOT / API_DIR).mkdir(parents=True, exist_ok=True)
+    with open(ROOT / API_DIR / API_MANIFEST, "w", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+
+
+def api_path(entry: dict, key: str):
+    """The file an entry records under `key` (file, index, text), or None unless it is a plain name inside the entry's own folder."""
+    value = entry.get(key)
+    name = entry.get("name")
+    if not isinstance(value, str) or not isinstance(name, str) or not API_NAME.fullmatch(name) or not API_FILE.fullmatch(value) or not value.startswith(name + "/"):
+        return None
+    return ROOT / API_DIR / value
+
+
+def api_read(entry: dict):
+    """(document, kind, ops, why not) of an imported machine-readable document."""
+    path = api_path(entry, "file")
+    try:
+        data = path.read_bytes() if path else b""
+        if path is None:
+            raise OSError("no usable file name")
+    except OSError:
+        return None, "", [], "its file is missing"
+    doc, why = api_doc_parse(data)
+    kind = api_kind(doc) if doc is not None else ""
+    if doc is None or not kind:
+        return None, "", [], why or "it is not an OpenAPI, Swagger or Postman document"
+    try:
+        return doc, kind, api_ops(doc, kind), ""
+    except (TypeError, ValueError, AttributeError, RecursionError) as e:
+        return None, "", [], f"it could not be read ({e})"
+
+
+def api_sources(cfg: dict) -> list:
+    """Every documented API the project can integrate with: the imported documents, and the project's own backend contract."""
+    out: list = []
+    for entry in api_load()["apis"]:
+        src = {"name": entry["name"], "entry": entry, "doc": None, "kind": entry.get("kind", ""), "ops": [], "why": ""}
+        if entry.get("kind") in ("openapi", "swagger", "postman") and entry.get("indexed", True):
+            doc, kind, ops, why = api_read(entry)
+            src.update({"doc": doc, "kind": kind or src["kind"], "ops": ops, "why": why})
+        out.append(src)
+    contract = (cfg.get("api") or {}).get("contract")
+    if contract and (ROOT / contract).is_file():
+        try:
+            snap = json.loads((ROOT / contract).read_text(encoding="utf-8"))
+            doc = {"openapi": "3.0.0", "info": {"title": "this project's backend"}, "paths": snap.get("paths", {}), "components": {"schemas": snap.get("schemas", {})}}
+            out.append({"name": "backend", "entry": {"name": "backend", "kind": "openapi", "title": "this project's backend", "file": contract}, "doc": doc, "kind": "openapi",
+                        "ops": api_ops(doc, "openapi"), "why": ""})
+        except (OSError, ValueError, AttributeError):
+            pass
+    return out
+
+
+API_KNOWN_CACHE: dict = {}
+
+
+def api_known(cfg: dict) -> tuple:
+    """({(METHOD, normalised path)}, whether any documentation exists, whether some of it cannot be searched for operations)."""
+    files = [ROOT / API_DIR / API_MANIFEST, ROOT / str((cfg.get("api") or {}).get("contract") or "-")]
+    files += [api_path(a, "file") or ROOT / "-" for a in api_load()["apis"]]
+    stamp = tuple((str(f), f.stat().st_mtime_ns, f.stat().st_size) if f.is_file() else (str(f), 0, 0) for f in files)
+    if API_KNOWN_CACHE.get("stamp") == stamp:
+        return API_KNOWN_CACHE["value"]
+    known: set = set()
+    sources = api_sources(cfg)
+    unsearchable = False
+    for s in sources:
+        if s["doc"] is None:
+            unsearchable = True
+            continue
+        bases = api_base_paths(s["doc"], s["kind"])
+        for o in s["ops"]:
+            for prefix in [""] + bases:
+                known.add((o["method"], api_norm(prefix + o["path"])))
+    API_KNOWN_CACHE.update({"stamp": stamp, "value": (known, bool(sources), unsearchable)})
+    return known, bool(sources), unsearchable
+
+
+def api_prd_section(prd_text: str):
+    """The body of the PRD's API integration section, or None when there is none."""
+    m = API_SECTION.search(prd_text)
+    if not m:
+        return None
+    rest = prd_text[m.end():]
+    nxt = re.search(r"^#{1," + str(len(m.group(1))) + r"}[ \t]+\S", rest, re.M)
+    return rest[:nxt.start()] if nxt else rest
+
+
+def api_prd_problems(cfg: dict, prd_text: str) -> list:
+    """What is wrong with the PRD's API integration section: missing, or naming an operation no documentation has."""
+    body = api_prd_section(prd_text)
+    if body is None:
+        return ["prd.md has no 'API integration' section: add it (write 'No API calls.' under it when the feature calls no API)"]
+    if re.search(r"\bno\s+api\s+calls?\b", body, re.I) or "TODO(prd)" in body:
+        return []  # (an unfinished section is reported by the TODO check, so it is not also reported as an unknown operation)
+    named = []
+    for m in API_OPERATION.finditer(body):
+        if m.group(1).lower() in API_METHODS:
+            named.append((m.group(1).upper(), m.group(2)))
+    if not named:
+        return ["prd.md's API integration section names no operation: list each one as `GET /path` (the way the documentation writes it), or write 'No API calls.'"]
+    known, anything, unsearchable = api_known(cfg)
+    if not anything:
+        return [f"prd.md's API integration section names `{named[0][0]} {named[0][1]}`, but no API documentation is imported: ./<%sdlcDir%>/sdlc api import <file or link> first"]
+    problems = []
+    for method, path in dict.fromkeys(named):
+        if unsearchable or any(m == method and api_same_path(p, api_norm(path)) for m, p in known):
+            continue
+        same_path = sorted(m for m, p in known if p == api_norm(path))
+        close = difflib.get_close_matches(api_norm(path), sorted({p for _, p in known}), n=3, cutoff=0.6)
+        hint = (f" It exists as {', '.join(same_path)}." if same_path else (f" Similar paths: {', '.join(close)}." if close else ""))
+        problems.append(f"prd.md's API integration section names `{method} {path}`, which no imported API documents.{hint} (./<%sdlcDir%>/sdlc api list shows every documented operation)")
+    return problems
+
+
+def api_references_text(cfg: dict, pending: list | None = None) -> str:
+    """What an agent is told about the API documentation: the files, and the operation index (all of it, if it is short)."""
+    sources = api_sources(cfg)
+    notes = ["- not imported yet, but this run imports it first: " + ", ".join(pending)] if pending else []
+    lines: list = []
+    index: list = []
+    for s in sources:
+        e = s["entry"]
+        if s["name"] == "backend":
+            lines.append(f"- this project's own backend, as its committed OpenAPI contract: `{e['file']}`")
+        elif e.get("kind") == "document":
+            files = [f"`{API_DIR}/{e['file']}`"] + ([f"its text `{API_DIR}/{e['text']}`"] if e.get("text") else [])
+            lines.append(f"- `{s['name']}`, a guide written for people: " + ", ".join(files) + ". It has no machine-readable operations: read it, and quote it where the PRD relies on it.")
+        else:
+            facts = [f"{API_KINDS.get(e.get('kind', ''), 'an API')} {e.get('spec', '')}".strip(), f"\"{e.get('title', s['name'])}\" {e.get('version', '')}".strip(),
+                     f"{e['operations']} operations" if "operations" in e else "no index could be built"]
+            where = f"`{API_DIR}/{e['file']}` is the document" + (f", `{API_DIR}/{e['index']}` its operation index" if e.get("index") else "")
+            extra = (f" Servers: {', '.join(e['servers'])}." if e.get("servers") else "") + (f" Auth: {', '.join(e['auth'])}." if e.get("auth") else "")
+            lines.append(f"- `{s['name']}` ({'; '.join(facts)}): {where}.{extra}")
+            if s["doc"] is None and s["why"]:
+                lines.append(f"  (the tool could not read it: {s['why']}; read the file yourself)")
+        if s["doc"] is not None and s["ops"]:
+            index += [f"### {s['name']}"] + api_op_lines(s["ops"], s["doc"], s["kind"])
+    if not lines:
+        return ("None imported, and this project has no backend of its own: the PRD's API integration section can only say `No API calls.` until a person imports "
+                "documentation with `./<%sdlcDir%>/sdlc api import <file or link>`." + ((" " + notes[0]) if notes else ""))
+    head = ("API documentation (read-only). Integrate ONLY with operations these documents define: do not invent an endpoint, a field, a header or a status code. "
+            "If the requirements need something that is not documented, say so as a question (or an ASSUMPTION in the PRD) instead of guessing.\n" + "\n".join(lines + notes) + "\n\n")
+    text = "\n".join(index).rstrip()
+    if len(text) <= API_PROMPT_BUDGET:
+        return head + "Operations (`name*` is required, `out:` lists the documented responses; `./<%sdlcDir%>/sdlc api show METHOD /path` prints one with all its types):\n\n" + text
+    counts = ", ".join(f"{s['name']}: {len(s['ops'])}" for s in sources if s["ops"])
+    return head + (f"The operation index is too long to include here ({counts} operations). Search it with `./<%sdlcDir%>/sdlc api list --grep <word>` and read one operation, "
+                   "with every type it uses, with `./<%sdlcDir%>/sdlc api show METHOD /path`; never read a whole document when one operation is what you need.")
+
+
+# ---- import
+
+def api_label(url: str) -> str:
+    """A link without its query, fragment and credentials (a query string may carry a token): safe to write down."""
+    parts = urllib.parse.urlsplit(url)
+    return f"{parts.scheme}://{parts.hostname}{':' + str(parts.port) if parts.port else ''}{parts.path}"
+
+
+class ApiRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not newurl.lower().startswith(("http://", "https://")):
+            raise urllib.error.HTTPError(newurl, code, "a redirect to something that is not an http(s) link", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def api_fetch(url: str) -> tuple:
+    """(bytes, "") of what a link serves, or (None, why not)."""
+    req = urllib.request.Request(url, headers={"User-Agent": "sdlc-api-import", "Accept": "application/json, application/yaml;q=0.9, */*;q=0.5"})
+    opener = urllib.request.build_opener(ApiRedirects)
+    try:
+        with opener.open(req, timeout=30) as resp:
+            data = resp.read(API_MAX_BYTES + 1)
+    except urllib.error.HTTPError as e:
+        return None, f"HTTP {e.code}"
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        return None, f"could not be reached ({getattr(e, 'reason', e)})"
+    return (data, "") if len(data) <= API_MAX_BYTES else (None, "larger than 20 MB")
+
+
+def api_fetch_document(url: str) -> tuple:
+    """(bytes, label, file name) of the API document a link serves. A link to a documentation PAGE is followed to the usual places the document lives."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        die(f"{url!r} is not an http(s) link", EXIT_USAGE)
+    if parts.username or parts.password:
+        die("a link with a user name or password in it is not accepted (it would be written down): download the document and import the file", EXIT_USAGE)
+    tried: list = []
+    candidates = [url] + [f"{parts.scheme}://{parts.netloc}{p}" for p in API_PROBES if parts.path != p]
+    for n, candidate in enumerate(candidates):
+        data, why = api_fetch(candidate)
+        if data is None:
+            tried.append(f"{api_label(candidate)}: {why}")
+            if n == 0 and why.startswith("could not be reached"):
+                break
+            continue
+        doc, parse_why = api_doc_parse(data)
+        if doc is not None and api_kind(doc):
+            name = Path(urllib.parse.urlsplit(candidate).path).name
+            name = name if Path(name).suffix.lower() in (".json", ".yaml", ".yml") else ("openapi.json" if data.lstrip()[:1] in (b"{", b"[") else "openapi.yaml")
+            return data, api_label(candidate), name
+        tried.append(f"{api_label(candidate)}: " + ("served something that is not an OpenAPI, Swagger or Postman document" if doc is not None else "not a document (" + parse_why[:60] + ")"))
+    die("no OpenAPI, Swagger or Postman document was found at that link. Tried:\n  " + "\n  ".join(tried)
+        + "\nOpen the documentation page, find the link to its JSON or YAML (often called openapi.json or swagger.json), and import that, or download it and import the file.", EXIT_USAGE)
+    return b"", "", ""
+
+
+def api_import_one(source: str, name: str, manifest: dict) -> tuple:
+    """Bring one document into .ai/api/<name>/ and record it: (its manifest entry, what changed since the last import of that name). Dies with a sentence about anything it cannot use."""
+    is_link = bool(re.match(r"https?://", source))
+    path = None
+    if is_link:
+        data, label, filename = api_fetch_document(source)
+    else:
+        path = Path(source).expanduser()
+        if not path.is_file():
+            die(f"{source} is not a file (and not an http(s) link)", EXIT_USAGE)
+        if path.stat().st_size > API_MAX_BYTES:
+            die(f"{source} is larger than 20 MB", EXIT_USAGE)
+        data, label, filename = path.read_bytes(), path.name, path.name
+    suffix = Path(filename).suffix.lower()
+    doc, kind, why, indexed = None, "", "", True
+    if suffix in SPEC_SOURCES:
+        kind = "document"
+    elif suffix in (".json", ".yaml", ".yml"):
+        doc, why = api_doc_parse(data)
+        kind = api_kind(doc) if doc is not None else ""
+        if doc is None:
+            guess = re.search(rb"(?m)^[\"']?(openapi|swagger)[\"']?\s*:\s*[\"']?([23])", data)
+            if suffix != ".json" and guess:
+                kind, indexed = guess.group(1).decode(), False
+                say(warn(f"  {label}: it looks like {'an OpenAPI' if kind == 'openapi' else 'a Swagger'} document, but this tool cannot read it ({why}). It is kept as it is, with no operation index:"
+                         " the agent reads the file itself, and the PRD's operations are not checked against it. Converting it to JSON gives the full benefit."))
+            else:
+                die(f"{label} is not readable as an API document: {why}", EXIT_USAGE)
+        elif not kind:
+            die(f"{label} is JSON/YAML, but not an OpenAPI 3.x, Swagger 2.0 or Postman collection document (no `openapi`, `swagger` or Postman `info.schema` field)", EXIT_USAGE)
+    else:
+        die(f"{filename}: not an API document this tool knows. Give it an OpenAPI or Swagger file (.json, .yaml, .yml), a Postman collection (.json), a link to one, or a guide ({', '.join(SPEC_SOURCES)})", EXIT_USAGE)
+    info = doc.get("info") if isinstance(doc, dict) and isinstance(doc.get("info"), dict) else {}
+    title = str(info.get("title") or info.get("name") or "")
+    if not name:
+        name = ref_slug(title or Path(filename).stem, "api")[:48].strip("-") or "api"
+    if not API_NAME.fullmatch(name):
+        die("--name is lowercase letters, digits and dashes (at most 48)", EXIT_USAGE)
+    if name == "backend":
+        die("the name `backend` is taken by this project's own API contract: choose another with --name", EXIT_USAGE)
+    old = next((a for a in manifest["apis"] if a["name"] == name), None)
+    where = label  # a link that led to the document beside a documentation page is written down as where the document is
+    if old and old.get("source") != where:
+        say(warn(f"  {name} was imported from {old.get('source', 'somewhere else')}; this replaces it (give --name to keep both)"))
+    before = set()
+    if old and old.get("kind") in ("openapi", "swagger", "postman"):
+        before = {(o["method"], api_norm(o["path"])) for o in api_read(old)[2]}
+    folder = ROOT / API_DIR / name
+    if old:
+        for key in ("file", "index", "text"):
+            gone = api_path(old, key)
+            if gone is not None:
+                with contextlib.suppress(OSError):
+                    gone.unlink()
+    folder.mkdir(parents=True, exist_ok=True)
+    entry: dict = {"name": name, "kind": kind}
+    text_name = ""
+    if kind == "document":
+        stem = ref_slug(Path(filename).stem, "guide")
+        stored = f"{stem}{suffix}"
+        if suffix in (".md", ".markdown", ".txt", ".rst"):
+            data = data.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+        (folder / stored).write_bytes(data)
+        if suffix in (".pdf", ".docx"):
+            text, how = extract_source(folder / stored)
+            if text:
+                text_name = f"{stem}.txt"
+                (folder / text_name).write_bytes(text.replace("\r\n", "\n").encode("utf-8"))
+            else:
+                say(warn(f"  no text could be read from {filename} ({how}): the agent will have to read the file itself"))
+    else:
+        data = data.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+        stored = ("postman" if kind == "postman" else "swagger" if kind == "swagger" else "openapi") + (".yaml" if suffix in (".yaml", ".yml") else ".json")
+        (folder / stored).write_bytes(data)
+    entry["file"] = f"{name}/{stored}"
+    entry["source"] = where
+    entry.update({"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()})
+    if text_name:
+        entry.update({"text": f"{name}/{text_name}", "textSha256": hashlib.sha256((folder / text_name).read_bytes()).hexdigest()})
+    ops: list = []
+    if kind in ("openapi", "swagger", "postman") and indexed and doc is not None:
+        spec = str(doc.get("openapi") or doc.get("swagger") or (info.get("schema", "").rsplit("/", 2)[-2] if kind == "postman" and "/" in str(info.get("schema", "")) else ""))
+        ops = api_ops(doc, kind)
+        entry.update({"title": title or name, "version": str(info.get("version", "")), "spec": spec, "servers": api_servers(doc, kind), "auth": api_auth(doc, kind), "operations": len(ops), "indexed": True})
+        entry["index"] = f"{name}/endpoints.md"
+        api_write(folder / "endpoints.md", api_index_text(entry, doc, ops))
+    elif kind in ("openapi", "swagger"):
+        entry.update({"title": title or name, "indexed": False})
+    manifest["apis"] = [a for a in manifest["apis"] if a["name"] != name] + [entry]
+    after = {(o["method"], api_norm(o["path"])) for o in ops}
+    return entry, ([f"+ {m} {p}" for m, p in sorted(after - before)] + [f"- {m} {p}" for m, p in sorted(before - after)]) if old else []
+
+
+def api_describe(e: dict) -> str:
+    if e.get("kind") == "document":
+        return "a guide, " + f"{e.get('bytes', 0):,} bytes"
+    spec = f"{API_KINDS.get(e.get('kind', ''), 'API')} {e.get('spec', '')}".strip()
+    return f"{spec}, \"{e.get('title', e['name'])}\"" + (f" {e['version']}" if e.get("version") else "") + (f", {e['operations']} operations" if "operations" in e else ", not indexed")
+
+
+def api_import(args: argparse.Namespace) -> int:
+    sources = list(args.source or [])
+    if not sources:
+        die("name what to import: an OpenAPI or Swagger file (.json, .yaml, .yml), a Postman collection, a link to one, or a guide (.pdf, .docx, .md, .txt)", EXIT_USAGE)
+    if args.name and len(sources) > 1:
+        die("--name names one import: leave it out when importing several", EXIT_USAGE)
+    manifest = api_load()
+    made = []
+    for given in sources:
+        made.append(api_import_one(given, args.name or "", manifest))
+        api_save(manifest)  # one at a time: a later source that cannot be read does not leave the earlier files unrecorded
+    say(ok(f"imported {len(made)} API document(s) into {API_DIR}/:"))
+    for e, changes in made:
+        say(f"  {e['name']}: {api_describe(e)}")
+        say(dim(f"    {API_DIR}/{e['file']}   (the document)"))
+        if e.get("index"):
+            say(dim(f"    {API_DIR}/{e['index']}   (the operation index: generated, read it first)"))
+        if e.get("servers"):
+            say(dim("    servers: " + ", ".join(e["servers"])))
+        if e.get("auth"):
+            say(dim("    auth: " + ", ".join(e["auth"])))
+        if changes:
+            say(f"    changed since the last import: {len([c for c in changes if c[0] == '+'])} added, {len([c for c in changes if c[0] == '-'])} removed")
+            for line in changes[:12]:
+                say(dim(f"      {line}"))
+            if len(changes) > 12:
+                say(dim(f"      ... and {len(changes) - 12} more"))
+    say("Next: commit them with the spec (an agent may not edit them), list what a feature may call with `./<%sdlcDir%>/sdlc api list`,")
+    say("and name the operations a feature calls in the PRD's API integration section (`./<%sdlcDir%>/sdlc spec <requirements>` drafts it from the document and these).")
+    return EXIT_OK
+
+
+# ---- check, sync, list, show
+
+def api_check(cfg: dict) -> tuple:
+    """(problems, a summary line). Every file in the manifest exists and is what was imported, and every generated index is current."""
+    problems: list = []
+    path = ROOT / API_DIR / API_MANIFEST
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return [f"{rel(path)} is not valid JSON: import the API documents again"], ""
+        if not isinstance(data, dict) or not isinstance(data.get("apis"), list):
+            return [f"{rel(path)} has no `apis` list: import the API documents again"], ""
+    entries = api_load()["apis"]
+    seen: set = set()
+    operations = 0
+    for e in entries:
+        name = e["name"]
+        if not API_NAME.fullmatch(name) or name in seen:
+            problems.append(f"{API_MANIFEST} has an unusable or repeated name {name!r}")
+            continue
+        seen.add(name)
+        for key in ("file", "index", "text"):
+            if e.get(key) is not None and (not isinstance(e[key], str) or not API_FILE.fullmatch(e[key]) or not e[key].startswith(name + "/")):
+                problems.append(f"{API_MANIFEST}: {name} lists a {key} with an unusable name")
+        main = api_path(e, "file")
+        if main is None or not main.is_file():
+            problems.append(f"{API_DIR}/{e.get('file')} is listed for {name} but missing (or its name is not usable): import it again")
+            continue
+        if hashlib.sha256(main.read_bytes()).hexdigest() != e.get("sha256"):
+            problems.append(f"{API_DIR}/{e['file']} is not what {API_MANIFEST} recorded (edited or replaced): import the document again so the record matches")
+            continue
+        if e.get("text"):
+            text = api_path(e, "text")
+            if text is None or not text.is_file() or hashlib.sha256(text.read_bytes()).hexdigest() != e.get("textSha256"):
+                problems.append(f"{API_DIR}/{e['text']} is missing or not what was extracted: import the document again")
+        if e.get("kind") in ("openapi", "swagger", "postman") and e.get("indexed", True):
+            doc, kind, ops, why = api_read(e)
+            if doc is None:
+                problems.append(f"{API_DIR}/{e['file']} cannot be read as an API document ({why}): import it again")
+                continue
+            operations += len(ops)
+            index = api_path(e, "index")
+            if index is None or not index.is_file() or index.read_text(encoding="utf-8") != api_index_text(e, doc, ops):
+                problems.append(f"{API_DIR}/{e.get('index')} is not what {e['file']} produces: run ./<%sdlcDir%>/sdlc api sync (and never edit a generated file)")
+    folder = ROOT / API_DIR
+    for child in sorted(folder.iterdir()) if folder.is_dir() else []:
+        if child.is_dir() and child.name not in seen:
+            problems.append(f"{API_DIR}/{child.name}/ is not listed in {API_MANIFEST}: import it with `api import`, or delete it")
+    own = (cfg.get("api") or {}).get("contract")
+    summary = (f"api: {len(entries)} document(s), {operations} operation(s) indexed, every file as imported" if entries
+               else "api: no API documentation imported" + (f" (this project's own backend contract, {own}, is the API its screens use)" if own and (ROOT / own).is_file() else ""))
+    return problems, summary
+
+
+def api_sync() -> int:
+    manifest = api_load()
+    for e in manifest["apis"]:
+        if e.get("kind") not in ("openapi", "swagger", "postman") or not e.get("indexed", True):
+            continue
+        doc, kind, ops, why = api_read(e)
+        if doc is None:
+            say(bad(f"{e['name']}: {why}"))
+            return EXIT_FAIL
+        target = api_path(e, "index")
+        if target is None:
+            say(bad(f"{e['name']}: the recorded index name is not usable: import the document again"))
+            return EXIT_FAIL
+        content = api_index_text(e, doc, ops)
+        if target.is_file() and target.read_text(encoding="utf-8") == content:
+            say(f"{rel(target)}: already in sync")
+            continue
+        api_write(target, content)
+        say(ok(f"{rel(target)}: written from {e['file']}"))
+    return EXIT_OK
+
+
+def api_list(cfg: dict, args: argparse.Namespace) -> int:
+    sources = [s for s in api_sources(cfg) if not args.name or s["name"] == args.name]
+    if not sources:
+        say(dim("No API documentation" + (f" named {args.name}" if args.name else "") + " yet: `./<%sdlcDir%>/sdlc api import <file or link>` adds some."))
+        return EXIT_OK
+    needle = (args.grep or "").lower()
+    shown = 0
+    for s in sources:
+        e = s["entry"]
+        what = "this project's own backend contract" if s["name"] == "backend" else api_describe(e)
+        say(c(s["name"], "1") + dim("  " + what + (f"   servers: {', '.join(e['servers'])}" if e.get("servers") else "")))
+        if s["doc"] is None:
+            say(dim("  " + (s["why"] or "a guide: it has no machine-readable operations") + ("" if s["name"] == "backend" else f"   ({API_DIR}/{e['file']})")))
+            continue
+        heading = ""
+        for line in api_op_lines(s["ops"], s["doc"], s["kind"]):
+            if line.startswith("## "):
+                heading = line
+            elif line and (not needle or needle in line.lower()):
+                if heading:
+                    say(heading)
+                    heading = ""
+                say(line)
+                shown += 1
+        say("")
+    if needle and not shown:
+        say(dim(f"nothing documented matches {args.grep!r}"))
+    return EXIT_OK
+
+
+def api_show(cfg: dict, args: argparse.Namespace) -> int:
+    words = " ".join(args.source or []).split()
+    if len(words) != 2 or words[0].lower() not in API_METHODS:
+        die("name the operation: api show GET /pets/{petId}", EXIT_USAGE)
+    method, path = words[0].upper(), api_norm(words[1])
+    found = []
+    for s in api_sources(cfg):
+        if (args.name and s["name"] != args.name) or s["doc"] is None:
+            continue
+        bases = [""] + api_base_paths(s["doc"], s["kind"])
+        found += [(o, s) for o in s["ops"] if o["method"] == method and any(api_same_path(api_norm(b + o["path"]), path) for b in bases)]
+    if not found:
+        every = sorted({f"{o['method']} {o['path']}" for s in api_sources(cfg) if s["doc"] is not None for o in s["ops"]})
+        close = difflib.get_close_matches(f"{method} {words[1]}", every, n=4, cutoff=0.5)
+        say(bad(f"no documented operation {method} {words[1]}" + (f". Similar: {', '.join(close)}" if close else "")))
+        return EXIT_FAIL
+    for o, s in found:
+        say(api_show_text(o, s))
+    return EXIT_OK
+
+
+def cmd_api(cfg: dict, args: argparse.Namespace) -> int:
+    if not cfg.get("api"):
+        say(dim("This project has no screen (no web or mobile component), so it has no API documentation to integrate against: the API it serves is the contract in .ai/contract/."))
+        return EXIT_USAGE if args.action == "import" else EXIT_OK
+    if args.action == "import":
+        return api_import(args)
+    if args.action == "sync":
+        return api_sync()
+    if args.action == "list":
+        return api_list(cfg, args)
+    if args.action == "show":
+        return api_show(cfg, args)
+    problems, summary = api_check(cfg)
+    if problems:
+        say(bad(f"{len(problems)} API documentation problem(s):"))
+        for p in problems[:40]:
+            say(f"  - {p}")
+        say("The documentation is what the screens integrate against (rule: .ai/rules/api-integration.md): import it again rather than editing it.")
+        return EXIT_FAIL
+    say(ok(summary))
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="sdlc", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="command", required=True)
@@ -4130,6 +5534,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--allow-dirty", action="store_true", help="proceed with uncommitted changes")
     sp.add_argument("--dry-run", action="store_true", help="extract the text, write the prompt, print the agent command; run nothing")
     sp.add_argument("--max-attempts", type=int, default=3, help="how many times the agent may fix an invalid draft")
+    sp.add_argument("--api", action="append", metavar="FILE_OR_LINK", help="API documentation the feature integrates with (an OpenAPI/Swagger file, a Postman collection, a link or a guide): imported first, like `api import`; repeatable")
     ag = sub.add_parser("agent")  # list the AI agents (installed or not) and choose one for this machine
     ag.add_argument("choice", nargs="?", help="an agent's name (see the list), 'custom' or 'none'; leave out to list and choose")
     ag.add_argument("--command", dest="agent_command", help="with 'custom': the command that reads the prompt on stdin")
@@ -4165,6 +5570,12 @@ def build_parser() -> argparse.ArgumentParser:
     de.add_argument("--scale", type=float, default=2, help="import a Figma frame: export scale (0.5 to 4)")
     de.add_argument("--node", action="append", help="import a Figma link: a frame's node id (1:2), repeatable")
     de.add_argument("--variables", action="store_true", help="import a Figma link: also propose tokens from its variables (Enterprise plans)")
+    ap = sub.add_parser("api")
+    ap.add_argument("action", nargs="?", choices=["check", "import", "list", "show", "sync"], default="check",
+                    help="check: the gate (default); import: bring in API documentation; list: the documented operations; show: one operation with its types; sync: rewrite the generated indexes")
+    ap.add_argument("source", nargs="*", help="import: OpenAPI/Swagger files (.json .yaml .yml), Postman collections, links to them, or guides (.pdf .docx .md .txt); show: METHOD /path")
+    ap.add_argument("--name", help="import: the name to save it under (lowercase letters, digits, dashes); list and show: only this API")
+    ap.add_argument("--grep", help="list: only the operations whose line contains this text")
     sub.add_parser("up")
     sub.add_parser("down")
     sub.add_parser("report")
@@ -4173,7 +5584,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 COMMANDS = {
     "setup": cmd_setup, "doctor": cmd_doctor, "agent": cmd_agent, "gates": cmd_gates, "facts": cmd_facts, "verify": cmd_verify, "loop": cmd_loop,
-    "feature": cmd_feature, "spec": cmd_spec, "implement": cmd_implement, "sync": cmd_sync, "onboard": cmd_onboard, "baseline": cmd_baseline, "new": cmd_new, "deploy": cmd_deploy, "secrets": cmd_secrets, "design": cmd_design, "up": cmd_up, "down": cmd_down, "report": cmd_report,
+    "feature": cmd_feature, "spec": cmd_spec, "implement": cmd_implement, "sync": cmd_sync, "onboard": cmd_onboard, "baseline": cmd_baseline, "new": cmd_new, "deploy": cmd_deploy, "secrets": cmd_secrets, "design": cmd_design, "api": cmd_api, "up": cmd_up, "down": cmd_down, "report": cmd_report,
 }
 
 

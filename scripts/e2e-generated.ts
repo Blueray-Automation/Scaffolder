@@ -102,6 +102,59 @@ function designControls(dir: string, cfg: ScaffolderConfig): void {
   expectExit("sync back to the original tokens", dir, ["design", "sync"], 0);
 }
 
+/** A small API document, as somebody would be sent one. */
+const SHOP_API = {
+  openapi: "3.0.3",
+  info: { title: "Shop", version: "1.0.0" },
+  servers: [{ url: "https://shop.example.com/api" }],
+  paths: {
+    "/orders/{orderId}": {
+      get: {
+        tags: ["orders"],
+        summary: "Read one order",
+        parameters: [{ name: "orderId", in: "path", required: true, schema: { type: "string" } }],
+        responses: { "200": { description: "ok", content: { "application/json": { schema: { $ref: "#/components/schemas/Order" } } } }, "404": { description: "missing" } },
+      },
+    },
+  },
+  components: { schemas: { Order: { type: "object", required: ["id"], properties: { id: { type: "string" }, total: { type: "number" } } } } },
+};
+
+/**
+ * The API documentation's negative controls: an imported document somebody edited must FAIL the gate, a PRD that names an
+ * operation nobody documented must FAIL the spec check, and a document that is imported again puts the project right.
+ */
+function apiControls(dir: string, cfg: ScaffolderConfig): void {
+  if (!cfg.web.enabled && !cfg.mobile.enabled) return;
+  const doc = join(dir, "..", `e2e-shop-api-${cfg.project.name}.json`);
+  writeFileSync(doc, JSON.stringify(SHOP_API, null, 2));
+  expectExit("the API gate passes with nothing imported", dir, ["gates", "--only", "repo.api"], 0);
+  expectExit("api import brings a document in", dir, ["api", "import", doc, "--name", "shop"], 0);
+  const listed = expectExit("api show prints the operation with its types", dir, ["api", "show", "GET", "/orders/7"], 0);
+  if (listed.includes("Order {") && listed.includes("id: string") && listed.includes("404")) ok("it names the parameters, the responses and the type");
+  else bad("api show did not print the operation's types");
+  expectExit("the API gate passes with it", dir, ["gates", "--only", "repo.api"], 0);
+
+  const imported = join(dir, ".ai/api/shop/openapi.json");
+  const original = readFileSync(imported, "utf8");
+  writeFileSync(imported, original.replace("Read one order", "Read an order"));
+  expectExit("the API gate FAILS for an imported document somebody edited", dir, ["gates", "--only", "repo.api"], 1);
+  writeFileSync(imported, original);
+  expectExit("and passes again once it is as imported", dir, ["gates", "--only", "repo.api"], 0);
+
+  const prdPath = join(dir, ".ai/specs/FEAT-000-hello-world/prd.md");
+  const prd = readFileSync(prdPath, "utf8");
+  writeFileSync(prdPath, prd.replace(/(## \d+\. API integration\n)[\s\S]*?(?=## \d+\. Out of scope)/, "$1- **Operations**: `GET /orders/{orderId}/lines`, which nobody documented.\n\n"));
+  const undocumented = expectExit("the spec check FAILS for an operation nobody documented", dir, ["facts", "--runtime", "none"], 1);
+  const report = /\[(\.ai\/evidence\/[^\]]+\/report\.md)\]/.exec(undocumented)?.[1];
+  if (report && readFileSync(join(dir, report), "utf8").includes("`GET /orders/{orderId}/lines`, which no imported API documents")) ok("the failure names the operation");
+  else bad("the undocumented operation was not named");
+  writeFileSync(prdPath, prd);
+  rmSync(join(dir, ".ai/api"), { recursive: true, force: true });
+  rmSync(doc);
+  expectExit("the API gate is green again with nothing imported", dir, ["gates", "--only", "repo.api"], 0);
+}
+
 function pythonVersion(): string {
   const r = run("python3", ["-c", "import sys;print('%d.%d'%sys.version_info[:2])"], process.cwd());
   return (r.stdout ?? "").trim();
@@ -272,8 +325,9 @@ function scenario(name: string, patch: Json): void {
     expectExit("secret scan catches a committed key", dir, ["secrets"], 1);
     rmSync(join(dir, "leak.txt"));
 
-    // --- the design contract ---
+    // --- the design contract, and the API documentation ---
     if (cfg.web.enabled) designControls(dir, cfg);
+    apiControls(dir, cfg);
 
     // --- sdlc implement: spec in, verified code out, with a scripted agent standing in for the AI ---
     implementFromSpec(dir, cfg, git, name);
@@ -374,8 +428,9 @@ function mobileOnlyScenario(name: string, cfg: Json, result: ReturnType<typeof g
     expectExit("secret scan catches a committed key", dir, ["secrets"], 1);
     rmSync(join(dir, "leak.txt"));
 
-    // --- the design contract ---
+    // --- the design contract, and the API documentation ---
     designControls(dir, cfg as ScaffolderConfig);
+    apiControls(dir, cfg as ScaffolderConfig);
 
     // --- the platform folders: `flutter create` must not break or rewrite what was generated ---
     const shipped = (root: string) =>
@@ -429,10 +484,13 @@ New endpoint \`GET /api/v1/slug\`. No migrations.
 ## 6. UI & design
 No UI change.
 
-## 7. Out of scope
+## 7. API integration
+No API calls.
+
+## 8. Out of scope
 Custom separators, uniqueness, persistence.
 
-## 8. Verification map
+## 9. Verification map
 See acceptance.json.
 `;
 

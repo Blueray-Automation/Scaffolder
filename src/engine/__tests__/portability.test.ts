@@ -87,7 +87,8 @@ describe("generated scripts/sdlc.py: rules that keep it portable (it cannot be r
     const offenders = lines.filter((l) => /\.(read_text|write_text)\(/.test(l) && !l.includes("encoding="));
     expect(offenders).toEqual([]);
     expect(lines.filter((l) => /\btext=True\b/.test(l))).toEqual([]);
-    expect(lines.filter((l) => /\bopen\(/.test(l) && !/urlopen/.test(l) && !l.includes("encoding=") && !/\b(rb|wb|"rb"|"wb")\b/.test(l))).toEqual([]);
+    // (a network opener's .open() is not a file: `api import` uses one to refuse a redirect that leaves http(s))
+    expect(lines.filter((l) => /\bopen\(/.test(l) && !/urlopen|opener\.open\(/.test(l) && !l.includes("encoding=") && !/\b(rb|wb|"rb"|"wb")\b/.test(l))).toEqual([]);
   });
 
   it("only signals process groups on POSIX, after the Windows branch has returned", () => {

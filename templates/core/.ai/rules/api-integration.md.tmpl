@@ -1,0 +1,26 @@
+# Rule: API integration
+
+The API's documentation is a contract, like the design tokens. A screen integrates with what is documented, and only that. How the documentation is imported and read: `.ai/api/README.md`.
+
+## Rules
+1. **Only documented operations.** Every call a screen makes is an operation in `.ai/api/<name>/` (its `endpoints.md` is the index; `./<%sdlcDir%>/sdlc api show METHOD /path` prints one with its types)<%#hasBackend%>, or in this project's own backend contract, `.ai/contract/openapi.json`<%/hasBackend%>.
+   Never invent an endpoint, a field, a header, a status code or an error shape. If the requirements need something the documentation does not have, stop and ask: a missing operation is a question for the API's owner, not something to guess.
+2. **One client, typed from the documentation.** All access goes through one module (in `<%#hasWeb%>`<%webApiDir%>`<%/hasWeb%><%#hasMobile%><%#hasWeb%>; on mobile, <%/hasWeb%>`<%mobileDir%>/lib/api/`<%/hasMobile%>), never a `fetch` or HTTP call from a component or a widget. Its types mirror the documented schemas, and what comes back is checked against them at the boundary
+   (treat it as `unknown` until it is narrowed): a response that does not look documented is an error state, not a crash.
+3. **Addresses and credentials are configuration.** The base URL comes from the server's documented `servers` entry through an environment variable read at run time, with a safe development default in `.env.example` and `docker-compose.yml`. Never commit a token, key or password, never log one, and never put a secret in code that reaches the browser or the app bundle.
+4. **Every documented outcome is a state.** For each operation: success, each documented error the screen can cause (validation, unauthorised, forbidden, not found, conflict), a server error, a timeout, and offline. Each has a test, and each is shown to the user in words and announced to assistive technology (`.ai/rules/design.md`).
+5. **Tests use documented shapes.** A mocked response has exactly the status and body the documentation gives: copy it from `api show`, do not invent a body to make a test pass. One test per documented status the screen handles.
+6. **The PRD lists the operations.** The PRD's API integration section names each one as `` `METHOD /path` `` with what it is for. The spec fails if one is not documented. Build exactly those; a new operation needs the PRD to change first.
+7. **Never edit `.ai/api/`.** It is protected. If the documentation looks wrong or out of date, say so in your final message (a person imports the new version); do not "fix" it, and do not code around it silently.
+8. **Pagination, retries and rate limits** follow what the documentation says. If it says nothing, do the simplest safe thing (no retry on a non-idempotent call, a bounded page size) and list it as an assumption.
+
+## How it is checked
+<%#apiEnforced%>
+- Gate `repo.api` (`./<%sdlcDir%>/sdlc api check`): every imported file is what was imported and every generated index is current.
+- Facts: the PRD must have an API integration section (`No API calls.` is a complete one), and every operation it names must exist in the documentation, or the spec fails.
+<%/apiEnforced%>
+<%^apiEnforced%>
+- Not enforced in this project (`api.enforce` is off): run `./<%sdlcDir%>/sdlc api check` yourself, and check by hand that every call a screen makes is documented.
+<%/apiEnforced%>
+- Not checked by the tool: that the code calls only what the PRD lists, and that the live API answers as documented. A reviewer reads the client module against `api show`; the facts against the running system cover the backend this project owns.
+- Skill: `.ai/skills/integrate-api/`.

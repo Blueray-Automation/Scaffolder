@@ -22,6 +22,8 @@ export interface WebStack {
   start: (port: number) => { cmd: string; env: Record<string, string> };
   /** The design contract, relative to the web directory: where the generated stylesheet of tokens goes, and the folder checked for hard-coded values. */
   design: { tokensCss: string; sourceDir: string };
+  /** The folder (relative to the web directory) where the code that calls an API lives. */
+  apiDir: string;
 }
 
 const NEXTJS: WebStack = {
@@ -33,6 +35,7 @@ const NEXTJS: WebStack = {
   env: { NEXT_TELEMETRY_DISABLED: "1" },
   start: (port) => ({ cmd: `npm run start -- --port ${port} --hostname 127.0.0.1`, env: {} }),
   design: { tokensCss: "src/app/tokens.css", sourceDir: "src" },
+  apiDir: "src/lib",
 };
 
 const NUXT: WebStack = {
@@ -45,6 +48,7 @@ const NUXT: WebStack = {
   // The built server reads its address from these (it has no command-line flags).
   start: (port) => ({ cmd: "npm run start", env: { NITRO_PORT: String(port), NITRO_HOST: "127.0.0.1" } }),
   design: { tokensCss: "app/assets/css/tokens.css", sourceDir: "app" },
+  apiDir: "server/utils",
 };
 
 const STACKS: Partial<Record<WebFramework, WebStack>> = { nextjs: NEXTJS, nuxt: NUXT };

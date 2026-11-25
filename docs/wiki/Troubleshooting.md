@@ -134,6 +134,18 @@ A PDF is turned into pictures by poppler's `pdftoppm`. Install it (macOS `brew i
 ### The spec fails: "prd.md has no 'UI & design' section"
 Every PRD in a project with a screen needs the section. Add `## 6. UI & design` with the frame, every state, the components, any new tokens and the copy, or the single line `No UI change.` when the feature has no screen. Turn the requirement off with `design.enforce: false` in `scaffolder.config.yaml`.
 
+### The spec fails: "prd.md has no 'API integration' section"
+Every PRD in a project with a screen needs the section. Add `## 7. API integration` (after UI & design) listing each operation the feature calls as `` `GET /path` `` with how requests are authenticated and what the user sees when each fails, or the single line `No API calls.` when it calls none. Turn the requirement off with `api.enforce: false` in `scaffolder.config.yaml`. See [API Integration](API-Integration).
+
+### The spec fails: "names `GET /...`, which no imported API documents"
+The PRD lists an operation that is in no imported document and not in the project's own backend contract. The message says which paths are close and which methods the path does have. Fix the PRD, or import the document that defines the operation (`./scripts/sdlc api import <file or link>`). `./scripts/sdlc api list` shows every documented operation, and `api list --grep <word>` searches them.
+
+### `api import` says it could not read a YAML document
+The small YAML reader in `scripts/sdlc.py` does not support anchors (`&a`), aliases (`*a`), tags (`!!`), merge keys (`<<:`) or several documents in one file. The file is kept, but no operation index is built and the PRD's operations are not checked against it. Convert it to JSON (Swagger Editor, or `npx @redocly/cli bundle openapi.yaml --dereferenced -o openapi.json`) and import that.
+
+### `api check` says a file "is not what apis.json recorded"
+Somebody edited or replaced an imported document. If the new version is the right one, import it again (`./scripts/sdlc api import <file or link> --name <same name>`): it prints which operations were added and removed, and the record is rewritten. If you did not mean to change it, `git checkout -- .ai/api`.
+
 ### `npm audit` shows a warning
 That gate is advisory on purpose. It reports vulnerabilities in transitive dependencies, some of which have no patched release yet. Look at the list, but it won't block you.
 

@@ -42,6 +42,15 @@ New endpoints `GET /health`, `GET /ready`, `GET /api/v1/hello`. No migrations. E
 - **Responsive & accessibility**: <%#hasWeb%>the card is at most the `size.content` token wide and shrinks to fit a narrow screen; <%/hasWeb%>the greeting is a real heading and the colour tokens keep their contrast in the light and the dark theme.
 
 <%/designEnforced%>
+<%#apiEnforced%>
+## <%prdApiNo%>. API integration
+- **Operations**: `GET /api/v1/hello`, to fetch the greeting<%#hasWeb%>: the web page calls it on the server for every request<%#hasMobile%>, and the mobile app calls it when its first screen opens<%/hasMobile%><%/hasWeb%><%^hasWeb%>, when the mobile app's first screen opens<%/hasWeb%>.
+- **Documentation**: this project's own backend contract, `.ai/contract/openapi.json`.
+- **Authentication**: none: the endpoint is public.
+- **Failure behaviour**: when the backend cannot be reached, or answers with anything but `200`, the screen shows the error heading `Backend unavailable` and the reason, announced to assistive technology; it never shows a half-built greeting.
+- **Data mapping**: the response's `message` is the greeting, shown as the heading. A response without a string `message` is treated as an unexpected answer (an error), not as an empty greeting.
+
+<%/apiEnforced%>
 ## <%prdOutOfScopeNo%>. Out of scope
 Authentication, persistence of greetings, localization.
 
@@ -84,6 +93,11 @@ None. This project has no separate API: <%#hasWeb%>the <%webName%> app renders t
 - **Responsive & accessibility**: <%#hasWeb%>the card is at most the `size.content` token wide and shrinks to fit a narrow screen; <%/hasWeb%>the greeting is a real heading and the colour tokens keep their contrast in the light and the dark theme.
 
 <%/designEnforced%>
+<%#apiEnforced%>
+## <%prdApiNo%>. API integration
+No API calls.
+
+<%/apiEnforced%>
 ## <%prdOutOfScopeNo%>. Out of scope
 Authentication, persistence, localization, and any API or database.
 

@@ -22,6 +22,12 @@ you work, so follow the steps and rules below and keep going until the work is d
 {{designReferences}}
 
 <%/hasDesign%>
+<%#hasApiDocs%>
+### API documentation (read-only)
+
+{{apiReferences}}
+
+<%/hasApiDocs%>
 Every `http` check calls the **running** system with exactly that method, path, body and headers and compares the answer with `expect`.
 Study each check and make the implementation satisfy it exactly. A `cmd` check runs one named test: that test must exist and pass.
 
@@ -52,7 +58,10 @@ Study each check and make the implementation satisfy it exactly. A `cmd` check r
 7. **Design.** If the feature changes anything a person can see, follow `.ai/skills/implement-ui/SKILL.md` and `.ai/rules/design.md`: build from the PRD's UI & design section and
    its reference images in `{{specDir}}/design/`, use only the design tokens in `.ai/design/tokens.json` (a literal colour, space, radius or font size fails `./<%sdlcDir%>/sdlc design check`),
    add a token there (then `./<%sdlcDir%>/sdlc design sync`) only when the PRD says the feature needs a new one, and build every state the PRD lists.
-8. **Prove it.**<%/hasDesign%><%^hasDesign%>7. **Prove it.**<%/hasDesign%> Run `./<%sdlcDir%>/sdlc gates` until it is green (use `--only <gate-id>` while iterating). After you finish, the loop runs the facts
+8. **API integration.** If the feature calls an API, follow `.ai/skills/integrate-api/SKILL.md` and `.ai/rules/api-integration.md`: call only the operations the PRD's API integration section lists (the documentation above has every one of them),
+   build the typed client from the documented schemas, take addresses and credentials from configuration, and give every documented outcome (each error the screen can cause, a server error, a timeout, offline) a state and a test
+   whose response is shaped exactly as documented. Never edit `.ai/api/`; if the documentation looks wrong, say so in your final message.
+9. **Prove it.**<%/hasDesign%><%^hasDesign%>7. **Prove it.**<%/hasDesign%> Run `./<%sdlcDir%>/sdlc gates` until it is green (use `--only <gate-id>` while iterating). After you finish, the loop runs the facts
    against the running system and sends you any failure to fix.
 
 ## Hard rules

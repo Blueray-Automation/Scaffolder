@@ -43,6 +43,17 @@ TODO(prd): if this feature changes no screen, delete this whole list and write `
 - **Responsive & accessibility**: TODO(prd): <%#hasWeb%>how the layout changes at 375, 768 and 1280 px; <%/hasWeb%>keyboard and screen-reader behaviour; what is announced when something fails.
 
 <%/designEnforced%>
+<%#apiEnforced%>
+## <%prdApiNo%>. API integration
+TODO(prd): if this feature calls no API, delete this whole list and write `No API calls.` Otherwise fill in every line.
+
+- **Operations**: TODO(prd): every operation this feature calls, one per line, in backticks and written the way the documentation writes it (method, space, path), with what it is for and which screen or state calls it. Only documented operations are allowed: `./<%sdlcDir%>/sdlc api list` shows them, and the spec fails on any other.
+- **Documentation**: TODO(prd): where they are documented: `.ai/api/<name>/` (`./<%sdlcDir%>/sdlc api import <file or link>` brings it in)<%#hasBackend%>, or this project's own backend contract (`.ai/contract/openapi.json`)<%/hasBackend%>.
+- **Authentication**: TODO(prd): how a request is authenticated (the scheme the documentation names), where the credential comes from at run time, and what the screen does when it is missing or refused (401, 403).
+- **Failure behaviour**: TODO(prd): what the user sees for each documented error response of each operation, for a server error, a timeout and when offline.
+- **Data mapping**: TODO(prd): which response fields are shown or stored, how a missing, null or unknown field is handled, and any value the screen converts (dates, money, units).
+
+<%/apiEnforced%>
 ## <%prdOutOfScopeNo%>. Out of scope
 TODO(prd): what this feature deliberately does not do.
 

@@ -17,12 +17,15 @@ The report is `.ai/evidence/latest/report.md`. If you cannot run something, say 
 <%#hasDesign%>
 | Design | Build screens from the design tokens, every state, then compare with the reference | `.ai/skills/implement-ui/`, `.ai/rules/design.md`, `.ai/design/README.md` |
 <%/hasDesign%>
+<%#hasApiDocs%>
+| API integration | Call only documented operations, typed from the documentation, every documented outcome handled | `.ai/skills/integrate-api/`, `.ai/rules/api-integration.md`, `.ai/api/README.md` |
+<%/hasApiDocs%>
 | Code | Small vertical slices, test first | `.ai/skills/implement-feature/`, `.ai/rules/*` |
 | Test | Run the loop until green | `.ai/skills/verify-loop/`, `.ai/skills/fix-failing-gate/` |
 | Deploy | Tag, let CD promote, verify the live URL | `.ai/skills/release-and-deploy/` |
 
 Start a feature in one of two ways, then run `./<%sdlcDir%>/sdlc implement FEAT-xxx` (the agent writes tests, code, dependencies and config from the spec, and the loop verifies it):
-- **From a document:** `./<%sdlcDir%>/sdlc spec requirements.pdf` (also .docx, .md, .txt). An agent drafts `prd.md` and `acceptance.json`, the tool validates them, and **you review the draft** before implementing (skill `.ai/skills/review-spec`).
+- **From a document:** `./<%sdlcDir%>/sdlc spec requirements.pdf` (also .docx, .md, .txt)<%#hasApiDocs%>, with the API it integrates with: `--api api.yaml` (an OpenAPI or Swagger file, a Postman collection, a link or a guide; or `./<%sdlcDir%>/sdlc api import` first)<%/hasApiDocs%>. An agent drafts `prd.md` and `acceptance.json`, the tool validates them, and **you review the draft** before implementing (skill `.ai/skills/review-spec`).
 - **By hand:** `./<%sdlcDir%>/sdlc new <slug>` creates `.ai/specs/FEAT-xxx-<slug>/`; you write `prd.md` and `acceptance.json`.
 Worked example: `.ai/specs/FEAT-000-hello-world/`.
 
@@ -41,6 +44,11 @@ Worked example: `.ai/specs/FEAT-000-hello-world/`.
 ./<%sdlcDir%>/sdlc design sync    # rewrite the generated files from the design tokens (.ai/design/tokens.json)
 ./<%sdlcDir%>/sdlc design check   # tokens valid, generated files current, no hard-coded colour, space, radius or font size
 <%/hasDesign%>
+<%#hasApiDocs%>
+./<%sdlcDir%>/sdlc api import <file or link>   # bring in API documentation (OpenAPI, Swagger, Postman, or a guide): .ai/api/
+./<%sdlcDir%>/sdlc api list|show METHOD /path  # the documented operations, and one with its types
+./<%sdlcDir%>/sdlc api check      # imported documents unchanged, their indexes current
+<%/hasApiDocs%>
 ```
 Single gate while iterating: `./<%sdlcDir%>/sdlc gates --only <id>`. `make help` lists the same commands.
 On Windows (PowerShell or cmd) the launcher is `.\<%sdlcDir%>\sdlc.cmd`; every command and option is the same. Never edit the launchers (`<%sdlcDir%>/sdlc`, `<%sdlcDir%>/sdlc.cmd`, `<%sdlcDir%>/sdlc.py`).
@@ -55,10 +63,10 @@ On Windows (PowerShell or cmd) the launcher is `.\<%sdlcDir%>\sdlc.cmd`; every c
 ## Layout
 ```
 <%#hasBackend%>
-.ai/            rules/ skills/ prompts/ specs/ contract/<%#hasDesign%> design/<%/hasDesign%>   <- the AI operating system of this repo
+.ai/            rules/ skills/ prompts/ specs/ contract/<%#hasDesign%> design/ api/<%/hasDesign%>   <- the AI operating system of this repo
 <%/hasBackend%>
 <%^hasBackend%>
-.ai/            rules/ skills/ prompts/ specs/<%#hasDesign%> design/<%/hasDesign%>             <- the AI operating system of this repo
+.ai/            rules/ skills/ prompts/ specs/<%#hasDesign%> design/ api/<%/hasDesign%>             <- the AI operating system of this repo
 <%/hasBackend%>
 scripts/        sdlc, sdlc.py                              <- the verification loop (stdlib-only Python)
 <%#hasBackend%>
@@ -88,6 +96,7 @@ docker-compose.yml   full stack, also used by the facts stage
 6. If the spec is ambiguous or seems wrong, stop and ask. Do not guess requirements.
 <%#hasDesign%>
 7. Never hard-code a colour, space, radius or font size in a screen, and never edit a generated tokens file: use the tokens in `.ai/design/tokens.json` (`.ai/rules/design.md`).
+8. Call only operations the API documentation has (`.ai/api/`, or this project's contract), and never edit `.ai/api/` (`.ai/rules/api-integration.md`).
 <%/hasDesign%>
 <%/hasBackend%>
 <%^hasBackend%>
@@ -96,6 +105,7 @@ docker-compose.yml   full stack, also used by the facts stage
 5. If the spec is ambiguous or seems wrong, stop and ask. Do not guess requirements.
 <%#hasDesign%>
 6. Never hard-code a colour, space, radius or font size in a screen, and never edit a generated tokens file: use the tokens in `.ai/design/tokens.json` (`.ai/rules/design.md`).
+7. Call only operations the API documentation has (`.ai/api/`), and never edit `.ai/api/` (`.ai/rules/api-integration.md`).
 <%/hasDesign%>
 <%/hasBackend%>
 

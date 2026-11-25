@@ -228,7 +228,7 @@ describe("what a generated project gets", () => {
   });
 
   it("with the gate turned off the tokens still style the screens, and the PRD needs no UI section", () => {
-    const { files, config } = generate({ design: { enforce: false } });
+    const { files, config } = generate({ design: { enforce: false }, api: { enforce: false } });
     expect(config.design.enforce).toBe(false);
     const sdlc = JSON.parse(text(files, ".ai/sdlc.json")) as Json;
     expect(sdlc.gates.map((g: Json) => g.id)).not.toContain("repo.design");
@@ -249,11 +249,12 @@ describe("what a generated project gets", () => {
       const { files } = generate(patch);
       const template = text(files, ".ai/specs/_template/prd.md");
       expect(template).toMatch(/^## 6\. UI & design$/m);
-      expect(template).toMatch(/^## 7\. Out of scope$/m);
-      expect(template).toMatch(/^## 8\. Verification map$/m);
+      expect(template).toMatch(/^## 7\. API integration$/m); // the API section follows the design one (api.test.ts covers the numbering in full)
+      expect(template).toMatch(/^## 8\. Out of scope$/m);
+      expect(template).toMatch(/^## 9\. Verification map$/m);
       const example = text(files, ".ai/specs/FEAT-000-hello-world/prd.md");
       expect(example).toMatch(/^## 6\. UI & design$/m);
-      expect(example).toMatch(/^## 8\. Verification map$/m);
+      expect(example).toMatch(/^## 9\. Verification map$/m);
       expect(example).not.toMatch(/TODO\(prd\)/);
       expect(text(files, ".ai/rules/prd.md")).toContain("6. **UI & design**");
     }

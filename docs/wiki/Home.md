@@ -20,6 +20,7 @@ Every generated project follows **PRD -> Code -> Test -> Deploy**, ships a worki
 | Choose between Next.js, Nuxt, FastAPI and Flutter, and see what is generated | [Stacks and Options](Stacks-and-Options) |
 | Build a feature from a requirements document, end to end | [Tutorial: Add a Login API](Tutorial-Add-a-Login-API) |
 | Make the UI match a design from Figma, a PDF or an image | [Design and the UI](Design-and-the-UI) |
+| Give the frontend the API to integrate with, along with requirements.pdf | [API Integration](API-Integration) |
 | Add the verification loop to a repository I already have | [Adopt an Existing Project](Adopt-an-Existing-Project) |
 | Let the Claude desktop app, Cursor or VS Code be the AI agent | [Using a Desktop App](Desktop-Apps) |
 | Understand gates, facts, evidence and healing | [The Verification Loop](The-Verification-Loop) |

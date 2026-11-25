@@ -12,6 +12,9 @@ Draft a specification from the requirements document `$ARGUMENTS`. **You are the
 You write only the spec: no code, no tests, and no other file. On Windows PowerShell or cmd, write `.\<%sdlcDir%>\sdlc.cmd` wherever this says `./<%sdlcDir%>/sdlc`.
 
 1. No document given: ask for its path and stop. It must exist and be a `.pdf`, `.docx`, `.md` or `.txt` file.
+<%#hasApiDocs%>
+   The feature calls an API? The person brings its documentation in first, once, and commits it (step 2 wants a clean tree): `./<%sdlcDir%>/sdlc api import <file or link>` (an OpenAPI or Swagger file, a Postman collection, a guide). The dry run's prompt then lists it, and the draft must name only documented operations. You cannot import it for them from a dry run: say so and stop if it is missing.
+<%/hasApiDocs%>
 2. `git status --short` must print nothing: the tool wants a clean tree so that your draft is the only change. Otherwise ask the person to commit or stash first, and stop.
 3. `./<%sdlcDir%>/sdlc spec $ARGUMENTS --dry-run --agent claude` (quote the path if it has spaces) creates nothing and starts no agent. It reads the document, then prints
    `would create: .ai/specs/FEAT-00N-<feature name>/` and `prompt: .ai/evidence/<run>/spec.prompt.md`. Read the prompt file to see what the document is about.

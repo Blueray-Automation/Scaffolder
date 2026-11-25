@@ -182,8 +182,8 @@ The agent has to guess whatever you leave vague, and it is told to *stop and ask
 | AC-005 | `GET /api/v1/auth/me` with a valid token -> `200` with the user's email |
 | AC-006 | `/me` with no token, a malformed token, or an expired token -> `401` |
 
-Also write the **out of scope** list (registration, refresh tokens, password reset, a users table, rate limiting). A project with a web or mobile app also needs a **UI & design** section in every PRD:
-this feature has no screen, so it is the single line `No UI change.` (the section, and what to put in it for a feature with a screen, are in [Design and the UI](Design-and-the-UI)). The full PRD is in the
+Also write the **out of scope** list (registration, refresh tokens, password reset, a users table, rate limiting). A project with a web or mobile app also needs a **UI & design** section and an **API integration** section in every PRD:
+this feature has no screen and no screen calls it yet, so each is a single line, `No UI change.` and `No API calls.` (what to put in them for a feature with a screen that calls an API is in [Design and the UI](Design-and-the-UI) and [API Integration](API-Integration)). The full PRD is in the
 [reference page](Reference-Login-Implementation#prdmd).
 
 **The checks (`acceptance.json`).** Every acceptance criterion needs at least one **check**, and every check names the criterion it proves. Three kinds:

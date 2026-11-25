@@ -314,6 +314,20 @@ export function buildGates(cfg: ScaffolderConfig): Gate[] {
     });
   }
 
+  // Static too: the imported API documents are what was imported, and their generated indexes are current.
+  if (cfg.api.enforce && (cfg.web.enabled || cfg.mobile.enabled) && g.lint) {
+    gates.push({
+      id: "repo.api",
+      label: "Imported API documentation unchanged, its index current",
+      stage: "static",
+      component: "repo",
+      cwd: ".",
+      cmd: "python3 scripts/sdlc.py api check",
+      required: true,
+      timeoutSeconds: 120,
+    });
+  }
+
   if (g.security) {
     gates.push({
       id: "repo.secrets",

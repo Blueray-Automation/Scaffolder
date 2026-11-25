@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Boxes, GitBranch, Layers, Palette, Plus, ShieldCheck, Smartphone, Trash2 } from "lucide-react";
+import { Boxes, GitBranch, Layers, Palette, Plug, Plus, ShieldCheck, Smartphone, Trash2 } from "lucide-react";
 import { AGENT_PRESETS, CAPABILITIES, type DeployTrigger, type Issue, type ScaffolderConfig } from "@/engine";
 import { setIn } from "@/lib/utils";
 import { Button, Field, NumberInput, Section, Select, TextInput, Toggle } from "./ui";
@@ -220,6 +220,21 @@ export function ConfigForm({ config, onChange, issues }: Props) {
               </Field>
             </div>
           </div>
+        </Section>
+      )}
+
+      {(config.web.enabled || config.mobile.enabled) && (
+        <Section
+          icon={<Plug className="h-4 w-4" />}
+          title="API integration"
+          hint="The API a screen calls is documented in the repository: import an OpenAPI or Swagger file, a Postman collection, a link or a guide, and the agent integrates with what is documented."
+        >
+          <Toggle
+            checked={config.api.enforce}
+            onChange={(v) => set(["api", "enforce"], v)}
+            label="Enforce the API documentation"
+            hint="Every PRD gets an API integration section that may only name documented operations, and a gate checks that imported documents are unchanged. `sdlc api import` is in the project either way."
+          />
         </Section>
       )}
 

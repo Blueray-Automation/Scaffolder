@@ -21,6 +21,7 @@ The rule it enforces: *done means `./scripts/sdlc verify` exits 0 and you can sh
 | `./scripts/sdlc deploy <env>` | Runs the deploy script, then checks the live URL |
 | `./scripts/sdlc secrets` | Scans for committed secrets |
 | `./scripts/sdlc design sync` / `design check` | Writes the stylesheet or Dart file from the design tokens / checks they are current and that no screen hard-codes a design value (see [Design and the UI](Design-and-the-UI)) |
+| `./scripts/sdlc api import` / `list` / `show` / `check` | Brings an API's documentation (OpenAPI, Swagger, a Postman collection, a link or a guide) into `.ai/api/` / lists the documented operations / prints one with its types / checks the imported files are unchanged (see [API Integration](API-Integration)) |
 | `./scripts/sdlc report` | Prints the latest report |
 
 Two launchers start the same program (`scripts/sdlc.py`): `scripts/sdlc` (bash: macOS, Linux, WSL, Git Bash) and `scripts/sdlc.cmd` (Windows: `.\scripts\sdlc.cmd <command>`). Every command and flag is identical.

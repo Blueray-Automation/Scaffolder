@@ -50,6 +50,7 @@ describe("wiki pages (docs/wiki)", () => {
     expect([...pages.keys()].sort()).toEqual(
       [
         "Adopt-an-Existing-Project",
+        "API-Integration",
         "Contributing-and-Releasing",
         "Design-and-the-UI",
         "Desktop-Apps",
@@ -121,6 +122,17 @@ describe("wiki pages (docs/wiki)", () => {
     expect(pages.get("Design-and-the-UI")).toContain("## In five minutes");
     expect(pages.get("Stacks-and-Options")).toContain("design.enforce");
     expect(pages.get("Status-and-Limits")).toContain("The Figma import has not been run against Figma");
+  });
+
+  it("covers the API integration layer where a reader looks for it", () => {
+    const readme = readFileSync(join(WIKI_DIR, "..", "..", "README.md"), "utf8");
+    expect(readme).toContain("API integration is a contract too");
+    expect(readme).toContain("./scripts/sdlc spec requirements.pdf --api openapi.yaml");
+    expect(pages.get("Home")).toContain("](API-Integration)");
+    expect(pages.get("API-Integration")).toContain("## In five minutes");
+    expect(pages.get("Stacks-and-Options")).toContain("api.enforce");
+    expect(pages.get("Status-and-Limits")).toContain("No document from a real API");
+    expect(pages.get("Troubleshooting")).toContain("prd.md has no 'API integration' section");
   });
 
   it("only mentions ./scripts/sdlc commands that exist", () => {

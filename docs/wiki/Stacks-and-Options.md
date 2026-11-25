@@ -32,6 +32,7 @@ Full-stack uses Next.js. To put **Nuxt 4** in front of the API instead, change *
 **Android** and **iOS** (native) are marked *soon*: they have no pack yet, so they cannot be chosen rather than being generated as broken stubs.
 
 Every stack with a screen (a web app, a Flutter app, or both) also gets the design tokens and the gate that checks them: see [Design and the UI](Design-and-the-UI).
+It also gets a place for the documentation of the API it calls, and a PRD section that may only name documented operations: see [API Integration](API-Integration).
 
 ## A Flutter app
 
@@ -49,6 +50,7 @@ One typed config, `scaffolder.config.yaml`, is validated and also editable in th
 - each component's framework, version and port, the database, Docker and the CI provider;
 - CD environments, triggers, registry and deploy target;
 - the design contract: `design.enforce`, `design.tool` and `design.url`;
+- the API documentation contract: `api.enforce`;
 - the loop itself: gates on or off, coverage floors, runtime mode (`docker`, `local` or `none`), the iteration budget, the no-progress limit, fail-fast, the agent command and its timeout, and extra protected paths.
 
 Anything can be overridden for one run with `--set path=value`, and a copy of the config is written into each generated project, so you can regenerate the same project later.

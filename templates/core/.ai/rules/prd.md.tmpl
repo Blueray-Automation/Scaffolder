@@ -10,13 +10,12 @@ Every feature lives in `.ai/specs/FEAT-<nnn>-<slug>/` with `prd.md` and `accepta
 5. **Contract impact**: endpoints, status codes, error payloads, migrations.
 <%#designEnforced%>
 6. **UI & design**: the frame being built, the states of each screen, the components to reuse, any new tokens, the exact copy, responsive and accessibility behaviour. `No UI change.` when the feature has no screen. Without this section the spec fails.
-7. **Out of scope**.
-8. **Verification map** (lives in `acceptance.json`).
 <%/designEnforced%>
-<%^designEnforced%>
-6. **Out of scope**.
-7. **Verification map** (lives in `acceptance.json`).
-<%/designEnforced%>
+<%#apiEnforced%>
+<%prdApiNo%>. **API integration**: every operation the feature calls, written `` `GET /path` `` the way the documentation writes it, with what it is for, how requests are authenticated, what the user sees when each fails, and how the fields map to the screen. `No API calls.` when it calls none. Each operation must exist in the imported API documentation (`.ai/api/`)<%#hasBackend%> or in this project's backend contract<%/hasBackend%>, or the spec fails.
+<%/apiEnforced%>
+<%prdOutOfScopeNo%>. **Out of scope**.
+<%prdVerificationNo%>. **Verification map** (lives in `acceptance.json`).
 
 ## Writing acceptance criteria
 - Observable from outside the system. "Returns 404 with `{"detail": "..."}`", not "handles missing users well".
