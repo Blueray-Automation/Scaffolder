@@ -2012,6 +2012,7 @@ def cmd_spec(cfg: dict, args: argparse.Namespace) -> int:
         say("Commit or stash them first so you can see exactly what the agent changes (or pass --allow-dirty).")
         return EXIT_HUMAN
 
+    design_given = list(getattr(args, "design", None) or [])
     api_sources_given = list(getattr(args, "api", None) or [])
     if api_sources_given and not cfg.get("api"):
         say(warn("  --api is ignored: this project has no screen, so it has no API documentation to integrate against"))
@@ -2044,6 +2045,7 @@ def cmd_spec(cfg: dict, args: argparse.Namespace) -> int:
         "focus": args.focus or "the whole document", "extractor": how, "sourceText": shown,
         "targets": targets, "questionsFile": rel(questions),
         "apiReferences": api_references_text(cfg, [api_label(g) if re.match(r"https?://", g) else Path(g).name for g in api_sources_given] if args.dry_run else None) if cfg.get("api") else "",
+        "designReferences": design_references_text(planned, [api_label(g) if re.match(r"https?://", g) else Path(g).name for g in design_given] if args.dry_run else None),
     }
     prompt = render_prompt(cfg["agent"]["prompts"]["spec"], values)
     if args.dry_run:
@@ -2054,7 +2056,7 @@ def cmd_spec(cfg: dict, args: argparse.Namespace) -> int:
         handoff_note(cfg, agent)
         named_later = spec_dir is None and not args.name
         folder = f"{rel(specs_dir)}/{values['feature']}-<feature name>" if named_later else rel(planned)
-        say(f"  would create  : {folder}/  (prd.md, acceptance.json, and a copy of the source in source/)")
+        say(f"  would create  : {folder}/  (prd.md, acceptance.json, and a copy of the source in source/" + (", the design in design/" if design_given else "") + ")")
         if named_later:
             say(f"                  the folder is named after the feature in the PRD's title once the draft is valid; pass --name <slug> to choose it now")
         say(f"  prompt        : {rel(prompt_file)}  ({len(prompt.splitlines())} lines, includes the document text)")
@@ -2065,6 +2067,12 @@ def cmd_spec(cfg: dict, args: argparse.Namespace) -> int:
         say(f"  created {rel(spec_dir)}/")
     (spec_dir / "source").mkdir(exist_ok=True)
     shutil.copy2(src, spec_dir / "source" / src.name)
+    if design_given:
+        say(c("\n== design ==", "1"))
+        for entry in design_import_sources(spec_dir / "design", design_given):
+            say(ok(f"  imported {entry['file']}   {ref_describe(entry)}"))
+        values["designReferences"] = design_references_text(spec_dir)  # the prompt now lists the pictures that were imported
+        prompt = render_prompt(cfg["agent"]["prompts"]["spec"], values)
 
     # the agent may write the two spec files and nothing else
     integ = cfg["integrity"]
@@ -2613,7 +2621,7 @@ def cmd_implement(cfg: dict, args: argparse.Namespace) -> int:
         "protected": ", ".join(f"`{p}`" for p in integ["protected"] + integ["protectedWhileHealing"]),
         "questionsFile": rel(questions),
         "context": listing(".ai/context/*.md"),
-        "designReferences": design_references_text(spec_dir) if cfg.get("design") else "",
+        "designReferences": design_references_text(spec_dir),
         "apiReferences": api_references_text(cfg) if cfg.get("api") else "",
     })
     for path, state in context_state(cfg):
@@ -3597,7 +3605,7 @@ def ref_describe(r: dict) -> str:
     return f"{kinds.get(r.get('kind'), r.get('kind', 'file'))}, {size}"
 
 
-def design_references_text(spec_dir: Path) -> str:
+def design_references_text(spec_dir: Path, pending: list | None = None) -> str:
     """What the agent is told about the design pictures of a feature (and the project's style guide)."""
     lines: list = []
     for label, directory in (("this feature", spec_dir / "design"), ("the project's style guide", ROOT / REF_PROJECT_DIR)):
@@ -3609,10 +3617,12 @@ def design_references_text(spec_dir: Path) -> str:
                     lines.append("  colours used, by how often: " + ", ".join(f"{v} x{n}" for v, n in census["colors"][:8]))
                 if census.get("fontSizes"):
                     lines.append("  type sizes used: " + ", ".join(f"{v} x{n}" for v, n in census["fontSizes"][:6]))
+    if pending and not lines:
+        return "None imported yet, but this run imports them first: " + ", ".join(pending) + "."
     if not lines:
-        return "None imported: the PRD's UI & design section is the only brief for the screens (`./<%sdlcDir%>/sdlc design import` adds pictures)."
-    return ("Pictures of the design. Open every image and look at it, build the screens to match it, and say in your final message what still differs "
-            "(or that you cannot view images). A `.txt` file is the exact text found in the design: copy from it, do not retype.\n" + "\n".join(lines))
+        return "None imported: the requirements and the PRD are the only brief (`./<%sdlcDir%>/sdlc design import <pdf, image or Figma link> --feature FEAT-xxx`, or `spec <document> --design <file or link>`, adds pictures)."
+    return ("Pictures of the design. Open every image and look at it (say in your final message if you cannot view images). "
+            "A `.txt` file is the exact text found in the design: copy from it, do not retype.\n" + "\n".join(lines))
 
 
 def image_import(path: Path, directory: Path, manifest: dict, name: str) -> list:
@@ -3975,6 +3985,25 @@ def figma_import(url: str, directory: Path, manifest: dict, name: str, nodes: li
         die(str(e).replace(token, "***"), EXIT_FAIL)
 
 
+def design_import_sources(directory: Path, sources: list, name: str = "", pages: str = "", dpi: int = 150, scale: float = 2, nodes: list | None = None, variables: bool = False) -> list:
+    """Turn each image, PDF or Figma link into reference pictures in `directory` and record them; the entries made."""
+    manifest = ref_load(directory)
+    made: list = []
+    for source in sources:
+        if re.match(r"https?://", source):
+            made += figma_import(source, directory, manifest, name, nodes or [], scale, variables)
+            continue
+        path = Path(source).expanduser()
+        if not path.is_file():
+            die(f"{source} is not a file (and not a Figma link)", EXIT_USAGE)
+        if path.suffix.lower() == ".pdf":
+            made += pdf_import(path, directory, manifest, name, pages, dpi)
+        else:
+            made += image_import(path, directory, manifest, name)
+    ref_save(directory, manifest)
+    return made
+
+
 def design_import(cfg: dict, args: argparse.Namespace) -> int:
     sources = list(getattr(args, "source", None) or [])
     if not sources:
@@ -3994,20 +4023,7 @@ def design_import(cfg: dict, args: argparse.Namespace) -> int:
         die("--name names one import: leave it out when importing several", EXIT_USAGE)
     if args.name and ref_slug(args.name, "") != args.name:
         die("--name is lowercase letters, digits and dashes", EXIT_USAGE)
-    manifest = ref_load(directory)
-    made: list = []
-    for source in sources:
-        if re.match(r"https?://", source):
-            made += figma_import(source, directory, manifest, args.name or "", args.node or [], args.scale, args.variables)
-            continue
-        path = Path(source).expanduser()
-        if not path.is_file():
-            die(f"{source} is not a file (and not a Figma link)", EXIT_USAGE)
-        if path.suffix.lower() == ".pdf":
-            made += pdf_import(path, directory, manifest, args.name or "", args.pages or "", args.dpi)
-        else:
-            made += image_import(path, directory, manifest, args.name or "")
-    ref_save(directory, manifest)
+    made = design_import_sources(directory, sources, args.name or "", args.pages or "", args.dpi, args.scale, args.node or [], args.variables)
     if not made:
         say(warn("nothing was imported"))
         return EXIT_FAIL
@@ -4019,7 +4035,9 @@ def design_import(cfg: dict, args: argparse.Namespace) -> int:
             say(dim("    colours: " + ", ".join(f"{v} x{n}" for v, n in census["colors"][:8])))
         if census.get("fontSizes"):
             say(dim("    type sizes: " + ", ".join(f"{v} x{n}" for v, n in census["fontSizes"][:6])))
-    if args.feature:
+    if not cfg.get("design"):
+        say("Next: the API is drafted from these: every field a screen shows and every action it offers needs an endpoint. `./<%sdlcDir%>/sdlc spec <requirements> --focus \"the API\"` and `implement` show the pictures to the agent.")
+    elif args.feature:
         say("Next: write the PRD's UI & design section from these (skill .ai/skills/implement-ui); `./<%sdlcDir%>/sdlc implement` shows them to the agent.")
     else:
         say("Next: derive the design tokens from these into .ai/design/tokens.json, then ./<%sdlcDir%>/sdlc design sync.")
@@ -4053,11 +4071,11 @@ def design_check_references(cfg: dict) -> list:
 
 def cmd_design(cfg: dict, args: argparse.Namespace) -> int:
     design = cfg.get("design")
-    if not design:
-        say(dim("This project has no design tokens: it has no screen (no web or mobile component)."))
-        return EXIT_USAGE if args.action == "import" else EXIT_OK
     if args.action == "import":
-        return design_import(cfg, args)
+        return design_import(cfg, args)  # also in a project with no screen: a backend reads the design to know what its API must serve
+    if not design:
+        say(dim("This project has no design tokens: it has no screen (no web or mobile component). `design import` still works: the pictures tell the API what the screens need."))
+        return EXIT_OK
     tokens, problems = design_load(design)
     if problems:
         say(bad(f"{design['tokens']} is not valid:"))
@@ -4610,9 +4628,14 @@ def api_doc_parse(data: bytes) -> tuple:
     except UnicodeDecodeError:
         return None, "it is not UTF-8 text"
     try:
-        return (json.loads(text) if text.lstrip()[:1] in ("{", "[") else yaml_load(text)), ""
+        doc = json.loads(text) if text.lstrip()[:1] in ("{", "[") else yaml_load(text)
     except (ValueError, RecursionError) as e:
         return None, str(e)
+    if isinstance(doc, dict) and isinstance(doc.get("contract"), int) and isinstance(doc.get("paths"), dict) and "openapi" not in doc and "swagger" not in doc:
+        # the committed contract of a backend generated by this tool (.ai/contract/openapi.json): paths and schemas, read as OpenAPI
+        doc = {"openapi": "3.0.0", "info": {"title": "API contract", "version": str(doc["contract"])}, "paths": doc["paths"],
+               "components": {"schemas": doc.get("schemas") if isinstance(doc.get("schemas"), dict) else {}}}
+    return doc, ""
 
 
 def api_kind(doc) -> str:
@@ -5534,6 +5557,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--allow-dirty", action="store_true", help="proceed with uncommitted changes")
     sp.add_argument("--dry-run", action="store_true", help="extract the text, write the prompt, print the agent command; run nothing")
     sp.add_argument("--max-attempts", type=int, default=3, help="how many times the agent may fix an invalid draft")
+    sp.add_argument("--design", action="append", metavar="FILE_OR_LINK", help="the design the feature serves (an image, a PDF or a Figma link): imported into the feature's design/ folder like `design import`, and shown to the agent; repeatable")
     sp.add_argument("--api", action="append", metavar="FILE_OR_LINK", help="API documentation the feature integrates with (an OpenAPI/Swagger file, a Postman collection, a link or a guide): imported first, like `api import`; repeatable")
     ag = sub.add_parser("agent")  # list the AI agents (installed or not) and choose one for this machine
     ag.add_argument("choice", nargs="?", help="an agent's name (see the list), 'custom' or 'none'; leave out to list and choose")

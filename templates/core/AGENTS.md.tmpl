@@ -28,6 +28,8 @@ Start a feature in one of two ways, then run `./<%sdlcDir%>/sdlc implement FEAT-
 - **From a document:** `./<%sdlcDir%>/sdlc spec requirements.pdf` (also .docx, .md, .txt)<%#hasApiDocs%>, with the API it integrates with: `--api api.yaml` (an OpenAPI or Swagger file, a Postman collection, a link or a guide; or `./<%sdlcDir%>/sdlc api import` first)<%/hasApiDocs%>. An agent drafts `prd.md` and `acceptance.json`, the tool validates them, and **you review the draft** before implementing (skill `.ai/skills/review-spec`).
 - **By hand:** `./<%sdlcDir%>/sdlc new <slug>` creates `.ai/specs/FEAT-xxx-<slug>/`; you write `prd.md` and `acceptance.json`.
 Worked example: `.ai/specs/FEAT-000-hello-world/`.
+The order of the chain is **design, then API, then screens**: an API exists to serve the screens, so a backend reads the design too. Bring everything in on the same line:
+`./<%sdlcDir%>/sdlc spec requirements.pdf --design mockups.pdf<%#hasApiDocs%> --api api.yaml<%/hasApiDocs%>`, review the draft, then `implement`. Inside a feature build the API and its contract first, then the client that calls it, then the screens in every state.
 
 ## Commands
 ```bash

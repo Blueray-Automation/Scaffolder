@@ -41,6 +41,20 @@ design tokens it needs (colours, spacing, sizes the document names; else `none`)
 `ASSUMPTION:` line. Do not write `.ai/design/tokens.json`: that file is not yours to change.
 
 <%/designEnforced%>
+## Design (read-only)
+
+{{designReferences}}
+
+<%#hasBackend%>
+**The API exists to serve these screens.** Work it out from the pictures before writing **Contract impact**: for each screen, list the data it shows (every field, its type, and what the empty, loading and error states need)
+and the actions it offers (each button, form, filter, sort and page), and make each one an endpoint with its request, its response and the status code and error body each state needs.
+Anything a picture shows that the requirements never mention, and any endpoint you add that no picture or requirement needs, is listed as an `ASSUMPTION:` (the picture is evidence of what is wanted, not a licence to invent rules).
+The acceptance criteria still describe what the API does (a status and a body), never what the screen looks like.
+<%/hasBackend%>
+<%^hasBackend%>
+These are the screens to build. The **UI & design** section below is written from them.
+<%/hasBackend%>
+
 <%#hasApiDocs%>
 ## API documentation
 

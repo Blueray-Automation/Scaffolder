@@ -27,6 +27,7 @@ Then read what the spec drafted (its **API integration** section lists each oper
 | **The review** | A person reads the client against `./scripts/sdlc api show METHOD /path` for each operation. | A person (the skill `integrate-api` and the PR template say what to look at) |
 
 A project with a screen (a web app, a Flutter app, or both) gets all three. A backend on its own has none: the API it serves is its contract in `.ai/contract/`.
+The chain as a whole (requirements, design and API in, verified code out) is in [Build a Feature: the Chain](Build-a-Feature).
 A project with a backend **and** a screen already has its own API documented, and `api list` shows it as `backend`; import documentation only for the *other* APIs the screens call.
 
 ## What can be imported
@@ -42,6 +43,7 @@ A project with a backend **and** a screen already has its own API documented, an
 |---|---|---|---|
 | **OpenAPI 3.x / Swagger 2.0** | Every operation, its parameters, request body, documented responses, the types they use, the servers and the auth schemes | Exact: it is read from the document | A YAML document that uses anchors, aliases or tags is kept, but no index is built (the tool says so; convert it to JSON for the full benefit) |
 | **Postman collection** | Each request's method, path and query, and the examples saved in it | Requests and examples, not types: a collection does not say what a field is | `api show` prints the example bodies |
+| **A backend's contract** (`.ai/contract/openapi.json` of a project built with this tool) | The same as an OpenAPI document | Exact: this is how a frontend in another repository gets the API its backend built | Or import the running service's `/openapi.json` as a link |
 | **A link** | The same as a file | A link to a documentation page is followed to `/openapi.json`, `/swagger.json`, `/v3/api-docs` and a few other usual places beside it | A link with a user name or password in it is refused (it would be written down), and the query string is never recorded. Download a protected document and import the file |
 | **A guide** (PDF, Word, Markdown, text) | Nothing machine-readable: it is stored with its extracted text | PDF text is as good as the PDF's text layer | The PRD's operations cannot be checked against it, so any operation is accepted while a guide is the only documentation |
 

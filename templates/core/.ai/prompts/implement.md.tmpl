@@ -16,12 +16,16 @@ you work, so follow the steps and rules below and keep going until the work is d
 {{acceptance}}
 ```
 
-<%#hasDesign%>
 ### Design references (read-only)
 
 {{designReferences}}
-
+<%#hasBackend%>
+The API exists to serve these screens: if pictures are listed, check that every field they show and every action they offer is served by an endpoint, and add no endpoint that no picture or criterion needs.
+<%/hasBackend%>
+<%#hasDesign%>
+Build the screens to match the pictures, and say in your final message what still differs (or that you cannot view images).
 <%/hasDesign%>
+
 <%#hasApiDocs%>
 ### API documentation (read-only)
 
@@ -41,6 +45,10 @@ Study each check and make the implementation satisfy it exactly. A `cmd` check r
 - Gates that must pass: {{gates}}
 
 ## What to do, in this order
+<%#hasBackend%><%#hasDesign%>
+When the feature spans layers, build them in this order and finish each before the next: **(1)** the API and its committed contract (what the design needs), **(2)** the client code that calls it, typed from that contract,
+**(3)** the screens in every state. Do not build a screen against an endpoint that does not exist yet.
+<%/hasDesign%><%/hasBackend%>
 
 1. **Read** `AGENTS.md`, the rules, and the hello-world feature and its code.
 2. **List** every acceptance criterion (`AC-xxx`) and the check(s) that prove it.

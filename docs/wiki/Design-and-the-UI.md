@@ -12,7 +12,7 @@ Scaffolder treats the design the way it treats the API: as a **contract**, commi
 In a generated project that has a web or Flutter screen:
 
 ```bash
-./scripts/sdlc design import mockups.pdf --feature FEAT-001   # 1. bring the design in: a PDF, an image or a Figma link
+./scripts/sdlc design import mockups.pdf --feature FEAT-001   # 1. bring the design in: a PDF, an image or a Figma link (or `spec requirements.pdf --design mockups.pdf`, which does it while drafting)
 ```
 
 ```bash
@@ -30,7 +30,7 @@ Then write the PRD's **UI & design** section, build the screen from the tokens, 
 | **The brief** | The PRD's **UI & design** section: the frame being built, every state of each screen, the components to reuse, new tokens, the exact copy, responsive and accessibility behaviour. Reference images sit next to the PRD in `design/`. | The spec check: a PRD without the section fails (`No UI change.` is a complete one) |
 | **The review** | A screenshot of every state next to its reference image, and the differences listed, in the pull request. | A person (the skill `implement-ui` and the PR template say what to bring) |
 
-A project with a screen (a web app, a Flutter app, or both) gets all three. A backend on its own has none.
+A project with a screen (a web app, a Flutter app, or both) gets all three. A backend on its own has no tokens, gate or UI section, but it **does** read the design: `./scripts/sdlc spec requirements.pdf --design mockups.pdf` (or `design import ... --feature FEAT-001`) puts the pictures in the feature's `design/` folder, and the agent works out which endpoints the screens need from them. See [Build a Feature: the Chain](Build-a-Feature).
 
 ## What is in a generated project
 

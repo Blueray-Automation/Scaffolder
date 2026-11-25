@@ -6,7 +6,7 @@ description: Design the HTTP API contract (schemas, status codes, errors) before
 # Define the contract first
 
 ## Steps
-1. From the PRD's acceptance criteria, list endpoints: method, path (`/api/v1/...`), request, response, every status code, error body.
+1. From the PRD's acceptance criteria, and from the design pictures in the spec's `design/` folder if there are any (each field a screen shows and each action it offers needs an endpoint; look at every picture), list endpoints: method, path (`/api/v1/...`), request, response, every status code, error body.
 2. Write the typed models first (<%#hasBackend%>`<%backendDir%>/app/schemas/`<%/hasBackend%>): constraints in the type (`min_length`, `ge`, enums), not in handler code.
 3. Add the route with the response model and `responses=` for each documented error. Handlers stay thin: parse -> call service/repository -> return.
 4. Write tests from the contract (status, body shape, each validation rule).

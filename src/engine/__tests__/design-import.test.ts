@@ -217,11 +217,16 @@ python("design import: images", () => {
     });
   });
 
-  it("has nothing to do in a project with no screen", async () => {
+  it("still imports in a project with no screen: a backend reads the design to know what its API must serve", async () => {
     await inProject({ web: { enabled: false } }, async (p) => {
       const r = await p.run(["design", "import", p.outside("a.png", png(8, 8)), "--project"]);
-      expect(r.status).toBe(64);
-      expect(r.out).toContain("no design tokens");
+      expect(r.status, r.out).toBe(0);
+      expect(r.out).toContain("the API is drafted from these");
+      expect(JSON.parse(p.read(".ai/design/references/references.json")).references[0].file).toBe("a.png");
+      expect(existsSync(join(p.dir, ".ai/design/tokens.json")), "no tokens: there is no screen to style").toBe(false);
+      const check = await p.run(["design", "check"]);
+      expect(check.status).toBe(0);
+      expect(check.out).toContain("no design tokens");
     });
   });
 
@@ -607,6 +612,6 @@ describe("the documentation of the import", () => {
     expect(text(".ai/skills/implement-ui/SKILL.md")).toContain("design import");
     expect(text(".ai/prompts/implement.md")).toContain("### Design references (read-only)");
     expect(text("scripts/sdlc.py")).toContain('choices=["check", "sync", "import"]');
-    expect(generateProject(deepMerge(defaultConfig(), { web: { enabled: false } })).files.find((f) => f.path === ".ai/prompts/implement.md")!.content).not.toContain("designReferences");
+    expect(generateProject(deepMerge(defaultConfig(), { web: { enabled: false } })).files.find((f) => f.path === ".ai/prompts/implement.md")!.content).toContain("The API exists to serve these screens");
   });
 });

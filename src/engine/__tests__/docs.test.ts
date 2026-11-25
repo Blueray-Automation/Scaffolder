@@ -51,6 +51,7 @@ describe("wiki pages (docs/wiki)", () => {
       [
         "Adopt-an-Existing-Project",
         "API-Integration",
+        "Build-a-Feature",
         "Contributing-and-Releasing",
         "Design-and-the-UI",
         "Desktop-Apps",
@@ -122,6 +123,19 @@ describe("wiki pages (docs/wiki)", () => {
     expect(pages.get("Design-and-the-UI")).toContain("## In five minutes");
     expect(pages.get("Stacks-and-Options")).toContain("design.enforce");
     expect(pages.get("Status-and-Limits")).toContain("The Figma import has not been run against Figma");
+  });
+
+  it("gives the chain of commands where a reader starts: the README, Home and the page itself", () => {
+    const readme = readFileSync(join(WIKI_DIR, "..", "..", "README.md"), "utf8");
+    expect(readme).toContain("## Build a feature: the chain");
+    expect(readme).toContain("./scripts/sdlc spec requirements.pdf --design mockups.pdf");
+    expect(pages.get("Home")).toContain("](Build-a-Feature)");
+    const chain = pages.get("Build-a-Feature")!;
+    // the order is design, then API, then screens; the backend reads the design too
+    expect(chain).toContain("design, then API, then screens");
+    for (const command of ["spec requirements.pdf --design mockups.pdf", "implement FEAT-001", "verify", "api import", '--focus "the API"', '--focus "the screens"']) expect(chain, command).toContain(command);
+    expect(chain.indexOf("# BACKEND")).toBeLessThan(chain.indexOf("# FRONTEND"));
+    expect(pages.get("Status-and-Limits")).toContain("No real agent has been given a design");
   });
 
   it("covers the API integration layer where a reader looks for it", () => {

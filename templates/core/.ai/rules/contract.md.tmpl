@@ -2,6 +2,7 @@
 
 The backend is the single source of truth for the API. Define the contract before any client code.
 
+- **Design first.** When the feature has design pictures (`.ai/specs/FEAT-xxx/design/`, from `./<%sdlcDir%>/sdlc spec ... --design` or `design import`), derive the endpoints from them: every field a screen shows and every action it offers is an endpoint's job, and so is each state (empty, loading, error). An endpoint that no screen and no criterion needs is not added.
 - Decide request/response schemas, status codes and error payloads from the PRD first; encode them as typed models, then implement.
 - Status codes: `200/201/204` success, `400` malformed, `401` unauthenticated, `403` forbidden, `404` missing, `409` conflict, `422` validation, `5xx` only for genuine server faults. Errors never leak stack traces or secrets.
 - Versioned paths: `/api/v1/...`. Breaking changes need a new version, not an edit.

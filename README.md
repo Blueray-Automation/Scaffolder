@@ -45,7 +45,8 @@ npx ai-scaffolder adopt ./my-repo --write
 | Install the tools on macOS, Ubuntu or Windows | [Setup by Operating System](docs/wiki/Setup-by-Operating-System.md) |
 | Go from a zip to a verified hello world | [Getting Started](docs/wiki/Getting-Started.md) |
 | Pick a stack (Next.js, Nuxt, FastAPI, Flutter) and see what is generated | [Stacks and Options](docs/wiki/Stacks-and-Options.md) |
-| Build a feature from a requirements document | [Tutorial: Add a Login API](docs/wiki/Tutorial-Add-a-Login-API.md) |
+| Build something: requirements, design and API in, verified code out | [Build a Feature: the Chain](docs/wiki/Build-a-Feature.md) |
+| Walk one feature through that chain in detail | [Tutorial: Add a Login API](docs/wiki/Tutorial-Add-a-Login-API.md) |
 | Make the UI match a design (Figma, PDF or image) | [Design and the UI](docs/wiki/Design-and-the-UI.md) |
 | Give the frontend the API to integrate with, along with the requirements | [API Integration](docs/wiki/API-Integration.md) |
 | Add the loop to a repository I already have | [Adopt an Existing Project](docs/wiki/Adopt-an-Existing-Project.md) |
@@ -68,12 +69,17 @@ The same pages are inside the web app (**Docs**, with search) and published to t
 | **API documentation** (`.ai/api/`) | The OpenAPI, Swagger or Postman documentation of the API a screen calls, an API integration section in every PRD that may only name documented operations, and a gate that keeps the imported files as imported |
 | **CI/CD and runtime** | GitHub Actions CI and CD (build images once, GHCR, staged environments, post-deploy checks), Dockerfiles, `docker-compose.yml` |
 
-## Build a feature
+## Build a feature: the chain
+
+Design first, then the API, then the screens: an API exists to serve the screens, so even the backend reads the design.
 
 ```bash
-./scripts/sdlc spec requirements.pdf    # an agent drafts the PRD and its checks from a document; YOU review the draft
-./scripts/sdlc implement FEAT-001       # an agent writes tests and code; the loop proves it
+./scripts/sdlc spec requirements.pdf --design mockups.pdf [--api api.yaml]   # an agent drafts the PRD and its checks from the requirements, the design and the API docs
+# YOU review .ai/specs/FEAT-001-<feature>/prd.md, then set "Status: Accepted"
+./scripts/sdlc implement FEAT-001       # the API and its contract first, then the client, then the screens; the loop proves it
 ```
+
+A bigger feature goes layer by layer (backend first, then frontend), and a backend and a frontend in different repositories hand over the backend's contract: [Build a Feature: the Chain](docs/wiki/Build-a-Feature.md).
 
 Nothing is built until you run `implement`, and `implement` never commits or pushes. The agent can be a command-line tool (`claude`, `codex`, `gemini`, `copilot`, `cursor`, or any command that reads a prompt) or a desktop app; each person picks one for their machine with `./scripts/sdlc agent`.
 

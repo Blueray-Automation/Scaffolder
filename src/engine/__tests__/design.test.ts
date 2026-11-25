@@ -206,7 +206,9 @@ describe("what a generated project gets", () => {
     expect(sdlc.gates.map((g: Json) => g.id)).not.toContain("repo.design");
     expect(text(files, ".ai/specs/_template/prd.md")).not.toMatch(/UI & design/);
     expect(text(files, ".ai/specs/FEAT-000-hello-world/prd.md")).not.toMatch(/UI & design/);
-    expect(text(files, "AGENTS.md")).not.toMatch(/design/i);
+    // it reads the design (to know what its API must serve) but has no tokens, no generated files and no gate to talk about
+    expect(text(files, "AGENTS.md")).not.toMatch(/tokens|implement-ui|design (check|sync)/i);
+    expect(text(files, "AGENTS.md")).toContain("--design mockups.pdf");
   });
 
   it("the gate is one more repository check: in the loop and, with the same command, in CI", () => {

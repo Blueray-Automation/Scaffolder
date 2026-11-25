@@ -68,7 +68,75 @@ PRD (AC-001...)  ->  acceptance.json (checks)  ->  code + tests
 
 Details: [`AGENTS.md`](AGENTS.md) and [`.ai/README.md`](.ai/README.md).
 
-## Add a feature
+## Build something: the chain
+
+Always the same three moves: **bring in** what you have, **spec** it (an agent drafts, you review), **implement** it (an agent builds, the loop proves it).
+The design comes first, because an API exists to serve the screens: even the backend reads the design to know which endpoints it needs.
+
+| You have | Bring it in with | What it decides |
+|---|---|---|
+| Requirements (PDF, Word, Markdown, text) | `spec requirements.pdf` | what is built: the PRD and its checks |
+| A design (images, a PDF, a Figma link) | `--design mockups.pdf` | <%#hasBackend%>the API: which endpoints the screens need<%/hasBackend%><%#hasDesign%><%#hasBackend%>; <%/hasBackend%>the screens: what they look like in every state<%/hasDesign%> |
+<%#hasApiDocs%>
+| API documentation (OpenAPI, Swagger, Postman, a link, a guide) | `--api api.yaml` | the frontend: which operations it may call<%#hasBackend%> (an API you do not own: this project's own is its contract)<%/hasBackend%> |
+<%/hasApiDocs%>
+
+<%#hasBackend%>
+<%#hasDesign%>
+**The simplest chain: one feature, every layer.**
+
+```bash
+./<%sdlcDir%>/sdlc spec requirements.pdf --design mockups.pdf   # 1. an agent drafts the PRD and its checks from the requirements AND the design
+# 2. YOU review .ai/specs/FEAT-001-<feature>/prd.md (skill: .ai/skills/review-spec), then set "Status: Accepted"
+./<%sdlcDir%>/sdlc implement FEAT-001                           # 3. the API and its contract first, then the client, then the screens; the loop proves every criterion
+./<%sdlcDir%>/sdlc verify                                       # 4. what CI runs
+```
+
+**Layer by layer** (a bigger feature, or the backend and the frontend live in different repositories): the design, then the API, then the screens.
+
+```bash
+# BACKEND: the design tells it what the API must serve
+./<%sdlcDir%>/sdlc spec requirements.pdf --design mockups.pdf --focus "the API" --name orders-api
+./<%sdlcDir%>/sdlc implement FEAT-001            # builds the API and writes its contract, .ai/contract/openapi.json (you commit it with the code): that file IS the API's documentation
+
+# FRONTEND: the design tells it what to build, the API's documentation what it may call
+./<%sdlcDir%>/sdlc spec requirements.pdf --design mockups.pdf --focus "the screens" --name orders-screens
+./<%sdlcDir%>/sdlc implement FEAT-002            # in this repository the backend's contract is already known to it as `backend` (`./<%sdlcDir%>/sdlc api list`)
+```
+
+<%/hasDesign%>
+<%^hasDesign%>
+**The chain: the design first, then the API.**
+
+```bash
+./<%sdlcDir%>/sdlc spec requirements.pdf --design mockups.pdf   # 1. an agent drafts the PRD and its checks from the requirements AND the screens the API will serve
+# 2. YOU review .ai/specs/FEAT-001-<feature>/prd.md (skill: .ai/skills/review-spec), then set "Status: Accepted"
+./<%sdlcDir%>/sdlc implement FEAT-001                           # 3. the API is built and its contract written, .ai/contract/openapi.json (you commit it): that file IS the API's documentation
+./<%sdlcDir%>/sdlc verify                                       # 4. what CI runs
+```
+
+Then give the frontend project that documentation: `./<%sdlcDir%>/sdlc api import <this project's .ai/contract/openapi.json, or http://localhost:<%backendPort%>/openapi.json while it runs>` there.
+
+<%/hasDesign%>
+<%/hasBackend%>
+<%^hasBackend%>
+**The chain: the API's documentation and the design in, screens out.**
+
+```bash
+./<%sdlcDir%>/sdlc spec requirements.pdf --design mockups.pdf --api api.yaml   # 1. an agent drafts the PRD and its checks from the requirements, the design AND the API documentation
+# 2. YOU review .ai/specs/FEAT-001-<feature>/prd.md (skill: .ai/skills/review-spec), then set "Status: Accepted"
+./<%sdlcDir%>/sdlc implement FEAT-001                                          # 3. a typed client from the documentation, then the screens in every state; the loop proves every criterion
+./<%sdlcDir%>/sdlc verify                                                      # 4. what CI runs
+```
+
+`api.yaml` is the documentation of the backend the screens call: an OpenAPI or Swagger file, a Postman collection, a link such as `https://api.example.com/swagger.json`, or the committed contract of a backend built with this tool.
+Import it once (`./<%sdlcDir%>/sdlc api import api.yaml`) and leave `--api` out of the later features.
+
+<%/hasBackend%>
+Each input is optional but the requirements: with no design the agent works from the requirements alone, and a feature that calls no API says `No API calls.`.
+`--focus "the login flow (section 3)"` and `--name login` split a large document into one feature per run. Details: [`AGENTS.md`](AGENTS.md).
+
+## Add a feature, other ways
 
 **From a requirements document** (PDF, DOCX, Markdown or text):
 

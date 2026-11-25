@@ -39,7 +39,7 @@ What was run for real, what was run against a stand-in, and what was not run at 
 - The small YAML reader in `scripts/sdlc.py` reads back 600 random documents written by the `yaml` library in twelve styles identically (`npm test`), and the petstore document reads the same as in libyaml (Ruby). A one-off run of 3,000 documents in thirteen styles agreed too.
 - `api import`, `list`, `show`, `check` and `sync` run through the generated project's own `./scripts/sdlc` on Python 3.9: a petstore document (YAML and the same document as JSON, with the same index), a Swagger 2.0 document, a Postman collection, a guide, links served by a local server (including a documentation page that is followed to `/openapi.json`), every refusal, every way the gate fails, and the PRD's API integration section against both imported documents and a project's own contract.
 - The spec and implement prompts that carry the documentation were rendered by the real tool and read back.
-- `npm run e2e` (scenarios `flutter-only` and `default`, Next.js + FastAPI): the `repo.api` gate in a real project, an imported document that somebody edited failing it and passing again, and a PRD that names an undocumented operation failing the spec check, and (in `default`) `implement` and `spec` run through their scripted agents with the new prompts and PRD section. `flutter-only` passed completely; in `default` every check passed except the two that build the Docker images, which could not pull base images from Docker Hub on the machine it ran on (the same environment failure noted for the design layer), so those were not run.
+- `npm run e2e` (scenarios `flutter-only` and `default`, Next.js + FastAPI): the `repo.api` gate in a real project, an imported document that somebody edited failing it and passing again, and a PRD that names an undocumented operation failing the spec check, and (in `default`) `implement` and `spec` run through their scripted agents with the new prompts and PRD section. Both scenarios passed completely, including the Docker compose step of `default` (its first run failed only at the two checks that build the Docker images, because Docker Hub would not serve the base images at that moment; a second run passed them).
 
 **Not run**
 
@@ -48,6 +48,18 @@ What was run for real, what was run against a stand-in, and what was not run at 
 - A guide as a PDF was imported with the built-in text extractor, not with every extractor `spec` can use; a scanned PDF has no text.
 - Windows: the code is written for it (LF files, no shell) but was run on macOS only, like the rest.
 - A mock server generated from the documentation, contract tests against the live API, GraphQL, gRPC, AsyncAPI and HAR files, documentation behind a login, and the API layer in `adopt`ed existing projects are not built.
+
+## The chain: design, API, screens
+
+**Run for real**
+
+- `npm test` runs the real generated `./scripts/sdlc`: a backend-only project imports a design for a feature and its `spec` and `implement` prompts list the pictures and tell the agent to derive the API from them; `spec --design` imports the pictures into the new feature before a scripted agent starts and the agent is shown them; a frontend project imports a backend's committed contract and its PRD may then name that backend's operations; every README and AGENTS.md variant (backend and screens, backend only, web only, Flutter only) carries the chain with the same three commands.
+- `npm run e2e` (scenario `default`, Next.js + FastAPI, passed completely) ran `spec` and `implement` through their scripted agents with the new prompts.
+
+**Not run**
+
+- **No real agent has been given a design and asked to derive an API from it.** The prompts say what to do and the tests prove the agent is shown the pictures, but whether a particular agent works out good endpoints from a mock-up is not something a test can show: that is why the PRD is a draft you review.
+- Layer by layer across two repositories (the backend's contract imported into the frontend's) was run with the contract file, not with two real projects side by side.
 
 ## Things to know
 

@@ -8,6 +8,7 @@
 
 **Build**
 
+- [Build a Feature: the Chain](Build-a-Feature)
 - [Tutorial: Add a Login API](Tutorial-Add-a-Login-API)
 - [Design and the UI](Design-and-the-UI)
 - [API Integration](API-Integration)
